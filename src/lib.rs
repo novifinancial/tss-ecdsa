@@ -88,7 +88,7 @@ fn round_2(
                     &BigNumber::from_slice(r1_priv_i.gamma.to_repr()),
                 )
                 .unwrap(),
-            &beta.clone(),
+            &beta,
         )
         .unwrap();
 
@@ -99,7 +99,7 @@ fn round_2(
                 .pk
                 .mul(&r1_pub_j.K, &BigNumber::from_slice(kg_priv_i.x.to_repr()))
                 .unwrap(),
-            &beta_hat.clone(),
+            &beta_hat,
         )
         .unwrap();
 
