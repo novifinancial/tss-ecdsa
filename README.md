@@ -1,1 +1,1 @@
-# tss-ecdsa
+# mp-ecdsa
