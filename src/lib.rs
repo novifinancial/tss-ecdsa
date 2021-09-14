@@ -1,3 +1,8 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
+
 #![allow(non_snake_case)] // FIXME: To be removed in the future
 
 use ecdsa::hazmat::FromDigest;
@@ -6,9 +11,13 @@ use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
 use k256::elliptic_curve::group::GroupEncoding;
 use k256::elliptic_curve::Curve;
-use k256::elliptic_curve::Field;
 use libpaillier::{unknown_order::BigNumber, *};
-use rand::{rngs::OsRng, CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
+
+pub mod errors;
+pub mod zkp;
+
+use crate::zkp::pbmod::PaillierBlumModulusProof;
 
 #[derive(Clone, Debug)]
 struct Ciphertext(libpaillier::Ciphertext);
@@ -16,13 +25,21 @@ struct Ciphertext(libpaillier::Ciphertext);
 #[derive(Debug)]
 pub struct KeygenPrivate {
     sk: DecryptionKey,
-    x: k256::Scalar,
+    x: BigNumber, // in the range [1, q)
 }
 #[derive(Debug)]
 pub struct KeygenPublic {
     pk: EncryptionKey,
     X: k256::ProjectivePoint,
+    proof: PaillierBlumModulusProof,
 }
+
+impl KeygenPublic {
+    fn verify(&self) -> bool {
+        self.pk.n() == &self.proof.N && self.proof.verify()
+    }
+}
+
 pub struct KeyShare {
     public: KeygenPublic,
     private: KeygenPrivate,
@@ -30,28 +47,40 @@ pub struct KeyShare {
 
 impl KeyShare {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, prime_bits: usize) -> Self {
-        // FIXME: prime generation doesn't do safe primes... should we?
-        let p = BigNumber::prime(prime_bits);
-        let q = BigNumber::prime(prime_bits);
+        let p = BigNumber::safe_prime(prime_bits);
+        let q = BigNumber::safe_prime(prime_bits);
+        Self::from_safe_primes(rng, &p, &q)
+    }
 
-        let sk = DecryptionKey::with_safe_primes_unchecked(&p, &q).unwrap();
+    pub fn from_safe_primes<R: RngCore + CryptoRng>(
+        _rng: &mut R,
+        p: &BigNumber,
+        q: &BigNumber,
+    ) -> Self {
+        let sk = DecryptionKey::with_safe_primes_unchecked(p, q).unwrap();
         let pk = EncryptionKey::from(&sk);
 
-        let x = k256::Scalar::random(rng);
+        let order = k256_order();
+        let x = BigNumber::random(&order);
         let g = k256::ProjectivePoint::generator();
-        let X = g * x; // public component
+        let X = g * bn_to_scalar(&x).unwrap(); // public component
+
+        let proof = PaillierBlumModulusProof::prove(&(p * q), p, q).unwrap();
+
+        // Proof should verify
+        assert!(proof.verify());
 
         Self {
             private: KeygenPrivate { sk, x },
-            public: KeygenPublic { pk, X },
+            public: KeygenPublic { pk, X, proof },
         }
     }
 }
 
 #[derive(Debug)]
 pub struct RoundOnePrivate {
-    k: k256::Scalar,
-    gamma: k256::Scalar,
+    k: BigNumber,
+    gamma: BigNumber,
 }
 
 #[derive(Debug)]
@@ -60,14 +89,17 @@ pub struct RoundOnePublic {
     G: Ciphertext,
 }
 
+static ELL: usize = 384;
+static EPSILON: usize = 384;
+
 /// Corresponds to pre-signing round 1 for party i
 ///
 /// Produces local shares k and gamma, along with their encrypted
 /// components K = enc(k) and G = enc(gamma).
 ///
 pub fn round_one(keyshare: &KeyShare) -> (RoundOnePrivate, RoundOnePublic) {
-    let k = k256::Scalar::random(&mut OsRng);
-    let gamma = k256::Scalar::random(&mut OsRng);
+    let k = BigNumber::random(&(BigNumber::one() << ELL));
+    let gamma = BigNumber::random(&(BigNumber::one() << ELL));
 
     let (K, _) = keyshare.public.pk.encrypt(&k.to_bytes(), None).unwrap();
     let (G, _) = keyshare.public.pk.encrypt(&gamma.to_bytes(), None).unwrap();
@@ -91,11 +123,15 @@ pub fn round_two(
     r1_priv_i: &RoundOnePrivate,
     r1_pub_j: &RoundOnePublic,
 ) -> (RoundTwoPrivate, RoundTwoPublic) {
-    // Picking betas as k256 random scalars here is like sampling them from the distribution
-    // [1, 2^256], which is akin to 2^{ell + epsilon} where ell = 128 and epsilon = 128
-    let mut rng = rand::rngs::OsRng;
-    let beta = k256::Scalar::random(&mut rng);
-    let beta_hat = k256::Scalar::random(&mut rng);
+    // Verify KeygenPublic
+    assert!(kg_pub_j.verify());
+
+    // Picking betas as elements of [+- 2^384] here is like sampling them from the distribution
+    // [1, 2^256], which is akin to 2^{ell + epsilon} where ell = epsilon = 384. Note that
+    // we need q/2^epsilon to be negligible.
+    // FIXME: allow for betas to also be negative
+    let beta = BigNumber::random(&(BigNumber::one() << (ELL + EPSILON)));
+    let beta_hat = BigNumber::random(&(BigNumber::one() << (ELL + EPSILON)));
 
     let (beta_ciphertext, _) = kg_pub_j.pk.encrypt(beta.to_bytes(), None).unwrap();
     let (beta_hat_ciphertext, _) = kg_pub_j.pk.encrypt(beta_hat.to_bytes(), None).unwrap();
@@ -103,13 +139,7 @@ pub fn round_two(
     let D = kg_pub_j
         .pk
         .add(
-            &kg_pub_j
-                .pk
-                .mul(
-                    &r1_pub_j.K.0,
-                    &BigNumber::from_slice(r1_priv_i.gamma.to_repr()),
-                )
-                .unwrap(),
+            &kg_pub_j.pk.mul(&r1_pub_j.K.0, &r1_priv_i.gamma).unwrap(),
             &beta_ciphertext,
         )
         .unwrap();
@@ -117,13 +147,7 @@ pub fn round_two(
     let D_hat = kg_pub_j
         .pk
         .add(
-            &kg_pub_j
-                .pk
-                .mul(
-                    &r1_pub_j.K.0,
-                    &BigNumber::from_slice(keyshare.private.x.to_repr()),
-                )
-                .unwrap(),
+            &kg_pub_j.pk.mul(&r1_pub_j.K.0, &keyshare.private.x).unwrap(),
             &beta_hat_ciphertext,
         )
         .unwrap();
@@ -136,7 +160,7 @@ pub fn round_two(
         .unwrap();
 
     let g = k256::ProjectivePoint::generator();
-    let Gamma = g * r1_priv_i.gamma;
+    let Gamma = g * bn_to_scalar(&r1_priv_i.gamma).unwrap();
 
     (
         RoundTwoPrivate { beta, beta_hat },
@@ -152,8 +176,8 @@ pub fn round_two(
 
 #[derive(Clone)]
 pub struct RoundTwoPrivate {
-    beta: k256::Scalar,
-    beta_hat: k256::Scalar,
+    beta: BigNumber,
+    beta_hat: BigNumber,
 }
 
 #[derive(Clone)]
@@ -166,7 +190,7 @@ pub struct RoundTwoPublic {
 }
 
 pub struct RoundThreePrivate {
-    k: k256::Scalar,
+    k: BigNumber,
     chi: k256::Scalar,
     Gamma: k256::ProjectivePoint,
 }
@@ -187,13 +211,14 @@ pub fn round_three(
     r2_privs: &[Option<RoundTwoPrivate>],
     r2_pubs: &[Option<RoundTwoPublic>],
 ) -> (RoundThreePrivate, RoundThreePublic) {
-    let mut delta: k256::Scalar = r1_priv_i.gamma * r1_priv_i.k;
-    let mut chi: k256::Scalar = keyshare.private.x * r1_priv_i.k;
+    let order = k256_order();
+    let mut delta: BigNumber = r1_priv_i.gamma.modmul(&r1_priv_i.k, &order);
+    let mut chi: BigNumber = keyshare.private.x.modmul(&r1_priv_i.k, &order);
 
     assert!(r2_privs.len() == r2_pubs.len(), "Should be same length");
 
     let g = k256::ProjectivePoint::generator();
-    let mut Gamma = g * r1_priv_i.gamma;
+    let mut Gamma = g * bn_to_scalar(&r1_priv_i.gamma).unwrap();
 
     for i in 0..r2_privs.len() {
         if r2_pubs[i].is_none() {
@@ -206,36 +231,37 @@ pub fn round_three(
         let r2_pub_j = r2_pubs[i].clone().unwrap();
         let r2_priv_j = r2_privs[i].clone().unwrap();
 
-        let alpha = bn_to_scalar(&BigNumber::from_slice(
-            keyshare.private.sk.decrypt(&r2_pub_j.D.0).unwrap(),
-        ))
-        .unwrap();
-        let alpha_hat = bn_to_scalar(&BigNumber::from_slice(
-            keyshare.private.sk.decrypt(&r2_pub_j.D_hat.0).unwrap(),
-        ))
-        .unwrap();
+        let alpha = BigNumber::from_slice(keyshare.private.sk.decrypt(&r2_pub_j.D.0).unwrap());
+        let alpha_hat =
+            BigNumber::from_slice(keyshare.private.sk.decrypt(&r2_pub_j.D_hat.0).unwrap());
 
-        delta += alpha - r2_priv_j.beta;
-        chi += alpha_hat - r2_priv_j.beta_hat;
+        delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
+        chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
 
         Gamma += r2_pub_j.Gamma;
     }
 
-    let Delta = Gamma * r1_priv_i.k;
+    let Delta = Gamma * bn_to_scalar(&r1_priv_i.k).unwrap();
+
+    let delta_scalar = bn_to_scalar(&delta).unwrap();
+    let chi_scalar = bn_to_scalar(&chi).unwrap();
 
     (
         RoundThreePrivate {
-            k: r1_priv_i.k,
-            chi,
+            k: r1_priv_i.k.clone(),
+            chi: chi_scalar,
             Gamma,
         },
-        RoundThreePublic { delta, Delta },
+        RoundThreePublic {
+            delta: delta_scalar,
+            Delta,
+        },
     )
 }
 
 pub struct PresignRecord {
     R: k256::ProjectivePoint,
-    k: k256::Scalar,
+    k: BigNumber,
     chi: k256::Scalar,
 }
 
@@ -257,7 +283,7 @@ pub fn finish(r3_priv: &RoundThreePrivate, r3_pubs: &[RoundThreePublic]) -> Pres
 
     PresignRecord {
         R,
-        k: r3_priv.k,
+        k: r3_priv.k.clone(),
         chi: r3_priv.chi,
     }
 }
@@ -265,7 +291,7 @@ pub fn finish(r3_priv: &RoundThreePrivate, r3_pubs: &[RoundThreePublic]) -> Pres
 pub fn sign(record: &PresignRecord, d: sha2::Sha256) -> (k256::Scalar, k256::Scalar) {
     let r = x_from_point(&record.R);
     let m = k256::Scalar::from_digest(d);
-    let s = record.k * m + r * record.chi;
+    let s = bn_to_scalar(&record.k).unwrap() * m + r * record.chi;
 
     (r, s)
 }
@@ -277,8 +303,7 @@ fn x_from_point(p: &k256::ProjectivePoint) -> k256::Scalar {
 
 fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     // Take (mod q)
-    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
-    let order = BigNumber::from_slice(&order_bytes);
+    let order = k256_order();
 
     let x_modded = x % order;
 
@@ -287,6 +312,12 @@ fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     let mut slice = vec![0u8; 32 - bytes.len()];
     slice.extend_from_slice(&bytes);
     k256::Scalar::from_repr(GenericArray::clone_from_slice(&slice))
+}
+
+fn k256_order() -> BigNumber {
+    // Set order = q
+    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
+    BigNumber::from_slice(&order_bytes)
 }
 
 #[cfg(test)]
@@ -298,7 +329,6 @@ mod tests {
 
     /// Generate safe primes from a file. Usually, generating safe primes takes
     /// awhile (5-10 minutes per 1024-bit safe prime on my laptop)
-    #[allow(dead_code)]
     fn get_safe_primes() -> Vec<BigNumber> {
         let file_contents = std::fs::read_to_string("src/safe_primes.txt").unwrap();
         let mut safe_primes_str: Vec<&str> = file_contents.split("\n").collect();
@@ -316,11 +346,14 @@ mod tests {
         let mut rng = OsRng;
         let NUM_PARTIES = 3;
 
+        let safe_primes = get_safe_primes();
+
         // Keygen
         println!("Beginning Keygen");
         let mut keyshares = vec![];
-        for _ in 0..NUM_PARTIES {
-            let keyshare = KeyShare::new(&mut rng, 512);
+        for i in 0..NUM_PARTIES {
+            let keyshare =
+                KeyShare::from_safe_primes(&mut rng, &safe_primes[2 * i], &safe_primes[2 * i + 1]);
             keyshares.push(keyshare);
         }
 
@@ -401,7 +434,7 @@ mod tests {
         let mut signing_key = k256::Scalar::zero();
         let mut verifying_key = k256::ProjectivePoint::identity();
         for i in 0..NUM_PARTIES {
-            signing_key += keyshares[i].private.x;
+            signing_key += bn_to_scalar(&keyshares[i].private.x).unwrap();
             verifying_key += keyshares[i].public.X;
         }
 
