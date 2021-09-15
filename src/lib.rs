@@ -7,9 +7,7 @@
 
 use ecdsa::hazmat::FromDigest;
 use generic_array::GenericArray;
-use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::GroupEncoding;
-use k256::elliptic_curve::Curve;
 use libpaillier::unknown_order::BigNumber;
 
 pub mod errors;
@@ -17,7 +15,9 @@ pub mod zkp;
 
 use crate::zkp::pbmod::PaillierBlumModulusProof;
 
-mod key;
+pub mod key;
+
+#[cfg(test)]
 mod tests;
 
 #[derive(Clone, Debug)]
@@ -130,10 +130,4 @@ impl PresignRecord {
 
         (r, s)
     }
-}
-
-fn k256_order() -> BigNumber {
-    // Set order = q
-    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
-    BigNumber::from_slice(&order_bytes)
 }

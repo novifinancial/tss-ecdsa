@@ -1,10 +1,12 @@
-#![allow(non_snake_case)] // FIXME: To be removed in the future
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree.
 
 use generic_array::GenericArray;
 use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
 use k256::elliptic_curve::Curve;
-use k256::elliptic_curve::Field;
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 
@@ -221,4 +223,10 @@ impl KeyShare {
             },
         }
     }
+}
+
+fn k256_order() -> BigNumber {
+    // Set order = q
+    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
+    BigNumber::from_slice(&order_bytes)
 }

@@ -6,7 +6,6 @@ use sha2::{Digest, Sha256};
 
 /// Generate safe primes from a file. Usually, generating safe primes takes
 /// awhile (5-10 minutes per 1024-bit safe prime on my laptop)
-#[allow(dead_code)]
 fn get_safe_primes() -> Vec<BigNumber> {
     let file_contents = std::fs::read_to_string("src/safe_primes.txt").unwrap();
     let mut safe_primes_str: Vec<&str> = file_contents.split("\n").collect();
@@ -23,12 +22,14 @@ fn get_safe_primes() -> Vec<BigNumber> {
 fn run_test() {
     let mut rng = OsRng;
     let NUM_PARTIES = 3;
+    let safe_primes = get_safe_primes();
 
     // Keygen
     println!("Beginning Keygen");
     let mut keyshares = vec![];
-    for _ in 0..NUM_PARTIES {
-        let keyshare = key::KeyShare::new(&mut rng, 512);
+    for i in 0..NUM_PARTIES {
+        let keyshare =
+            key::KeyShare::from_safe_primes(&mut rng, &safe_primes[2 * i], &safe_primes[2 * i + 1]);
         keyshares.push(keyshare);
     }
 
