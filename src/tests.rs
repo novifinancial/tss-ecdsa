@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 /// Generate safe primes from a file. Usually, generating safe primes takes
 /// awhile (5-10 minutes per 1024-bit safe prime on my laptop)
-fn get_safe_primes() -> Vec<BigNumber> {
+pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
     let file_contents = std::fs::read_to_string("src/safe_primes.txt").unwrap();
     let mut safe_primes_str: Vec<&str> = file_contents.split("\n").collect();
     safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
