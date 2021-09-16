@@ -12,11 +12,6 @@ use rand::{CryptoRng, RngCore};
 
 use super::*;
 
-pub struct Pair<S, T> {
-    pub(crate) private: S,
-    pub(crate) public: T,
-}
-
 pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     // Take (mod q)
     let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
@@ -93,7 +88,7 @@ impl KeyShare {
     /// Produces local shares k and gamma, along with their encrypted
     /// components K = enc(k) and G = enc(gamma).
     ///
-    pub fn round_one(&self) -> Pair<round_one::Private, round_one::Public> {
+    pub fn round_one(&self) -> round_one::Pair {
         let k = BigNumber::random(&(BigNumber::one() << Self::ELL));
         let gamma = BigNumber::random(&(BigNumber::one() << Self::ELL));
 
@@ -117,7 +112,7 @@ impl KeyShare {
         kg_pub_j: &KeygenPublic,
         r1_priv_i: &round_one::Private,
         r1_pub_j: &round_one::Public,
-    ) -> Pair<round_two::Private, round_two::Public> {
+    ) -> round_two::Pair {
         // Verify KeygenPublic
         assert!(kg_pub_j.verify());
 
@@ -175,7 +170,7 @@ impl KeyShare {
         r1_priv_i: &round_one::Private,
         r2_privs: &[Option<round_two::Private>],
         r2_pubs: &[Option<round_two::Public>],
-    ) -> Pair<round_three::Private, round_three::Public> {
+    ) -> round_three::Pair {
         let order = k256_order();
         let mut delta: BigNumber = r1_priv_i.gamma.modmul(&r1_priv_i.k, &order);
         let mut chi: BigNumber = self.private.x.modmul(&r1_priv_i.k, &order);

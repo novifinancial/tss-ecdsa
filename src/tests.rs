@@ -38,7 +38,7 @@ fn run_test() {
     let mut r1_privs = vec![];
     let mut r1_pubs = vec![];
     for k in keyshares.iter() {
-        let key::Pair { private, public } = k.round_one();
+        let Pair { private, public } = k.round_one();
         r1_privs.push(private);
         r1_pubs.push(public);
     }
@@ -56,7 +56,7 @@ fn run_test() {
                 r2_pub_i.push(None);
                 continue;
             }
-            let key::Pair {
+            let Pair {
                 private: r2_priv_ij,
                 public: r2_pub_ij,
             } = keyshares[i].round_two(&keyshares[j].public, &r1_privs[i], &r1_pubs[j]);
@@ -80,7 +80,7 @@ fn run_test() {
             result
         };
 
-        let key::Pair {
+        let Pair {
             private: r3_priv,
             public: r3_pub,
         } = keyshares[i].round_three(&r1_privs[i], &r2_privs[i][..], &r2_pubs_cross[..]);
