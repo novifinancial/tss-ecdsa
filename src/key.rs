@@ -98,26 +98,24 @@ impl KeygenPublic {
     pub fn from_slice<B: AsRef<[u8]>>(buf: B) -> Result<Self> {
         let mut offset = 0;
         let buf = buf.as_ref();
-        let (buf_pk_len, pk_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_pk_len, pk_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
 
         offset += pk_len;
-        let pk = EncryptionKey::from_bytes(&buf.clone()[offset..offset + buf_pk_len])
+        let pk = EncryptionKey::from_bytes(&buf[offset..offset + buf_pk_len])
             .map_err(|_| InternalError::Serialization)?;
         offset += buf_pk_len;
 
         let X_opt: Option<_> = k256::ProjectivePoint::from_bytes(
-            &generic_array::GenericArray::from_slice(&buf.clone()[offset..offset + 33]),
+            generic_array::GenericArray::from_slice(&buf[offset..offset + 33]),
         )
         .into();
-        let X = X_opt
-            .map(|v| Ok(v))
-            .unwrap_or(Err(InternalError::Serialization))?;
+        let X = X_opt.map(Ok).unwrap_or(Err(InternalError::Serialization))?;
         offset += 33;
 
-        let (buf_proof_len, proof_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_proof_len, proof_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += proof_len;
         let proof = PaillierBlumModulusProof::from_slice(&buf[offset..offset + buf_proof_len])?;

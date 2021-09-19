@@ -68,31 +68,30 @@ impl PaillierBlumModulusProof {
     pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
         let mut offset = 0;
         let buf = buf.as_ref();
-        let (buf_N_len, _N_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_N_len, _N_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += _N_len;
-        let N = BigNumber::from_slice(&buf.clone()[offset..offset + buf_N_len]);
+        let N = BigNumber::from_slice(&buf[offset..offset + buf_N_len]);
         offset += buf_N_len;
 
-        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += _w_len;
-        let w = BigNumber::from_slice(&buf.clone()[offset..offset + buf_w_len]);
+        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
         offset += buf_w_len;
 
-        let (num_elements, num_elements_len): (usize, usize) =
-            VarInt::decode_var(&buf.clone()[offset..])
-                .map(|v| Ok(v))
-                .unwrap_or(Err(InternalError::Serialization))?;
+        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
         offset += num_elements_len;
 
         let mut elements = Vec::new();
         for _ in 0..num_elements {
-            let serialized = buf.clone()[offset..].to_vec();
+            let serialized = buf[offset..].to_vec();
             let element = PaillierBlumModulusProofElements::from_slice(serialized)
-                .map(|v| Ok(v))
+                .map(Ok)
                 .unwrap_or(Err(InternalError::Serialization))?;
             offset += element.to_bytes().len();
             elements.push(element);
@@ -168,38 +167,39 @@ impl PaillierBlumModulusProofElements {
         out
     }
 
+    #[allow(clippy::many_single_char_names)]
     pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
         let mut offset = 0;
         let buf = buf.as_ref();
-        let (buf_x_len, _x_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_x_len, _x_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
 
         offset += _x_len;
-        let x = BigNumber::from_slice(&buf.clone()[offset..offset + buf_x_len]);
+        let x = BigNumber::from_slice(&buf[offset..offset + buf_x_len]);
         offset += buf_x_len;
 
-        let (buf_y_len, _y_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_y_len, _y_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += _y_len;
-        let y = BigNumber::from_slice(&buf.clone()[offset..offset + buf_y_len]);
+        let y = BigNumber::from_slice(&buf[offset..offset + buf_y_len]);
         offset += buf_y_len;
 
-        let (buf_z_len, _z_len): (usize, usize) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (buf_z_len, _z_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += _z_len;
-        let z = BigNumber::from_slice(&buf.clone()[offset..offset + buf_z_len]);
+        let z = BigNumber::from_slice(&buf[offset..offset + buf_z_len]);
         offset += buf_z_len;
 
-        let (a, a_len) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (a, a_len) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += a_len;
 
-        let (b, _) = VarInt::decode_var(&buf.clone()[offset..])
-            .map(|v| Ok(v))
+        let (b, _) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
 
         Ok(Self { x, a, b, y, z })
