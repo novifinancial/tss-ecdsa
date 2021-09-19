@@ -3,7 +3,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
 use generic_array::GenericArray;
+use integer_encoding::VarInt;
 use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
 use k256::elliptic_curve::Curve;
@@ -11,11 +13,9 @@ use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 
 use super::*;
+use crate::errors::{InternalError, Result};
 
-pub struct Pair<S, T> {
-    pub(crate) private: S,
-    pub(crate) public: T,
-}
+const COMPRESSED: bool = true;
 
 pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     // Take (mod q)
@@ -36,6 +36,24 @@ pub struct KeygenPrivate {
     pub(crate) sk: DecryptionKey,
     pub(crate) x: BigNumber, // in the range [1, q)
 }
+
+impl KeygenPrivate {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = self.sk.to_bytes();
+        out.extend(self.x.to_bytes());
+        out
+    }
+
+    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let sk =
+            DecryptionKey::from_bytes(buf.clone()).map_err(|_| InternalError::Serialization)?;
+        // TODO (ladi) We should upstream a serialized_size on libpaillier Key
+        let sk_buf = sk.to_bytes();
+        let x = BigNumber::from_slice(&buf.as_ref()[sk_buf.len()..]);
+        Ok(Self { sk, x })
+    }
+}
+
 #[derive(Debug)]
 pub struct KeygenPublic {
     pub(crate) pk: EncryptionKey,
@@ -46,6 +64,63 @@ pub struct KeygenPublic {
 impl KeygenPublic {
     fn verify(&self) -> bool {
         self.pk.n() == &self.proof.N && self.proof.verify()
+    }
+
+    pub fn to_bytes(self) -> Vec<u8> {
+        let buf_enc = self.pk.to_bytes();
+        let buf_enc_len = buf_enc.len();
+
+        let mut offset = 0;
+        let mut out = (0..buf_enc_len.required_space())
+            .map(|_| 0u8)
+            .collect::<Vec<u8>>();
+        offset += buf_enc_len.encode_var(&mut out[offset..]);
+        out.extend(buf_enc);
+        offset += buf_enc_len;
+
+        let encoded_point = self.X.to_encoded_point(COMPRESSED);
+        out.extend(encoded_point.to_bytes().to_vec());
+        offset += 33;
+
+        let buf_proof = self.proof.to_bytes();
+        let buf_proof_len = buf_proof.len();
+        out.extend(
+            (0..buf_proof_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        let _ = buf_proof_len.encode_var(&mut out[offset..]);
+        out.extend(buf_proof);
+
+        out
+    }
+
+    pub fn from_slice<B: AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let mut offset = 0;
+        let buf = buf.as_ref();
+        let (buf_pk_len, pk_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+
+        offset += pk_len;
+        let pk = EncryptionKey::from_bytes(&buf[offset..offset + buf_pk_len])
+            .map_err(|_| InternalError::Serialization)?;
+        offset += buf_pk_len;
+
+        let X_opt: Option<_> = k256::ProjectivePoint::from_bytes(
+            generic_array::GenericArray::from_slice(&buf[offset..offset + 33]),
+        )
+        .into();
+        let X = X_opt.map(Ok).unwrap_or(Err(InternalError::Serialization))?;
+        offset += 33;
+
+        let (buf_proof_len, proof_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += proof_len;
+        let proof = PaillierBlumModulusProof::from_slice(&buf[offset..offset + buf_proof_len])?;
+
+        Ok(Self { pk, X, proof })
     }
 }
 
@@ -93,7 +168,7 @@ impl KeyShare {
     /// Produces local shares k and gamma, along with their encrypted
     /// components K = enc(k) and G = enc(gamma).
     ///
-    pub fn round_one(&self) -> Pair<round_one::Private, round_one::Public> {
+    pub fn round_one(&self) -> round_one::Pair {
         let k = BigNumber::random(&(BigNumber::one() << Self::ELL));
         let gamma = BigNumber::random(&(BigNumber::one() << Self::ELL));
 
@@ -117,7 +192,7 @@ impl KeyShare {
         kg_pub_j: &KeygenPublic,
         r1_priv_i: &round_one::Private,
         r1_pub_j: &round_one::Public,
-    ) -> Pair<round_two::Private, round_two::Public> {
+    ) -> round_two::Pair {
         // Verify KeygenPublic
         assert!(kg_pub_j.verify());
 
@@ -175,7 +250,7 @@ impl KeyShare {
         r1_priv_i: &round_one::Private,
         r2_privs: &[Option<round_two::Private>],
         r2_pubs: &[Option<round_two::Public>],
-    ) -> Pair<round_three::Private, round_three::Public> {
+    ) -> round_three::Pair {
         let order = k256_order();
         let mut delta: BigNumber = r1_priv_i.gamma.modmul(&r1_priv_i.k, &order);
         let mut chi: BigNumber = self.private.x.modmul(&r1_priv_i.k, &order);
@@ -229,4 +304,34 @@ fn k256_order() -> BigNumber {
     // Set order = q
     let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
     BigNumber::from_slice(&order_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::OsRng;
+
+    #[test]
+    fn serialization_roundtrip() {
+        let mut rng = OsRng;
+        let NUM_PARTIES = 3;
+        let safe_primes = crate::tests::get_safe_primes();
+        for i in 0..NUM_PARTIES {
+            let KeyShare { private, public } =
+                KeyShare::from_safe_primes(&mut rng, &safe_primes[2 * i], &safe_primes[2 * i + 1]);
+            let private_bytes = private.to_bytes();
+            let X = public.X.clone();
+            let pk = public.pk.clone();
+            let public_bytes = public.to_bytes();
+
+            let roundtrip_private = KeygenPrivate::from_slice(private_bytes.clone())
+                .expect("Roundtrip deserialization should succeed. qed.");
+            assert_eq!(private_bytes, roundtrip_private.to_bytes());
+            let roundtrip_public = KeygenPublic::from_slice(&public_bytes)
+                .expect("Roundtrip deserialization should succeed. qed.");
+            assert_eq!(X, roundtrip_public.X);
+            assert_eq!(pk.to_bytes(), roundtrip_public.pk.to_bytes());
+            //assert_eq!(public_bytes, roundtrip_public.to_bytes());
+        }
+    }
 }

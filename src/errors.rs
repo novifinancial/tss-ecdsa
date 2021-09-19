@@ -9,6 +9,8 @@ use std::error::Error;
 
 use displaydoc::Display;
 
+pub type Result<T> = std::result::Result<T, InternalError>;
+
 /// Represents an error in the manipulation of internal cryptographic data
 #[derive(Clone, Display, Eq, Hash, PartialEq)]
 pub enum InternalError {
@@ -20,6 +22,8 @@ pub enum InternalError {
     NonUniqueFourthRootsCombination,
     /// Could not invert a BigNumber
     CouldNotInvertBigNumber,
+    /// Serialization Error
+    Serialization,
 }
 
 impl Debug for InternalError {
@@ -31,6 +35,7 @@ impl Debug for InternalError {
                 f.debug_tuple("NonUniqueFourthRootsCombination").finish()
             }
             Self::CouldNotInvertBigNumber => f.debug_tuple("CouldNotInvertBigNumber").finish(),
+            Self::Serialization => f.debug_tuple("CouldNotDeserialize").finish(),
         }
     }
 }

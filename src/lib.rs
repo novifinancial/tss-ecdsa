@@ -20,6 +20,11 @@ pub mod key;
 #[cfg(test)]
 mod tests;
 
+pub struct Pair<S, T> {
+    pub(crate) private: S,
+    pub(crate) public: T,
+}
+
 #[derive(Clone, Debug)]
 struct Ciphertext(libpaillier::Ciphertext);
 
@@ -39,7 +44,7 @@ pub mod round_one {
         pub(crate) G: Ciphertext,
     }
 
-    pub type Pair = super::key::Pair<Private, Public>;
+    pub type Pair = super::Pair<Private, Public>;
 }
 
 pub mod round_two {
@@ -61,7 +66,7 @@ pub mod round_two {
         pub(crate) Gamma: k256::ProjectivePoint,
     }
 
-    pub type Pair = super::key::Pair<Private, Public>;
+    pub type Pair = super::Pair<Private, Public>;
 }
 
 pub mod round_three {
@@ -79,12 +84,12 @@ pub mod round_three {
         pub(crate) Delta: k256::ProjectivePoint,
     }
 
-    pub type Pair = super::key::Pair<Private, Public>;
+    pub type Pair = super::Pair<Private, Public>;
 }
 
 pub type PresignCouncil = Vec<round_three::Public>;
 
-pub type RecordPair = key::Pair<round_three::Private, PresignCouncil>;
+pub type RecordPair = Pair<round_three::Private, PresignCouncil>;
 
 pub struct PresignRecord {
     R: k256::ProjectivePoint,
