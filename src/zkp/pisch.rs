@@ -3,6 +3,4 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-pub(crate) mod pimod;
-pub(crate) mod piprm;
-pub(crate) mod setup;
+//! Implements the ZKP from Figure 22 of https://eprint.iacr.org/2021/060.pdf
