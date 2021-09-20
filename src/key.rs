@@ -3,6 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::zkp::setup::ZkSetupParameters;
 use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
 use generic_array::GenericArray;
 use integer_encoding::VarInt;
@@ -58,15 +59,15 @@ impl KeygenPrivate {
 pub struct KeygenPublic {
     pub(crate) pk: EncryptionKey,
     pub(crate) X: k256::ProjectivePoint,
-    pub(crate) proof: PaillierBlumModulusProof,
+    pub(crate) params: ZkSetupParameters,
 }
 
 impl KeygenPublic {
     fn verify(&self) -> bool {
-        self.pk.n() == &self.proof.N && self.proof.verify()
+        self.pk.n() == &self.params.N && self.params.verify()
     }
 
-    pub fn to_bytes(self) -> Vec<u8> {
+    pub fn to_bytes(self) -> Result<Vec<u8>> {
         let buf_enc = self.pk.to_bytes();
         let buf_enc_len = buf_enc.len();
 
@@ -82,17 +83,17 @@ impl KeygenPublic {
         out.extend(encoded_point.to_bytes().to_vec());
         offset += 33;
 
-        let buf_proof = self.proof.to_bytes();
-        let buf_proof_len = buf_proof.len();
+        let buf_params = self.params.to_bytes()?;
+        let buf_params_len = buf_params.len();
         out.extend(
-            (0..buf_proof_len.required_space())
+            (0..buf_params_len.required_space())
                 .map(|_| 0u8)
                 .collect::<Vec<u8>>(),
         );
-        let _ = buf_proof_len.encode_var(&mut out[offset..]);
-        out.extend(buf_proof);
+        let _ = buf_params_len.encode_var(&mut out[offset..]);
+        out.extend(buf_params);
 
-        out
+        Ok(out)
     }
 
     pub fn from_slice<B: AsRef<[u8]>>(buf: B) -> Result<Self> {
@@ -118,9 +119,9 @@ impl KeygenPublic {
             .map(Ok)
             .unwrap_or(Err(InternalError::Serialization))?;
         offset += proof_len;
-        let proof = PaillierBlumModulusProof::from_slice(&buf[offset..offset + buf_proof_len])?;
+        let params = ZkSetupParameters::from_slice(&buf[offset..offset + buf_proof_len])?;
 
-        Ok(Self { pk, X, proof })
+        Ok(Self { pk, X, params })
     }
 }
 
@@ -152,14 +153,14 @@ impl KeyShare {
         let g = k256::ProjectivePoint::generator();
         let X = g * bn_to_scalar(&x).unwrap(); // public component
 
-        let proof = PaillierBlumModulusProof::prove(&(p * q), p, q).unwrap();
+        let params = ZkSetupParameters::gen_from_primes(&(p * q), p, q).unwrap();
 
-        // Proof should verify
-        assert!(proof.verify());
+        // Zk setup parameters should verify
+        assert!(params.verify());
 
         Self {
             private: KeygenPrivate { sk, x },
-            public: KeygenPublic { pk, X, proof },
+            public: KeygenPublic { pk, X, params },
         }
     }
 
@@ -312,17 +313,19 @@ mod tests {
     use rand::rngs::OsRng;
 
     #[test]
-    fn serialization_roundtrip() {
+    fn serialization_roundtrip() -> Result<()> {
         let mut rng = OsRng;
         let NUM_PARTIES = 3;
-        let safe_primes = crate::tests::get_safe_primes();
         for i in 0..NUM_PARTIES {
-            let KeyShare { private, public } =
-                KeyShare::from_safe_primes(&mut rng, &safe_primes[2 * i], &safe_primes[2 * i + 1]);
+            let KeyShare { private, public } = KeyShare::from_safe_primes(
+                &mut rng,
+                &POOL_OF_PRIMES[2 * i],
+                &POOL_OF_PRIMES[2 * i + 1],
+            );
             let private_bytes = private.to_bytes();
             let X = public.X.clone();
             let pk = public.pk.clone();
-            let public_bytes = public.to_bytes();
+            let public_bytes = public.to_bytes()?;
 
             let roundtrip_private = KeygenPrivate::from_slice(private_bytes.clone())
                 .expect("Roundtrip deserialization should succeed. qed.");
@@ -333,5 +336,6 @@ mod tests {
             assert_eq!(pk.to_bytes(), roundtrip_public.pk.to_bytes());
             //assert_eq!(public_bytes, roundtrip_public.to_bytes());
         }
+        Ok(())
     }
 }

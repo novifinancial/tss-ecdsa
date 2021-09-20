@@ -22,84 +22,6 @@ pub struct PaillierBlumModulusProof {
     elements: Vec<PaillierBlumModulusProofElements>,
 }
 
-impl PaillierBlumModulusProof {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-
-        let buf_N = self.N.to_bytes();
-        let buf_N_len = buf_N.len();
-
-        out.extend(
-            (0..buf_N_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_N_len.encode_var(&mut out[offset..]);
-        out.extend(buf_N);
-        offset += buf_N_len;
-
-        let buf_w = self.w.to_bytes();
-        let buf_w_len = buf_w.len();
-
-        out.extend(
-            (0..buf_w_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_w_len.encode_var(&mut out[offset..]);
-        out.extend(buf_w);
-        offset += buf_w_len;
-
-        out.extend(
-            (0..self.elements.len().required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = self.elements.len().encode_var(&mut out[offset..]);
-
-        for element in self.elements.iter() {
-            out.extend(element.to_bytes());
-        }
-
-        out
-    }
-
-    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-        let (buf_N_len, _N_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _N_len;
-        let N = BigNumber::from_slice(&buf[offset..offset + buf_N_len]);
-        offset += buf_N_len;
-
-        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _w_len;
-        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
-        offset += buf_w_len;
-
-        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += num_elements_len;
-
-        let mut elements = Vec::new();
-        for _ in 0..num_elements {
-            let serialized = buf[offset..].to_vec();
-            let element = PaillierBlumModulusProofElements::from_slice(serialized)
-                .map(Ok)
-                .unwrap_or(Err(InternalError::Serialization))?;
-            offset += element.to_bytes().len();
-            elements.push(element);
-        }
-        Ok(Self { N, w, elements })
-    }
-}
-
 #[derive(Debug)]
 pub struct PaillierBlumModulusProofElements {
     x: BigNumber,
@@ -107,103 +29,6 @@ pub struct PaillierBlumModulusProofElements {
     b: usize,
     z: BigNumber,
     y: BigNumber,
-}
-
-impl PaillierBlumModulusProofElements {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-
-        let buf_x = self.x.to_bytes();
-        let buf_x_len = buf_x.len();
-
-        out.extend(
-            (0..buf_x_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_x_len.encode_var(&mut out[offset..]);
-        out.extend(buf_x);
-        offset += buf_x_len;
-
-        let buf_y = self.y.to_bytes();
-        let buf_y_len = buf_y.len();
-
-        out.extend(
-            (0..buf_y_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_y_len.encode_var(&mut out[offset..]);
-        out.extend(buf_y);
-        offset += buf_y_len;
-
-        let buf_z = self.z.to_bytes();
-        let buf_z_len = buf_z.len();
-
-        out.extend(
-            (0..buf_z_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_z_len.encode_var(&mut out[offset..]);
-        out.extend(buf_z);
-        offset += buf_z_len;
-
-        out.extend(
-            (0..self.a.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += self.a.encode_var(&mut out[offset..]);
-
-        out.extend(
-            (0..self.b.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = self.b.encode_var(&mut out[offset..]);
-
-        out
-    }
-
-    #[allow(clippy::many_single_char_names)]
-    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-        let (buf_x_len, _x_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-
-        offset += _x_len;
-        let x = BigNumber::from_slice(&buf[offset..offset + buf_x_len]);
-        offset += buf_x_len;
-
-        let (buf_y_len, _y_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _y_len;
-        let y = BigNumber::from_slice(&buf[offset..offset + buf_y_len]);
-        offset += buf_y_len;
-
-        let (buf_z_len, _z_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _z_len;
-        let z = BigNumber::from_slice(&buf[offset..offset + buf_z_len]);
-        offset += buf_z_len;
-
-        let (a, a_len) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += a_len;
-
-        let (b, _) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-
-        Ok(Self { x, a, b, y, z })
-    }
 }
 
 // Compute regular mod
@@ -430,11 +255,16 @@ impl PaillierBlumModulusProof {
             });
         }
 
-        Ok(Self {
+        let proof = Self {
             N: N.clone(),
             w,
             elements,
-        })
+        };
+
+        match proof.verify() {
+            true => Ok(proof),
+            false => Err(InternalError::CouldNotGenerateProof),
+        }
     }
 
     pub(crate) fn verify(&self) -> bool {
@@ -494,6 +324,181 @@ impl PaillierBlumModulusProof {
     }
 }
 
+impl PaillierBlumModulusProofElements {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut offset = 0;
+
+        let buf_x = self.x.to_bytes();
+        let buf_x_len = buf_x.len();
+
+        out.extend(
+            (0..buf_x_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_x_len.encode_var(&mut out[offset..]);
+        out.extend(buf_x);
+        offset += buf_x_len;
+
+        let buf_y = self.y.to_bytes();
+        let buf_y_len = buf_y.len();
+
+        out.extend(
+            (0..buf_y_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_y_len.encode_var(&mut out[offset..]);
+        out.extend(buf_y);
+        offset += buf_y_len;
+
+        let buf_z = self.z.to_bytes();
+        let buf_z_len = buf_z.len();
+
+        out.extend(
+            (0..buf_z_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_z_len.encode_var(&mut out[offset..]);
+        out.extend(buf_z);
+        offset += buf_z_len;
+
+        out.extend(
+            (0..self.a.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += self.a.encode_var(&mut out[offset..]);
+
+        out.extend(
+            (0..self.b.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        let _ = self.b.encode_var(&mut out[offset..]);
+
+        out
+    }
+
+    #[allow(clippy::many_single_char_names)]
+    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let mut offset = 0;
+        let buf = buf.as_ref();
+        let (buf_x_len, _x_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+
+        offset += _x_len;
+        let x = BigNumber::from_slice(&buf[offset..offset + buf_x_len]);
+        offset += buf_x_len;
+
+        let (buf_y_len, _y_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += _y_len;
+        let y = BigNumber::from_slice(&buf[offset..offset + buf_y_len]);
+        offset += buf_y_len;
+
+        let (buf_z_len, _z_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += _z_len;
+        let z = BigNumber::from_slice(&buf[offset..offset + buf_z_len]);
+        offset += buf_z_len;
+
+        let (a, a_len) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += a_len;
+
+        let (b, _) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+
+        Ok(Self { x, a, b, y, z })
+    }
+}
+
+impl PaillierBlumModulusProof {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut offset = 0;
+
+        let buf_N = self.N.to_bytes();
+        let buf_N_len = buf_N.len();
+
+        out.extend(
+            (0..buf_N_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_N_len.encode_var(&mut out[offset..]);
+        out.extend(buf_N);
+        offset += buf_N_len;
+
+        let buf_w = self.w.to_bytes();
+        let buf_w_len = buf_w.len();
+
+        out.extend(
+            (0..buf_w_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_w_len.encode_var(&mut out[offset..]);
+        out.extend(buf_w);
+        offset += buf_w_len;
+
+        out.extend(
+            (0..self.elements.len().required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        let _ = self.elements.len().encode_var(&mut out[offset..]);
+
+        for element in self.elements.iter() {
+            out.extend(element.to_bytes());
+        }
+
+        out
+    }
+
+    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let mut offset = 0;
+        let buf = buf.as_ref();
+        let (buf_N_len, _N_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += _N_len;
+        let N = BigNumber::from_slice(&buf[offset..offset + buf_N_len]);
+        offset += buf_N_len;
+
+        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += _w_len;
+        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
+        offset += buf_w_len;
+
+        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += num_elements_len;
+
+        let mut elements = Vec::new();
+        for _ in 0..num_elements {
+            let serialized = buf[offset..].to_vec();
+            let element = PaillierBlumModulusProofElements::from_slice(serialized)
+                .map(Ok)
+                .unwrap_or(Err(InternalError::Serialization))?;
+            offset += element.to_bytes().len();
+            elements.push(element);
+        }
+        Ok(Self { N, w, elements })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,8 +506,8 @@ mod tests {
 
     #[test]
     fn test_jacobi() {
-        let p = BigNumber::safe_prime(128);
-        let q = BigNumber::safe_prime(128);
+        let p = crate::get_random_safe_prime_512();
+        let q = crate::get_random_safe_prime_512();
 
         let N = &p * &q;
 
@@ -532,7 +537,7 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_prime() {
-        let p = BigNumber::safe_prime(128);
+        let p = crate::get_random_safe_prime_512();
 
         for _ in 0..100 {
             let a = BigNumber::random(&p);
@@ -557,8 +562,8 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_composite() {
-        let p = BigNumber::safe_prime(128);
-        let q = BigNumber::safe_prime(128);
+        let p = crate::get_random_safe_prime_512();
+        let q = crate::get_random_safe_prime_512();
         let N = &p * &q;
 
         // Loop until we've confirmed enough successes
@@ -588,8 +593,8 @@ mod tests {
 
     #[test]
     fn test_fourth_roots_mod_composite() {
-        let p = BigNumber::safe_prime(128);
-        let q = BigNumber::safe_prime(128);
+        let p = crate::get_random_safe_prime_512();
+        let q = crate::get_random_safe_prime_512();
         let N = &p * &q;
 
         // Loop until we've confirmed enough successes
@@ -619,8 +624,8 @@ mod tests {
 
     #[test]
     fn test_chinese_remainder_theorem() {
-        let p = BigNumber::safe_prime(128);
-        let q = BigNumber::safe_prime(128);
+        let p = crate::get_random_safe_prime_512();
+        let q = crate::get_random_safe_prime_512();
 
         for _ in 0..100 {
             let a1 = BigNumber::random(&p);

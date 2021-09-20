@@ -4,19 +4,6 @@ use ecdsa::signature::DigestVerifier;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
-/// Generate safe primes from a file. Usually, generating safe primes takes
-/// awhile (5-10 minutes per 1024-bit safe prime on my laptop)
-pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
-    let file_contents = std::fs::read_to_string("src/safe_primes.txt").unwrap();
-    let mut safe_primes_str: Vec<&str> = file_contents.split("\n").collect();
-    safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
-    let safe_primes: Vec<BigNumber> = safe_primes_str
-        .into_iter()
-        .map(|s| bincode::deserialize(&hex::decode(&s).unwrap()).unwrap())
-        .collect();
-    safe_primes
-}
-
 /// Executes a test between two parties i and j
 #[test]
 fn run_test() {
