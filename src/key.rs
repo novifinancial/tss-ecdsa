@@ -169,6 +169,7 @@ impl KeyShare {
     /// Produces local shares k and gamma, along with their encrypted
     /// components K = enc(k) and G = enc(gamma).
     ///
+    #[cfg_attr(feature = "flame_it", flame)]
     pub fn round_one(&self) -> round_one::Pair {
         let k = BigNumber::random(&(BigNumber::one() << Self::ELL));
         let gamma = BigNumber::random(&(BigNumber::one() << Self::ELL));
@@ -188,6 +189,7 @@ impl KeyShare {
     ///
     /// Constructs a D = gamma * K and D_hat = x * K, and Gamma = g * gamma.
     ///
+    #[cfg_attr(feature = "flame_it", flame)]
     pub fn round_two(
         &self,
         kg_pub_j: &KeygenPublic,
@@ -246,6 +248,7 @@ impl KeyShare {
     ///
     /// First computes alpha = dec(D), alpha_hat = dec(D_hat).
     /// Computes a delta = gamma * k
+    #[cfg_attr(feature = "flame_it", flame)]
     pub fn round_three(
         &self,
         r1_priv_i: &round_one::Private,

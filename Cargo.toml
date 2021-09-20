@@ -7,6 +7,10 @@ license = "MIT"
 edition = "2018"
 readme = "README.md"
 
+[features]
+default = []
+flame_it = ["flame", "flamer"]
+
 [dependencies]
 k256 = { version = "0.9.6", features = ["arithmetic", "digest", "sha256", "ecdsa-core"] }
 libpaillier = "0.2.1"
@@ -20,3 +24,8 @@ generic-array = "0.14.4"
 merlin = "3"
 integer-encoding = "3.0.2"
 lazy_static = "1.4"
+flame = { version = "0.2.2", optional = true }
+flamer = { version = "0.3", optional = true }
+
+
+[dev-dependencies]

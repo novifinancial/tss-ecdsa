@@ -7,6 +7,7 @@
 
 use crate::errors::*;
 use crate::serialization::*;
+use crate::utils::*;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use std::convert::TryInto;
@@ -100,6 +101,7 @@ impl RingPedersenProof {
 
 impl RingPedersenProof {
     // Needs to be the case that s = t^lambda (mod N)
+    #[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
     pub(crate) fn gen(
         N: &BigNumber,
         phi_n: &BigNumber,
@@ -109,9 +111,10 @@ impl RingPedersenProof {
     ) -> Result<Self> {
         let mut secret_a_values = vec![];
         let mut public_a_values = vec![];
+
         for _ in 0..LAMBDA {
             let a = BigNumber::random(phi_n);
-            let a_commit = t.modpow(&a, N);
+            let a_commit = modpow(t, &a, N);
 
             secret_a_values.push(a);
             public_a_values.push(a_commit);
@@ -146,6 +149,7 @@ impl RingPedersenProof {
         }
     }
 
+    #[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
     pub(crate) fn verify(&self) -> bool {
         if self.a_values.len() != LAMBDA
             || self.e_values.len() != LAMBDA
@@ -166,7 +170,7 @@ impl RingPedersenProof {
 
         for (i, e) in e_values.iter().enumerate() {
             // Verify that t^z = A * s^e (mod N)
-            let lhs = self.t.modpow(&self.z_values[i], &self.N);
+            let lhs = modpow(&self.t, &self.z_values[i], &self.N);
             let rhs = match e {
                 true => self.a_values[i].modmul(&self.s, &self.N),
                 false => self.a_values[i].modadd(&BigNumber::zero(), &self.N),
@@ -180,6 +184,7 @@ impl RingPedersenProof {
     }
 }
 
+#[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
 fn generate_e_from_a(a_values: &[BigNumber]) -> [bool; LAMBDA] {
     let mut e_values = [false; LAMBDA];
 
@@ -205,8 +210,8 @@ mod tests {
         let phi_n = (p - 1) * (q - 1);
         let tau = BigNumber::random(&N);
         let lambda = BigNumber::random(&phi_n);
-        let t = tau.modpow(&BigNumber::from(2), &N);
-        let s = t.modpow(&lambda, &N);
+        let t = modpow(&tau, &BigNumber::from(2), &N);
+        let s = modpow(&t, &lambda, &N);
         RingPedersenProof::gen(&N, &phi_n, &s, &t, &lambda)
     }
 
