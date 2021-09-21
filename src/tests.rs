@@ -5,6 +5,7 @@ use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
 /// Executes a test between two parties i and j
+#[cfg_attr(feature = "flame_it", flame)]
 #[test]
 fn run_test() {
     let mut rng = OsRng;
@@ -123,4 +124,7 @@ fn run_test() {
     let sig = ecdsa::Signature::from_scalars(r_scalars[0], s_acc).unwrap();
 
     assert!(vk.verify_digest(hasher, &sig).is_ok());
+
+    #[cfg(feature = "flame_it")]
+    flame::dump_html(&mut std::fs::File::create("stats/flame-graph.html").unwrap()).unwrap();
 }

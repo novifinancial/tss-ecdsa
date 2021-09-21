@@ -4,6 +4,12 @@
 // LICENSE file in the root directory of this source tree.
 
 #![allow(non_snake_case)] // FIXME: To be removed in the future
+#![cfg_attr(feature = "flame_it", feature(proc_macro_hygiene))]
+#[cfg(feature = "flame_it")]
+extern crate flame;
+#[cfg(feature = "flame_it")]
+#[macro_use]
+extern crate flamer;
 
 use ecdsa::hazmat::FromDigest;
 use generic_array::GenericArray;
@@ -14,6 +20,7 @@ use rand::Rng;
 pub mod errors;
 pub mod key;
 pub mod serialization;
+mod utils;
 pub mod zkp;
 
 #[cfg(test)]
