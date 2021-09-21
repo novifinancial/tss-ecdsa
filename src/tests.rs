@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::errors::*;
+use crate::key::KeygenPublic;
 use ecdsa::signature::DigestVerifier;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
@@ -7,7 +9,7 @@ use sha2::{Digest, Sha256};
 /// Executes a test between two parties i and j
 #[cfg_attr(feature = "flame_it", flame)]
 #[test]
-fn run_test() {
+fn run_test() -> Result<()> {
     let mut rng = OsRng;
     let NUM_PARTIES = 3;
     let safe_primes = get_safe_primes();
@@ -21,12 +23,19 @@ fn run_test() {
         keyshares.push(keyshare);
     }
 
+    let public_keys: Vec<Option<KeygenPublic>> =
+        keyshares.iter().map(|x| Some(x.public.clone())).collect();
+
     // Round 1
     println!("Beginning Round 1");
     let mut r1_privs = vec![];
     let mut r1_pubs = vec![];
-    for k in keyshares.iter() {
-        let Pair { private, public } = k.round_one();
+    for (i, k) in keyshares.iter().enumerate() {
+        // Produce the vector of public keys, where the i'th entry is None
+        let mut public_keys_without_self = public_keys.clone();
+        public_keys_without_self[i] = None;
+
+        let Pair { private, public } = k.round_one(&public_keys_without_self)?;
         r1_privs.push(private);
         r1_pubs.push(public);
     }
@@ -127,4 +136,6 @@ fn run_test() {
 
     #[cfg(feature = "flame_it")]
     flame::dump_html(&mut std::fs::File::create("stats/flame-graph.html").unwrap()).unwrap();
+
+    Ok(())
 }

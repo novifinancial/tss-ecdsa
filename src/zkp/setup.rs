@@ -14,15 +14,15 @@ use libpaillier::unknown_order::BigNumber;
 
 use super::piprm::RingPedersenProof;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ZkSetupParameters {
     pub(crate) N: BigNumber,
-    s: BigNumber,
-    t: BigNumber,
+    pub(crate) s: BigNumber,
+    pub(crate) t: BigNumber,
     proof: ZkSetupParametersProof,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ZkSetupParametersProof {
     pimod: PaillierBlumModulusProof,
     piprm: RingPedersenProof,
