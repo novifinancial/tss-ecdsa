@@ -16,7 +16,7 @@ use std::convert::TryInto;
 // Must be a multiple of 8
 const LAMBDA: usize = 16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RingPedersenProof {
     pub(crate) N: BigNumber,
     pub(crate) s: BigNumber,

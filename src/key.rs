@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::zkp::setup::ZkSetupParameters;
+use crate::zkp::{pienc::PaillierEncryptionInRangeProof, setup::ZkSetupParameters};
 use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
 use generic_array::GenericArray;
 use integer_encoding::VarInt;
@@ -12,6 +12,7 @@ use k256::elliptic_curve::group::ff::PrimeField;
 use k256::elliptic_curve::Curve;
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
+use utils::random_bn_in_range;
 
 use super::*;
 use crate::errors::{InternalError, Result};
@@ -55,7 +56,7 @@ impl KeygenPrivate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeygenPublic {
     pub(crate) pk: EncryptionKey,
     pub(crate) X: k256::ProjectivePoint,
@@ -121,7 +122,10 @@ impl KeygenPublic {
         offset += proof_len;
         let params = ZkSetupParameters::from_slice(&buf[offset..offset + buf_proof_len])?;
 
-        Ok(Self { pk, X, params })
+        let ret = Self { pk, X, params };
+        ret.verify()
+            .then(|| ret)
+            .ok_or(InternalError::FailedToVerifyProof)
     }
 }
 
@@ -131,15 +135,13 @@ pub struct KeyShare {
 }
 
 impl KeyShare {
-    const ELL: usize = 384;
-    const EPSILON: usize = 384;
-
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, prime_bits: usize) -> Self {
         let p = BigNumber::safe_prime(prime_bits);
         let q = BigNumber::safe_prime(prime_bits);
         Self::from_safe_primes(rng, &p, &q)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("Keygen"))]
     pub fn from_safe_primes<R: RngCore + CryptoRng>(
         _rng: &mut R,
         p: &BigNumber,
@@ -169,20 +171,40 @@ impl KeyShare {
     /// Produces local shares k and gamma, along with their encrypted
     /// components K = enc(k) and G = enc(gamma).
     ///
+    /// The public_keys parameter corresponds to a KeygenPublic for
+    /// each of the other parties. Party i should be left as `None`
     #[cfg_attr(feature = "flame_it", flame)]
-    pub fn round_one(&self) -> round_one::Pair {
-        let k = BigNumber::random(&(BigNumber::one() << Self::ELL));
-        let gamma = BigNumber::random(&(BigNumber::one() << Self::ELL));
+    pub fn round_one(&self, public_keys: &[Option<KeygenPublic>]) -> Result<round_one::Pair> {
+        let mut rng = rand::rngs::OsRng;
+        let k = random_bn_in_range(&mut rng, ELL);
+        let gamma = random_bn_in_range(&mut rng, ELL);
 
-        let (K, _) = self.public.pk.encrypt(&k.to_bytes(), None).unwrap();
+        let (K, rho) = self.public.pk.encrypt(&k.to_bytes(), None).unwrap();
         let (G, _) = self.public.pk.encrypt(&gamma.to_bytes(), None).unwrap();
-        Pair {
-            private: round_one::Private { k, gamma },
-            public: round_one::Public {
-                K: Ciphertext(K),
-                G: Ciphertext(G),
-            },
-        }
+        public_keys
+            .iter()
+            .map(|v| {
+                v.as_ref()
+                    .map(|key| {
+                        PaillierEncryptionInRangeProof::prove(
+                            &key.params,
+                            self.public.pk.n(),
+                            &Ciphertext(K.clone()),
+                            &k,
+                            &rho,
+                        )
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|v| Pair {
+                private: round_one::Private { k, gamma },
+                public: round_one::Public {
+                    K: Ciphertext(K),
+                    G: Ciphertext(G),
+                    encryption_proofs: v,
+                },
+            })
     }
 
     /// Needs to be run once per party j != i
@@ -196,15 +218,12 @@ impl KeyShare {
         r1_priv_i: &round_one::Private,
         r1_pub_j: &round_one::Public,
     ) -> round_two::Pair {
-        // Verify KeygenPublic
-        assert!(kg_pub_j.verify());
-
         // Picking betas as elements of [+- 2^384] here is like sampling them from the distribution
         // [1, 2^256], which is akin to 2^{ell + epsilon} where ell = epsilon = 384. Note that
         // we need q/2^epsilon to be negligible.
-        // FIXME: allow for betas to also be negative
-        let beta = BigNumber::random(&(BigNumber::one() << (Self::ELL + Self::EPSILON)));
-        let beta_hat = BigNumber::random(&(BigNumber::one() << (Self::ELL + Self::EPSILON)));
+        let mut rng = rand::rngs::OsRng;
+        let beta = random_bn_in_range(&mut rng, ELL + EPSILON);
+        let beta_hat = random_bn_in_range(&mut rng, ELL + EPSILON);
 
         let (beta_ciphertext, _) = kg_pub_j.pk.encrypt(beta.to_bytes(), None).unwrap();
         let (beta_hat_ciphertext, _) = kg_pub_j.pk.encrypt(beta_hat.to_bytes(), None).unwrap();

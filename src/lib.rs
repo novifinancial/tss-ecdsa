@@ -26,6 +26,23 @@ pub mod zkp;
 #[cfg(test)]
 mod tests;
 
+// A note on sampling from +- 2^L, and mod N computations:
+// In the paper (https://eprint.iacr.org/2021/060.pdf), ranges
+// are sampled as from being positive/negative 2^L and (mod N)
+// is taken to mean {-N/2, ..., N/2}. However, for the
+// sake of convenience, we sample everything from
+// + 2^{L+1} and use mod N to represent {0, ..., N-1}.
+
+///////////////
+// Constants //
+// ========= //
+///////////////
+
+/// From the paper, needs to be 3 * security parameter
+const ELL: usize = 384;
+/// From the paper, needs to be 3 * security parameter
+const EPSILON: usize = 384;
+
 pub struct Pair<S, T> {
     pub(crate) private: S,
     pub(crate) public: T,
@@ -35,6 +52,8 @@ pub struct Pair<S, T> {
 struct Ciphertext(libpaillier::Ciphertext);
 
 pub mod round_one {
+    use crate::zkp::pienc::PaillierEncryptionInRangeProof;
+
     use super::BigNumber;
     use super::Ciphertext;
 
@@ -48,6 +67,7 @@ pub mod round_one {
     pub struct Public {
         pub(crate) K: Ciphertext,
         pub(crate) G: Ciphertext,
+        pub(crate) encryption_proofs: Vec<Option<PaillierEncryptionInRangeProof>>,
     }
 
     pub type Pair = super::Pair<Private, Public>;

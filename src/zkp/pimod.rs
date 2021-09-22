@@ -15,7 +15,7 @@ use merlin::Transcript;
 // right now it is too slow if it large
 static LAMBDA: usize = 2;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PaillierBlumModulusProof {
     pub(crate) N: BigNumber,
     w: BigNumber,
@@ -23,7 +23,7 @@ pub struct PaillierBlumModulusProof {
     elements: Vec<PaillierBlumModulusProofElements>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PaillierBlumModulusProofElements {
     x: BigNumber,
     a: usize,

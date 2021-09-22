@@ -26,6 +26,8 @@ pub enum InternalError {
     Serialization,
     /// Could not successfully generate proof
     CouldNotGenerateProof,
+    /// Failed to verify proof
+    FailedToVerifyProof,
 }
 
 impl Debug for InternalError {
@@ -39,6 +41,7 @@ impl Debug for InternalError {
             Self::CouldNotInvertBigNumber => f.debug_tuple("CouldNotInvertBigNumber").finish(),
             Self::Serialization => f.debug_tuple("CouldNotDeserialize").finish(),
             Self::CouldNotGenerateProof => f.debug_tuple("CouldNotGenerateProof").finish(),
+            Self::FailedToVerifyProof => f.debug_tuple("FailedToVerifyProof").finish(),
         }
     }
 }
