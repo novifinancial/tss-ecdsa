@@ -123,11 +123,9 @@ impl KeygenPublic {
         let params = ZkSetupParameters::from_slice(&buf[offset..offset + buf_proof_len])?;
 
         let ret = Self { pk, X, params };
-
-        match ret.verify() {
-            true => Ok(ret),
-            false => Err(InternalError::FailedToVerifyProof),
-        }
+        ret.verify()
+            .then(|| ret)
+            .ok_or(InternalError::FailedToVerifyProof)
     }
 }
 
@@ -183,30 +181,30 @@ impl KeyShare {
 
         let (K, rho) = self.public.pk.encrypt(&k.to_bytes(), None).unwrap();
         let (G, _) = self.public.pk.encrypt(&gamma.to_bytes(), None).unwrap();
-
-        let mut encryption_proofs = vec![];
-        for optional_key in public_keys {
-            let optional_proof = match optional_key {
-                Some(key) => Some(PaillierEncryptionInRangeProof::prove(
-                    &key.params,
-                    self.public.pk.n(),
-                    &Ciphertext(K.clone()),
-                    &k,
-                    &rho,
-                )?),
-                None => None,
-            };
-            encryption_proofs.push(optional_proof);
-        }
-
-        Ok(Pair {
-            private: round_one::Private { k, gamma },
-            public: round_one::Public {
-                K: Ciphertext(K),
-                G: Ciphertext(G),
-                encryption_proofs,
-            },
-        })
+        public_keys
+            .iter()
+            .map(|v| {
+                v.as_ref()
+                    .map(|key| {
+                        PaillierEncryptionInRangeProof::prove(
+                            &key.params,
+                            self.public.pk.n(),
+                            &Ciphertext(K.clone()),
+                            &k,
+                            &rho,
+                        )
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|v| Pair {
+                private: round_one::Private { k, gamma },
+                public: round_one::Public {
+                    K: Ciphertext(K),
+                    G: Ciphertext(G),
+                    encryption_proofs: v,
+                },
+            })
     }
 
     /// Needs to be run once per party j != i

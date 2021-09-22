@@ -6,6 +6,8 @@
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 
+const MAX_ITER: usize = 50_000usize;
+
 /// Computes a^e (mod n)
 #[cfg_attr(feature = "flame_it", flame("utils"))]
 pub(crate) fn modpow(a: &BigNumber, e: &BigNumber, n: &BigNumber) -> BigNumber {
@@ -22,12 +24,13 @@ pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(
     _rng: &mut R,
     n: &BigNumber,
 ) -> BigNumber {
-    loop {
+    for _ in 0..MAX_ITER {
         let bn = BigNumber::random(n);
         if bn != BigNumber::zero() {
             return bn;
         }
     }
+    BigNumber::zero()
 }
 
 #[cfg(test)]
