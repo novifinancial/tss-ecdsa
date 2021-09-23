@@ -107,7 +107,7 @@ fn run_test() -> Result<()> {
     let mut signing_key = k256::Scalar::zero();
     let mut verifying_key = k256::ProjectivePoint::identity();
     for i in 0..NUM_PARTIES {
-        signing_key += crate::key::bn_to_scalar(&keyshares[i].private.x).unwrap();
+        signing_key += crate::utils::bn_to_scalar(&keyshares[i].private.x).unwrap();
         verifying_key += keyshares[i].public.X;
     }
 

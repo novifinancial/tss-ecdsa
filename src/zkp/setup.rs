@@ -9,29 +9,20 @@
 
 use crate::errors::*;
 use crate::serialization::*;
-use crate::zkp::pimod::PaillierBlumModulusProof;
+use crate::zkp::pimod::{PiModInput, PiModProof, PiModSecret};
 use libpaillier::unknown_order::BigNumber;
 
-use super::piprm::RingPedersenProof;
+use super::piprm::{PiPrmInput, PiPrmSecret, PiRpmProof};
+use crate::zkp::Proof;
+use rand::{CryptoRng, RngCore};
 
 #[derive(Debug, Clone)]
 pub struct ZkSetupParameters {
     pub(crate) N: BigNumber,
     pub(crate) s: BigNumber,
     pub(crate) t: BigNumber,
-    proof: ZkSetupParametersProof,
-}
-
-#[derive(Debug, Clone)]
-struct ZkSetupParametersProof {
-    pimod: PaillierBlumModulusProof,
-    piprm: RingPedersenProof,
-}
-
-impl ZkSetupParametersProof {
-    fn verify(&self) -> bool {
-        self.pimod.verify() && self.piprm.verify()
-    }
+    pimod: PiModProof,
+    piprm: PiRpmProof,
 }
 
 impl ZkSetupParameters {
@@ -40,7 +31,8 @@ impl ZkSetupParameters {
             serialize(&self.N.to_bytes(), 2)?,
             serialize(&self.s.to_bytes(), 2)?,
             serialize(&self.t.to_bytes(), 2)?,
-            serialize(&self.proof.to_bytes()?, 2)?,
+            serialize(&self.pimod.to_bytes(), 2)?,
+            serialize(&self.piprm.to_bytes()?, 2)?,
         ]
         .concat();
         Ok(result)
@@ -50,7 +42,8 @@ impl ZkSetupParameters {
         let (n_bytes, input) = tokenize(input, 2)?;
         let (s_bytes, input) = tokenize(&input, 2)?;
         let (t_bytes, input) = tokenize(&input, 2)?;
-        let (proof_bytes, input) = tokenize(&input, 2)?;
+        let (pimod_bytes, input) = tokenize(&input, 2)?;
+        let (piprm_bytes, input) = tokenize(&input, 2)?;
         if !input.is_empty() {
             // Should not be encountering any more bytes
             return Err(InternalError::Serialization);
@@ -59,70 +52,60 @@ impl ZkSetupParameters {
         let N = BigNumber::from_slice(n_bytes);
         let s = BigNumber::from_slice(s_bytes);
         let t = BigNumber::from_slice(t_bytes);
-        let proof = ZkSetupParametersProof::from_slice(&proof_bytes)?;
+        let pimod = PiModProof::from_slice(pimod_bytes)?;
+        let piprm = PiRpmProof::from_slice(&piprm_bytes)?;
 
-        Ok(ZkSetupParameters { N, s, t, proof })
-    }
-}
-
-impl ZkSetupParametersProof {
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.pimod.to_bytes(), 2)?,
-            serialize(&self.piprm.to_bytes()?, 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    pub fn from_slice(input: &[u8]) -> Result<Self> {
-        let (pimod_bytes, input) = tokenize(input, 2)?;
-        let (piprm_bytes, input) = tokenize(&input, 2)?;
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let pimod = PaillierBlumModulusProof::from_slice(pimod_bytes)?;
-        let piprm = RingPedersenProof::from_slice(&piprm_bytes)?;
-
-        Ok(Self { pimod, piprm })
+        Ok(ZkSetupParameters {
+            N,
+            s,
+            t,
+            pimod,
+            piprm,
+        })
     }
 }
 
 impl ZkSetupParameters {
     #[allow(unused)]
-    pub(crate) fn gen() -> Result<Self> {
+    pub(crate) fn gen<R: RngCore + CryptoRng>(rng: &mut R) -> Result<Self> {
         let p = crate::get_random_safe_prime_512();
         let q = crate::get_random_safe_prime_512();
         let N = &p * &q;
-        Self::gen_from_primes(&N, &p, &q)
+        Self::gen_from_primes(rng, &N, &p, &q)
     }
 
-    pub(crate) fn gen_from_primes(N: &BigNumber, p: &BigNumber, q: &BigNumber) -> Result<Self> {
+    pub(crate) fn gen_from_primes<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        N: &BigNumber,
+        p: &BigNumber,
+        q: &BigNumber,
+    ) -> Result<Self> {
         let phi_n = (p - 1) * (q - 1);
         let tau = BigNumber::random(N);
         let lambda = BigNumber::random(&phi_n);
         let t = tau.modpow(&BigNumber::from(2), N);
         let s = t.modpow(&lambda, N);
 
-        let pimod = PaillierBlumModulusProof::prove(N, p, q)?;
-        let piprm = RingPedersenProof::gen(N, &phi_n, &s, &t, &lambda)?;
-
-        let proof = ZkSetupParametersProof { pimod, piprm };
+        let pimod = PiModProof::prove(rng, &PiModInput::new(N), &PiModSecret::new(p, q))?;
+        let piprm = PiRpmProof::prove(
+            rng,
+            &PiPrmInput::new(N, &s, &t),
+            &PiPrmSecret::new(&lambda, &phi_n),
+        )?;
 
         Ok(Self {
             N: N.clone(),
             s,
             t,
-            proof,
+            pimod,
+            piprm,
         })
     }
 
     pub(crate) fn verify(&self) -> bool {
-        self.proof.verify()
-            && self.N == self.proof.pimod.N
-            && self.s == self.proof.piprm.s
-            && self.t == self.proof.piprm.t
+        self.pimod.verify(&PiModInput::new(&self.N))
+            && self
+                .piprm
+                .verify(&PiPrmInput::new(&self.N, &self.s, &self.t))
     }
 }
