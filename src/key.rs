@@ -3,35 +3,17 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::zkp::{pienc::PaillierEncryptionInRangeProof, setup::ZkSetupParameters};
+use crate::zkp::{pienc::PiEncProof, setup::ZkSetupParameters, Proof};
 use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
-use generic_array::GenericArray;
 use integer_encoding::VarInt;
-use k256::elliptic_curve::bigint::Encoding;
-use k256::elliptic_curve::group::ff::PrimeField;
-use k256::elliptic_curve::Curve;
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
-use utils::random_bn_in_range;
+use utils::{bn_to_scalar, k256_order, random_bn_in_range};
 
 use super::*;
 use crate::errors::{InternalError, Result};
 
 const COMPRESSED: bool = true;
-
-pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
-    // Take (mod q)
-    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
-    let order = BigNumber::from_slice(&order_bytes);
-
-    let x_modded = x % order;
-
-    let bytes = x_modded.to_bytes();
-
-    let mut slice = vec![0u8; 32 - bytes.len()];
-    slice.extend_from_slice(&bytes);
-    k256::Scalar::from_repr(GenericArray::clone_from_slice(&slice))
-}
 
 #[derive(Debug)]
 pub struct KeygenPrivate {
@@ -143,7 +125,7 @@ impl KeyShare {
 
     #[cfg_attr(feature = "flame_it", flame("Keygen"))]
     pub fn from_safe_primes<R: RngCore + CryptoRng>(
-        _rng: &mut R,
+        rng: &mut R,
         p: &BigNumber,
         q: &BigNumber,
     ) -> Self {
@@ -155,7 +137,7 @@ impl KeyShare {
         let g = k256::ProjectivePoint::generator();
         let X = g * bn_to_scalar(&x).unwrap(); // public component
 
-        let params = ZkSetupParameters::gen_from_primes(&(p * q), p, q).unwrap();
+        let params = ZkSetupParameters::gen_from_primes(rng, &(p * q), p, q).unwrap();
 
         // Zk setup parameters should verify
         assert!(params.verify());
@@ -186,12 +168,14 @@ impl KeyShare {
             .map(|v| {
                 v.as_ref()
                     .map(|key| {
-                        PaillierEncryptionInRangeProof::prove(
-                            &key.params,
-                            self.public.pk.n(),
-                            &Ciphertext(K.clone()),
-                            &k,
-                            &rho,
+                        PiEncProof::prove(
+                            &mut rng,
+                            &crate::zkp::pienc::PiEncInput::new(
+                                &key.params,
+                                self.public.pk.n(),
+                                &Ciphertext(K.clone()),
+                            ),
+                            &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
                         )
                     })
                     .transpose()
@@ -321,12 +305,6 @@ impl KeyShare {
             },
         }
     }
-}
-
-fn k256_order() -> BigNumber {
-    // Set order = q
-    let order_bytes: [u8; 32] = k256::Secp256k1::ORDER.to_be_bytes();
-    BigNumber::from_slice(&order_bytes)
 }
 
 #[cfg(test)]

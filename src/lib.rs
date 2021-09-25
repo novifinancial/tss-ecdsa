@@ -52,7 +52,7 @@ pub struct Pair<S, T> {
 struct Ciphertext(libpaillier::Ciphertext);
 
 pub mod round_one {
-    use crate::zkp::pienc::PaillierEncryptionInRangeProof;
+    use crate::zkp::pienc::PiEncProof;
 
     use super::BigNumber;
     use super::Ciphertext;
@@ -67,7 +67,7 @@ pub mod round_one {
     pub struct Public {
         pub(crate) K: Ciphertext,
         pub(crate) G: Ciphertext,
-        pub(crate) encryption_proofs: Vec<Option<PaillierEncryptionInRangeProof>>,
+        pub(crate) encryption_proofs: Vec<Option<PiEncProof>>,
     }
 
     pub type Pair = super::Pair<Private, Public>;
@@ -157,7 +157,7 @@ impl PresignRecord {
     pub fn sign(&self, d: sha2::Sha256) -> (k256::Scalar, k256::Scalar) {
         let r = Self::x_from_point(&self.R);
         let m = k256::Scalar::from_digest(d);
-        let s = key::bn_to_scalar(&self.k).unwrap() * m + r * self.chi;
+        let s = utils::bn_to_scalar(&self.k).unwrap() * m + r * self.chi;
 
         (r, s)
     }
