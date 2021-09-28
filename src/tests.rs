@@ -15,6 +15,8 @@ fn run_test() -> Result<()> {
     let safe_primes = get_safe_primes();
 
     // Keygen
+    // FIXME: Keygen needs to be done in multiple rounds, according
+    // to the protocol
     println!("Beginning Keygen");
     let mut keyshares = vec![];
     for i in 0..NUM_PARTIES {
@@ -35,9 +37,10 @@ fn run_test() -> Result<()> {
         let mut public_keys_without_self = public_keys.clone();
         public_keys_without_self[i] = None;
 
-        let Pair { private, public } = k.round_one(&public_keys_without_self)?;
+        let PairWithMultiplePublics { private, publics } =
+            k.round_one(&public_keys_without_self)?;
         r1_privs.push(private);
-        r1_pubs.push(public);
+        r1_pubs.push(publics);
     }
 
     // Round 2, each step needs to be done for each j != i
@@ -56,7 +59,11 @@ fn run_test() -> Result<()> {
             let Pair {
                 private: r2_priv_ij,
                 public: r2_pub_ij,
-            } = keyshares[i].round_two(&keyshares[j].public, &r1_privs[i], &r1_pubs[j]);
+            } = keyshares[i].round_two(
+                &keyshares[j].public,
+                &r1_privs[i],
+                &r1_pubs[j][i].as_ref().unwrap(),
+            );
             r2_priv_i.push(Some(r2_priv_ij));
             r2_pub_i.push(Some(r2_pub_ij));
         }
@@ -77,22 +84,44 @@ fn run_test() -> Result<()> {
             result
         };
 
-        let Pair {
+        // Produce the vector of public keys, where the i'th entry is None
+        let mut public_keys_without_self = public_keys.clone();
+        public_keys_without_self[i] = None;
+
+        let PairWithMultiplePublics {
             private: r3_priv,
-            public: r3_pub,
-        } = keyshares[i].round_three(&r1_privs[i], &r2_privs[i][..], &r2_pubs_cross[..]);
+            publics,
+        } = keyshares[i].round_three(
+            &public_keys_without_self,
+            &r1_privs[i],
+            &r2_privs[i][..],
+            &r2_pubs_cross[..],
+        );
         r3_privs.push(r3_priv);
-        r3_pubs.push(r3_pub);
+        r3_pubs.push(publics);
     }
 
     // Presign Finish
     println!("Beginning Presign Finish");
 
     let mut presign_records = vec![];
-    for private in r3_privs.into_iter() {
+    for (i, private) in r3_privs.into_iter().enumerate() {
+        let r3_pubs_cross = {
+            let mut result = vec![];
+            for j in 0..NUM_PARTIES {
+                match &r3_pubs[j][i] {
+                    Some(v) => {
+                        result.push(v.clone());
+                    }
+                    None => {}
+                }
+            }
+            result
+        };
+
         let record_i: PresignRecord = RecordPair {
             private,
-            public: r3_pubs.clone(),
+            public: r3_pubs_cross,
         }
         .into();
         presign_records.push(record_i);

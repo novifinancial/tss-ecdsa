@@ -20,7 +20,7 @@ use super::Proof;
 const LAMBDA: usize = 16;
 
 #[derive(Debug, Clone)]
-pub struct PiRpmProof {
+pub struct PiPrmProof {
     a_values: [BigNumber; LAMBDA],
     e_values: [bool; LAMBDA],
     z_values: [BigNumber; LAMBDA],
@@ -56,7 +56,7 @@ impl PiPrmSecret {
     }
 }
 
-impl Proof for PiRpmProof {
+impl Proof for PiPrmProof {
     type CommonInput = PiPrmInput;
     type ProverSecret = PiPrmSecret;
 
@@ -137,10 +137,8 @@ impl Proof for PiRpmProof {
 
         true
     }
-}
 
-impl PiRpmProof {
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+    fn to_bytes(&self) -> Result<Vec<u8>> {
         let result = [
             serialize_vec(&self.a_values)?,
             self.e_values.to_vec().iter().map(|&x| x as u8).collect(),
@@ -150,8 +148,8 @@ impl PiRpmProof {
         Ok(result)
     }
 
-    pub fn from_slice(input: &[u8]) -> Result<Self> {
-        let (a_values, input) = tokenize_vec(input)?;
+    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let (a_values, input) = tokenize_vec(buf.as_ref())?;
 
         if input.len() < LAMBDA {
             // Not enough bytes remaining to deserialize properly
@@ -218,7 +216,7 @@ mod tests {
     use super::*;
     use rand::rngs::OsRng;
 
-    fn random_ring_pedersen_proof() -> Result<(PiPrmInput, PiRpmProof)> {
+    fn random_ring_pedersen_proof() -> Result<(PiPrmInput, PiPrmProof)> {
         let p = crate::get_random_safe_prime_512();
         let q = crate::get_random_safe_prime_512();
         let N = &p * &q;
@@ -230,7 +228,7 @@ mod tests {
 
         let mut rng = OsRng;
         let input = PiPrmInput::new(&N, &s, &t);
-        let proof = PiRpmProof::prove(&mut rng, &input, &PiPrmSecret::new(&lambda, &phi_n))?;
+        let proof = PiPrmProof::prove(&mut rng, &input, &PiPrmSecret::new(&lambda, &phi_n))?;
         Ok((input, proof))
     }
 
@@ -245,7 +243,7 @@ mod tests {
     fn test_ring_pedersen_proof_roundtrip() -> Result<()> {
         let (_, proof) = random_ring_pedersen_proof()?;
         let buf = proof.to_bytes()?;
-        let orig = PiRpmProof::from_slice(&buf).unwrap();
+        let orig = PiPrmProof::from_slice(&buf).unwrap();
         assert_eq!(buf, orig.to_bytes()?);
         Ok(())
     }

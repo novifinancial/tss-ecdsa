@@ -3,6 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::errors::*;
+use ecdsa::elliptic_curve::group::GroupEncoding;
 use generic_array::GenericArray;
 use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
@@ -12,6 +14,14 @@ use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 
 const MAX_ITER: usize = 50_000usize;
+
+// Convert bytes into a k256::ProjectivePoint
+pub(crate) fn point_from_bytes(bytes: &[u8]) -> Result<k256::ProjectivePoint> {
+    Option::from(k256::ProjectivePoint::from_bytes(
+        generic_array::GenericArray::from_slice(bytes),
+    ))
+    .ok_or(InternalError::Serialization)
+}
 
 /// Computes a^e (mod n)
 #[cfg_attr(feature = "flame_it", flame("utils"))]
