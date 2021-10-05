@@ -48,6 +48,11 @@ pub struct Pair<S, T> {
     pub(crate) public: T,
 }
 
+pub struct PairWithMultiplePublics<S, T> {
+    pub private: S,
+    pub publics: Vec<Option<T>>,
+}
+
 #[derive(Clone, Debug)]
 struct Ciphertext(libpaillier::Ciphertext);
 
@@ -60,22 +65,28 @@ pub mod round_one {
     #[derive(Debug)]
     pub struct Private {
         pub(crate) k: BigNumber,
+        pub(crate) rho: BigNumber,
         pub(crate) gamma: BigNumber,
+        pub(crate) nu: BigNumber,
+        pub(crate) G: Ciphertext, // Technically can be public but is only one per party
+        pub(crate) K: Ciphertext, // Technically can be public but is only one per party
     }
 
     #[derive(Debug)]
     pub struct Public {
         pub(crate) K: Ciphertext,
         pub(crate) G: Ciphertext,
-        pub(crate) encryption_proofs: Vec<Option<PiEncProof>>,
+        pub(crate) proof: PiEncProof,
     }
 
-    pub type Pair = super::Pair<Private, Public>;
+    pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
 }
 
 pub mod round_two {
     use super::BigNumber;
     use super::Ciphertext;
+    use crate::zkp::piaffg::PiAffgProof;
+    use crate::zkp::pilog::PiLogProof;
 
     #[derive(Clone)]
     pub struct Private {
@@ -90,6 +101,9 @@ pub mod round_two {
         pub(crate) F: Ciphertext,
         pub(crate) F_hat: Ciphertext,
         pub(crate) Gamma: k256::ProjectivePoint,
+        pub(crate) psi: PiAffgProof,
+        pub(crate) psi_hat: PiAffgProof,
+        pub(crate) psi_prime: PiLogProof,
     }
 
     pub type Pair = super::Pair<Private, Public>;
@@ -97,20 +111,24 @@ pub mod round_two {
 
 pub mod round_three {
     use super::BigNumber;
+    use crate::zkp::pilog::PiLogProof;
 
     pub struct Private {
         pub(crate) k: BigNumber,
         pub(crate) chi: k256::Scalar,
         pub(crate) Gamma: k256::ProjectivePoint,
+        pub(crate) delta: k256::Scalar,
+        pub(crate) Delta: k256::ProjectivePoint,
     }
 
     #[derive(Clone)]
     pub struct Public {
         pub(crate) delta: k256::Scalar,
         pub(crate) Delta: k256::ProjectivePoint,
+        pub(crate) psi_double_prime: PiLogProof,
     }
 
-    pub type Pair = super::Pair<Private, Public>;
+    pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
 }
 
 pub type PresignCouncil = Vec<round_three::Public>;
@@ -125,8 +143,8 @@ pub struct PresignRecord {
 
 impl From<RecordPair> for PresignRecord {
     fn from(RecordPair { private, public }: RecordPair) -> Self {
-        let mut delta = k256::Scalar::zero();
-        let mut Delta = k256::ProjectivePoint::identity();
+        let mut delta = private.delta;
+        let mut Delta = private.Delta;
         for p in public {
             delta += &p.delta;
             Delta += p.Delta;

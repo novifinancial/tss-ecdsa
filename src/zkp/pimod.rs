@@ -167,6 +167,64 @@ impl Proof for PiModProof {
 
         true
     }
+
+    fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut offset = 0;
+
+        let buf_w = self.w.to_bytes();
+        let buf_w_len = buf_w.len();
+
+        out.extend(
+            (0..buf_w_len.required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        offset += buf_w_len.encode_var(&mut out[offset..]);
+        out.extend(buf_w);
+        offset += buf_w_len;
+
+        out.extend(
+            (0..self.elements.len().required_space())
+                .map(|_| 0u8)
+                .collect::<Vec<u8>>(),
+        );
+        let _ = self.elements.len().encode_var(&mut out[offset..]);
+
+        for element in self.elements.iter() {
+            out.extend(element.to_bytes());
+        }
+
+        Ok(out)
+    }
+
+    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
+        let mut offset = 0;
+        let buf = buf.as_ref();
+
+        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += _w_len;
+        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
+        offset += buf_w_len;
+
+        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
+            .map(Ok)
+            .unwrap_or(Err(InternalError::Serialization))?;
+        offset += num_elements_len;
+
+        let mut elements = Vec::new();
+        for _ in 0..num_elements {
+            let serialized = buf[offset..].to_vec();
+            let element = PiModProofElements::from_slice(serialized)
+                .map(Ok)
+                .unwrap_or(Err(InternalError::Serialization))?;
+            offset += element.to_bytes().len();
+            elements.push(element);
+        }
+        Ok(Self { w, elements })
+    }
 }
 
 // Compute regular mod
@@ -462,66 +520,6 @@ impl PiModProofElements {
     }
 }
 
-impl PiModProof {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-
-        let buf_w = self.w.to_bytes();
-        let buf_w_len = buf_w.len();
-
-        out.extend(
-            (0..buf_w_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_w_len.encode_var(&mut out[offset..]);
-        out.extend(buf_w);
-        offset += buf_w_len;
-
-        out.extend(
-            (0..self.elements.len().required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = self.elements.len().encode_var(&mut out[offset..]);
-
-        for element in self.elements.iter() {
-            out.extend(element.to_bytes());
-        }
-
-        out
-    }
-
-    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-
-        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _w_len;
-        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
-        offset += buf_w_len;
-
-        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += num_elements_len;
-
-        let mut elements = Vec::new();
-        for _ in 0..num_elements {
-            let serialized = buf[offset..].to_vec();
-            let element = PiModProofElements::from_slice(serialized)
-                .map(Ok)
-                .unwrap_or(Err(InternalError::Serialization))?;
-            offset += element.to_bytes().len();
-            elements.push(element);
-        }
-        Ok(Self { w, elements })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -708,8 +706,8 @@ mod tests {
             .collect::<Vec<PiModProofElements>>();
 
         let pbmp = PiModProof { w, elements };
-        let buf = pbmp.to_bytes();
+        let buf = pbmp.to_bytes().unwrap();
         let roundtrip_pbmp = PiModProof::from_slice(buf.clone()).unwrap();
-        assert_eq!(buf, roundtrip_pbmp.to_bytes());
+        assert_eq!(buf, roundtrip_pbmp.to_bytes().unwrap());
     }
 }

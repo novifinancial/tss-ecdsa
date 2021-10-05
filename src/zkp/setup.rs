@@ -12,7 +12,7 @@ use crate::serialization::*;
 use crate::zkp::pimod::{PiModInput, PiModProof, PiModSecret};
 use libpaillier::unknown_order::BigNumber;
 
-use super::piprm::{PiPrmInput, PiPrmSecret, PiRpmProof};
+use super::piprm::{PiPrmInput, PiPrmProof, PiPrmSecret};
 use crate::zkp::Proof;
 use rand::{CryptoRng, RngCore};
 
@@ -22,7 +22,7 @@ pub struct ZkSetupParameters {
     pub(crate) s: BigNumber,
     pub(crate) t: BigNumber,
     pimod: PiModProof,
-    piprm: PiRpmProof,
+    piprm: PiPrmProof,
 }
 
 impl ZkSetupParameters {
@@ -31,7 +31,7 @@ impl ZkSetupParameters {
             serialize(&self.N.to_bytes(), 2)?,
             serialize(&self.s.to_bytes(), 2)?,
             serialize(&self.t.to_bytes(), 2)?,
-            serialize(&self.pimod.to_bytes(), 2)?,
+            serialize(&self.pimod.to_bytes()?, 2)?,
             serialize(&self.piprm.to_bytes()?, 2)?,
         ]
         .concat();
@@ -53,7 +53,7 @@ impl ZkSetupParameters {
         let s = BigNumber::from_slice(s_bytes);
         let t = BigNumber::from_slice(t_bytes);
         let pimod = PiModProof::from_slice(pimod_bytes)?;
-        let piprm = PiRpmProof::from_slice(&piprm_bytes)?;
+        let piprm = PiPrmProof::from_slice(&piprm_bytes)?;
 
         Ok(ZkSetupParameters {
             N,
@@ -87,7 +87,7 @@ impl ZkSetupParameters {
         let s = t.modpow(&lambda, N);
 
         let pimod = PiModProof::prove(rng, &PiModInput::new(N), &PiModSecret::new(p, q))?;
-        let piprm = PiRpmProof::prove(
+        let piprm = PiPrmProof::prove(
             rng,
             &PiPrmInput::new(N, &s, &t),
             &PiPrmSecret::new(&lambda, &phi_n),
