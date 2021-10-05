@@ -47,7 +47,7 @@ use serialization::*;
 const ELL: usize = 384;
 /// From the paper, needs to be 3 * security parameter
 const EPSILON: usize = 384;
-/// Conenience constant
+/// Convenience constant
 const COMPRESSED: bool = true;
 
 pub struct Pair<S, T> {
