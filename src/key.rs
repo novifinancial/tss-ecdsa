@@ -12,15 +12,13 @@ use crate::zkp::{
 };
 use crate::PairWithMultiplePublics;
 use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
-use integer_encoding::VarInt;
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 use utils::{bn_to_scalar, k256_order, random_bn_in_range};
 
+use super::serialization::*;
 use super::*;
 use crate::errors::{InternalError, Result};
-
-const COMPRESSED: bool = true;
 
 #[derive(Debug)]
 pub struct KeygenPrivate {
@@ -29,18 +27,24 @@ pub struct KeygenPrivate {
 }
 
 impl KeygenPrivate {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = self.sk.to_bytes();
-        out.extend(self.x.to_bytes());
-        out
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let result = [
+            serialize(&self.sk.to_bytes(), 2)?,
+            serialize(&self.x.to_bytes(), 2)?,
+        ]
+        .concat();
+        Ok(result)
     }
 
-    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let sk =
-            DecryptionKey::from_bytes(buf.clone()).map_err(|_| InternalError::Serialization)?;
-        // TODO (ladi) We should upstream a serialized_size on libpaillier Key
-        let sk_buf = sk.to_bytes();
-        let x = BigNumber::from_slice(&buf.as_ref()[sk_buf.len()..]);
+    pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
+        let (sk_bytes, input) = tokenize(input.as_ref(), 2)?;
+        let (x_bytes, input) = tokenize(&input, 2)?;
+        if !input.is_empty() {
+            // Should not be encountering any more bytes
+            return Err(InternalError::Serialization);
+        }
+        let sk = DecryptionKey::from_bytes(sk_bytes).map_err(|_| InternalError::Serialization)?;
+        let x = BigNumber::from_slice(x_bytes);
         Ok(Self { sk, x })
     }
 }
@@ -57,59 +61,30 @@ impl KeygenPublic {
         self.pk.n() == &self.params.N && self.params.verify()
     }
 
-    pub fn to_bytes(self) -> Result<Vec<u8>> {
-        let buf_enc = self.pk.to_bytes();
-        let buf_enc_len = buf_enc.len();
-
-        let mut offset = 0;
-        let mut out = (0..buf_enc_len.required_space())
-            .map(|_| 0u8)
-            .collect::<Vec<u8>>();
-        offset += buf_enc_len.encode_var(&mut out[offset..]);
-        out.extend(buf_enc);
-        offset += buf_enc_len;
-
-        let encoded_point = self.X.to_encoded_point(COMPRESSED);
-        out.extend(encoded_point.to_bytes().to_vec());
-        offset += 33;
-
-        let buf_params = self.params.to_bytes()?;
-        let buf_params_len = buf_params.len();
-        out.extend(
-            (0..buf_params_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = buf_params_len.encode_var(&mut out[offset..]);
-        out.extend(buf_params);
-
-        Ok(out)
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let result = [
+            serialize(&self.pk.to_bytes(), 2)?,
+            serialize(&self.X.to_encoded_point(COMPRESSED).to_bytes(), 2)?,
+            serialize(&self.params.to_bytes()?, 2)?,
+        ]
+        .concat();
+        Ok(result)
     }
 
-    pub fn from_slice<B: AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-        let (buf_pk_len, pk_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-
-        offset += pk_len;
-        let pk = EncryptionKey::from_bytes(&buf[offset..offset + buf_pk_len])
-            .map_err(|_| InternalError::Serialization)?;
-        offset += buf_pk_len;
-
-        let X_opt: Option<_> = k256::ProjectivePoint::from_bytes(
-            generic_array::GenericArray::from_slice(&buf[offset..offset + 33]),
-        )
-        .into();
+    pub fn from_slice<B: AsRef<[u8]>>(input: B) -> Result<Self> {
+        let (pk_bytes, input) = tokenize(input.as_ref(), 2)?;
+        let (X_bytes, input) = tokenize(&input, 2)?;
+        let (params_bytes, input) = tokenize(&input, 2)?;
+        if !input.is_empty() {
+            // Should not be encountering any more bytes
+            return Err(InternalError::Serialization);
+        }
+        let pk = EncryptionKey::from_bytes(pk_bytes).map_err(|_| InternalError::Serialization)?;
+        let X_opt: Option<_> =
+            k256::ProjectivePoint::from_bytes(generic_array::GenericArray::from_slice(&X_bytes))
+                .into();
         let X = X_opt.map(Ok).unwrap_or(Err(InternalError::Serialization))?;
-        offset += 33;
-
-        let (buf_proof_len, proof_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += proof_len;
-        let params = ZkSetupParameters::from_slice(&buf[offset..offset + buf_proof_len])?;
+        let params = ZkSetupParameters::from_slice(&params_bytes)?;
 
         let ret = Self { pk, X, params };
         ret.verify()
@@ -424,19 +399,19 @@ mod tests {
                 &POOL_OF_PRIMES[2 * i],
                 &POOL_OF_PRIMES[2 * i + 1],
             );
-            let private_bytes = private.to_bytes();
+            let private_bytes = private.to_bytes()?;
             let X = public.X.clone();
             let pk = public.pk.clone();
             let public_bytes = public.to_bytes()?;
 
             let roundtrip_private = KeygenPrivate::from_slice(private_bytes.clone())
                 .expect("Roundtrip deserialization should succeed. qed.");
-            assert_eq!(private_bytes, roundtrip_private.to_bytes());
+            assert_eq!(private_bytes, roundtrip_private.to_bytes()?);
             let roundtrip_public = KeygenPublic::from_slice(&public_bytes)
                 .expect("Roundtrip deserialization should succeed. qed.");
             assert_eq!(X, roundtrip_public.X);
             assert_eq!(pk.to_bytes(), roundtrip_public.pk.to_bytes());
-            //assert_eq!(public_bytes, roundtrip_public.to_bytes());
+            assert_eq!(public_bytes, roundtrip_public.to_bytes()?);
         }
         Ok(())
     }

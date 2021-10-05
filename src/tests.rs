@@ -25,8 +25,22 @@ fn run_test() -> Result<()> {
         keyshares.push(keyshare);
     }
 
-    let public_keys: Vec<Option<KeygenPublic>> =
-        keyshares.iter().map(|x| Some(x.public.clone())).collect();
+    let public_keys: Vec<Option<KeygenPublic>> = keyshares
+        .iter()
+        .map(|x| {
+            let priv_bytes = x.private.to_bytes().unwrap();
+            let priv_roundtrip = crate::key::KeygenPrivate::from_slice(&priv_bytes).unwrap();
+            let priv_roundtrip_bytes = priv_roundtrip.to_bytes().unwrap();
+            assert_eq!(priv_bytes, priv_roundtrip_bytes);
+
+            let pub_bytes = x.public.to_bytes().unwrap();
+            let pub_roundtrip = crate::key::KeygenPublic::from_slice(&pub_bytes).unwrap();
+            let pub_roundtrip_bytes = pub_roundtrip.to_bytes().unwrap();
+            assert_eq!(pub_bytes, pub_roundtrip_bytes);
+
+            Some(x.public.clone())
+        })
+        .collect();
 
     // Round 1
     println!("Beginning Round 1");
@@ -39,6 +53,12 @@ fn run_test() -> Result<()> {
 
         let PairWithMultiplePublics { private, publics } =
             k.round_one(&public_keys_without_self)?;
+
+        let priv_bytes = private.to_bytes().unwrap();
+        let priv_roundtrip = crate::round_one::Private::from_slice(&priv_bytes).unwrap();
+        let priv_roundtrip_bytes = priv_roundtrip.to_bytes().unwrap();
+        assert_eq!(priv_bytes, priv_roundtrip_bytes);
+
         r1_privs.push(private);
         r1_pubs.push(publics);
     }
@@ -56,6 +76,15 @@ fn run_test() -> Result<()> {
                 r2_pub_i.push(None);
                 continue;
             }
+
+            let pub_bytes = r1_pubs[j][i]
+                .as_ref()
+                .map(|v| v.to_bytes().unwrap())
+                .unwrap();
+            let pub_roundtrip = crate::round_one::Public::from_slice(&pub_bytes).unwrap();
+            let pub_roundtrip_bytes = pub_roundtrip.to_bytes().unwrap();
+            assert_eq!(pub_bytes, pub_roundtrip_bytes);
+
             let Pair {
                 private: r2_priv_ij,
                 public: r2_pub_ij,
@@ -64,6 +93,17 @@ fn run_test() -> Result<()> {
                 &r1_privs[i],
                 &r1_pubs[j][i].as_ref().unwrap(),
             );
+
+            let priv_bytes = r2_priv_ij.to_bytes().unwrap();
+            let priv_roundtrip = crate::round_two::Private::from_slice(&priv_bytes).unwrap();
+            let priv_roundtrip_bytes = priv_roundtrip.to_bytes().unwrap();
+            assert_eq!(priv_bytes, priv_roundtrip_bytes);
+
+            let pub_bytes = r2_pub_ij.to_bytes().unwrap();
+            let pub_roundtrip = crate::round_two::Public::from_slice(&pub_bytes).unwrap();
+            let pub_roundtrip_bytes = pub_roundtrip.to_bytes().unwrap();
+            assert_eq!(pub_bytes, pub_roundtrip_bytes);
+
             r2_priv_i.push(Some(r2_priv_ij));
             r2_pub_i.push(Some(r2_pub_ij));
         }
@@ -97,6 +137,12 @@ fn run_test() -> Result<()> {
             &r2_privs[i][..],
             &r2_pubs_cross[..],
         );
+
+        let priv_bytes = r3_priv.to_bytes().unwrap();
+        let priv_roundtrip = crate::round_three::Private::from_slice(&priv_bytes).unwrap();
+        let priv_roundtrip_bytes = priv_roundtrip.to_bytes().unwrap();
+        assert_eq!(priv_bytes, priv_roundtrip_bytes);
+
         r3_privs.push(r3_priv);
         r3_pubs.push(publics);
     }
@@ -111,6 +157,12 @@ fn run_test() -> Result<()> {
             for j in 0..NUM_PARTIES {
                 match &r3_pubs[j][i] {
                     Some(v) => {
+                        let pub_bytes = v.to_bytes().unwrap();
+                        let pub_roundtrip =
+                            crate::round_three::Public::from_slice(&pub_bytes).unwrap();
+                        let pub_roundtrip_bytes = pub_roundtrip.to_bytes().unwrap();
+                        assert_eq!(pub_bytes, pub_roundtrip_bytes);
+
                         result.push(v.clone());
                     }
                     None => {}
