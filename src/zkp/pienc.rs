@@ -291,6 +291,11 @@ mod tests {
 
         let proof = PiEncProof::prove(&mut rng, &input, &PiEncSecret { k, rho })?;
 
+        let proof_bytes = proof.to_bytes()?;
+        let roundtrip_proof = PiEncProof::from_slice(&proof_bytes)?;
+        let roundtrip_proof_bytes = roundtrip_proof.to_bytes()?;
+        assert_eq!(proof_bytes, roundtrip_proof_bytes);
+
         Ok((input, proof))
     }
 
