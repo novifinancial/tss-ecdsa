@@ -12,6 +12,7 @@ use crate::zkp::{
 };
 use crate::PairWithMultiplePublics;
 use ecdsa::elliptic_curve::sec1::ToEncodedPoint;
+use k256::ProjectivePoint;
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 use utils::{bn_to_scalar, k256_order, random_bn_in_range};
@@ -93,40 +94,63 @@ impl KeygenPublic {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct KeyInit {
+    x: BigNumber,
+    pub(crate) X: ProjectivePoint,
+}
+
+impl KeyInit {
+    pub fn new<R: RngCore + CryptoRng>(_rng: &mut R) -> Self {
+        let order = k256_order();
+        let x = BigNumber::random(&order);
+        let g = k256::ProjectivePoint::generator();
+        let X = g * bn_to_scalar(&x).unwrap(); // public component
+        Self { x, X }
+    }
+}
+
 pub struct KeyShare {
-    pub(crate) public: KeygenPublic,
-    pub(crate) private: KeygenPrivate,
+    pub public: KeygenPublic,
+    pub private: KeygenPrivate,
 }
 
 impl KeyShare {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, prime_bits: usize) -> Self {
         let p = BigNumber::safe_prime(prime_bits);
         let q = BigNumber::safe_prime(prime_bits);
-        Self::from_safe_primes(rng, &p, &q)
+        let key_init = KeyInit::new(rng);
+        Self::from_safe_primes_and_init(rng, &p, &q, &key_init)
+    }
+
+    pub fn from(public: KeygenPublic, private: KeygenPrivate) -> Self {
+        Self { public, private }
     }
 
     #[cfg_attr(feature = "flame_it", flame("Keygen"))]
-    pub fn from_safe_primes<R: RngCore + CryptoRng>(
+    pub fn from_safe_primes_and_init<R: RngCore + CryptoRng>(
         rng: &mut R,
         p: &BigNumber,
         q: &BigNumber,
+        key_init: &KeyInit,
     ) -> Self {
         let sk = DecryptionKey::with_safe_primes_unchecked(p, q).unwrap();
         let pk = EncryptionKey::from(&sk);
-
-        let order = k256_order();
-        let x = BigNumber::random(&order);
-        let g = k256::ProjectivePoint::generator();
-        let X = g * bn_to_scalar(&x).unwrap(); // public component
-
         let params = ZkSetupParameters::gen_from_primes(rng, &(p * q), p, q).unwrap();
 
         // Zk setup parameters should verify
         assert!(params.verify());
 
         Self {
-            private: KeygenPrivate { sk, x },
-            public: KeygenPublic { pk, X, params },
+            private: KeygenPrivate {
+                sk,
+                x: key_init.x.clone(),
+            },
+            public: KeygenPublic {
+                pk,
+                X: key_init.X,
+                params,
+            },
         }
     }
 
@@ -394,10 +418,12 @@ mod tests {
         let mut rng = OsRng;
         let NUM_PARTIES = 3;
         for i in 0..NUM_PARTIES {
-            let KeyShare { private, public } = KeyShare::from_safe_primes(
+            let key_init = KeyInit::new(&mut rng);
+            let KeyShare { private, public } = KeyShare::from_safe_primes_and_init(
                 &mut rng,
                 &POOL_OF_PRIMES[2 * i],
                 &POOL_OF_PRIMES[2 * i + 1],
+                &key_init,
             );
             let private_bytes = private.to_bytes()?;
             let X = public.X.clone();

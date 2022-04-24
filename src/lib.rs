@@ -21,6 +21,8 @@ use crate::zkp::Proof;
 
 pub mod errors;
 pub mod key;
+pub mod messages;
+pub mod protocol;
 pub mod serialization;
 mod utils;
 pub mod zkp;
@@ -285,7 +287,7 @@ pub mod round_three {
                 serialize(&self.k.to_bytes(), 2)?,
                 serialize(&self.chi.to_bytes(), 2)?,
                 serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-                serialize(&self.delta.to_bytes().to_vec(), 2)?,
+                serialize(&self.delta.to_bytes(), 2)?,
                 serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
             ]
             .concat();
@@ -333,7 +335,7 @@ pub mod round_three {
     impl Public {
         pub fn to_bytes(&self) -> Result<Vec<u8>> {
             let result = [
-                serialize(&self.delta.to_bytes().to_vec(), 2)?,
+                serialize(&self.delta.to_bytes(), 2)?,
                 serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
                 serialize(&self.psi_double_prime.to_bytes()?, 2)?,
             ]
@@ -422,7 +424,8 @@ lazy_static::lazy_static! {
     static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes();
 }
 
-pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
+/// FIXME: Should only expose this for testing purposes
+pub fn get_safe_primes() -> Vec<BigNumber> {
     let file_contents = std::fs::read_to_string("src/safe_primes_512.txt").unwrap();
     let mut safe_primes_str: Vec<&str> = file_contents.split('\n').collect();
     safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
@@ -433,6 +436,8 @@ pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
     safe_primes
 }
 
+/// We sample safe primes that are 512 bits long. This comes from the security parameter
+/// setting of κ = 128, and safe primes being of length 4κ (Figure 6, Round 1 of the CGGMP'21 paper)
 pub(crate) fn get_random_safe_prime_512() -> BigNumber {
     // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
     POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()
