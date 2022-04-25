@@ -4,6 +4,9 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::time::{Duration, Instant};
 
+/// Used to pre-generate 512-bit safe primes, so that they can
+/// be stored in a text file to make testing this library faster
+
 fn main() {
     let mut file = OpenOptions::new()
         .write(true)
@@ -32,5 +35,4 @@ fn main() {
         writeln!(file, "{}", hex::encode(prime.to_bytes())).unwrap();
         file.flush().unwrap();
     }
-    println!("Hello World!");
 }

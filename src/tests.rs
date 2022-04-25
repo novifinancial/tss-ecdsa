@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::errors::*;
-use crate::key::KeygenPublic;
+use crate::key::{KeyInit, KeygenPublic};
 use ecdsa::signature::DigestVerifier;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
@@ -20,8 +20,13 @@ fn run_test() -> Result<()> {
     println!("Beginning Keygen");
     let mut keyshares = vec![];
     for i in 0..NUM_PARTIES {
-        let keyshare =
-            key::KeyShare::from_safe_primes(&mut rng, &safe_primes[2 * i], &safe_primes[2 * i + 1]);
+        let key_init = KeyInit::new(&mut rng);
+        let keyshare = key::KeyShare::from_safe_primes_and_init(
+            &mut rng,
+            &safe_primes[2 * i],
+            &safe_primes[2 * i + 1],
+            &key_init,
+        );
         keyshares.push(keyshare);
     }
 

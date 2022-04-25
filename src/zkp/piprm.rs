@@ -17,7 +17,7 @@ use super::Proof;
 
 // Soundness parameter lambda: FIXME: This needs to be 128
 // Must be a multiple of 8
-const LAMBDA: usize = 16;
+const LAMBDA: usize = 128;
 
 #[derive(Debug, Clone)]
 pub struct PiPrmProof {
