@@ -3,10 +3,12 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 14 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 15 of https://eprint.iacr.org/2021/060.pdf
 //!
-//! Proves that the plaintext of the Paillier ciphertext K_i lies within the range
-//! [1, 2^{ELL+EPSILON+1}]
+//! Proves that the prover knows an x and y where X = g^x and y is the
+//! plaintext of a Paillier ciphertext
+//!
+//! FIXME: need to make a distinction here between L and L'
 
 use super::Proof;
 use crate::serialization::*;
@@ -15,7 +17,7 @@ use crate::utils::{
     random_bn_in_z_star,
 };
 use crate::zkp::setup::ZkSetupParameters;
-use crate::{errors::*, ELL, EPSILON};
+use crate::{errors::*, ELL, ELL_PRIME, EPSILON};
 use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -113,8 +115,8 @@ impl Proof for PiAffgProof {
     ) -> Result<Self> {
         // Sample alpha from 2^{ELL + EPSILON}
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
-        // Sample beta from 2^{ELL + EPSILON}.
-        let beta = random_bn_in_range(rng, ELL + EPSILON);
+        // Sample beta from 2^{ELL_PRIME + EPSILON}.
+        let beta = random_bn_in_range(rng, ELL_PRIME + EPSILON);
 
         let r = random_bn_in_z_star(rng, &input.N0);
         let r_y = random_bn_in_z_star(rng, &input.N1);
@@ -220,10 +222,7 @@ impl Proof for PiAffgProof {
             w_y,
         };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
@@ -334,8 +333,9 @@ impl Proof for PiAffgProof {
 
         // Do range check
 
-        let bound = BigNumber::one() << (ELL + EPSILON + 1);
-        if self.z1 > bound || self.z2 > bound {
+        let ell_bound = BigNumber::one() << (ELL + EPSILON + 1);
+        let ell_prime_bound = BigNumber::one() << (ELL_PRIME + EPSILON + 1);
+        if self.z1 > ell_bound || self.z2 > ell_prime_bound {
             return false;
         }
 
@@ -432,7 +432,7 @@ mod tests {
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_affg_proof(k_range: usize) -> Result<(PiAffgInput, PiAffgProof)> {
+    fn random_paillier_affg_proof(k_range: usize) -> Result<()> {
         let mut rng = OsRng;
 
         let p0 = crate::get_random_safe_prime_512();
@@ -472,14 +472,19 @@ mod tests {
         let input = PiAffgInput::new(&setup_params, &g, &N0, &N1, &C, &D, &Y, &X);
         let proof = PiAffgProof::prove(&mut rng, &input, &PiAffgSecret::new(&x, &y, &rho, &rho_y))?;
 
-        Ok((input, proof))
+        match proof.verify(&input) {
+            true => Ok(()),
+            false => Err(InternalError::CouldNotGenerateProof),
+        }
     }
 
     #[test]
     fn test_paillier_affg_proof() -> Result<()> {
+        // FIXME: extend to supporting ELL_PRIME different from ELL
+
         // Sampling x,y in the range 2^ELL should always succeed
-        let (input, proof) = random_paillier_affg_proof(ELL)?;
-        assert!(proof.verify(&input));
+        let result = random_paillier_affg_proof(ELL);
+        assert!(result.is_ok());
 
         // Sampling x,y in the range 2^{ELL + EPSILON + 100} should (usually) fail
         let result = random_paillier_affg_proof(ELL + EPSILON + 100);

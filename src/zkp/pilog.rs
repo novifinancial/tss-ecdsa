@@ -157,10 +157,7 @@ impl Proof for PiLogProof {
             z3,
         };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiLogProof"))]
@@ -308,7 +305,7 @@ mod tests {
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_log_proof(k_range: usize) -> Result<(PiLogInput, PiLogProof)> {
+    fn random_paillier_log_proof(k_range: usize) -> Result<()> {
         let mut rng = OsRng;
 
         let p0 = crate::get_random_safe_prime_512();
@@ -331,14 +328,17 @@ mod tests {
 
         let proof = PiLogProof::prove(&mut rng, &input, &PiLogSecret::new(&x, &rho))?;
 
-        Ok((input, proof))
+        match proof.verify(&input) {
+            true => Ok(()),
+            false => Err(InternalError::CouldNotGenerateProof),
+        }
     }
 
     #[test]
     fn test_paillier_log_proof() -> Result<()> {
         // Sampling x in the range 2^ELL should always succeed
-        let (input, proof) = random_paillier_log_proof(ELL)?;
-        assert!(proof.verify(&input));
+        let result = random_paillier_log_proof(ELL);
+        assert!(result.is_ok());
 
         // Sampling x in the range 2^{ELL + EPSILON + 100} should (usually) fail
         let result = random_paillier_log_proof(ELL + EPSILON + 100);

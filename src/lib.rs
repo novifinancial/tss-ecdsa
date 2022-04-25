@@ -11,6 +11,9 @@ extern crate flame;
 #[macro_use]
 extern crate flamer;
 
+#[macro_use]
+extern crate anyhow;
+
 use ecdsa::hazmat::FromDigest;
 use generic_array::GenericArray;
 use k256::elliptic_curve::group::GroupEncoding;
@@ -21,12 +24,14 @@ use crate::zkp::Proof;
 
 pub mod errors;
 pub mod key;
+pub mod messages;
+pub mod protocol;
 pub mod serialization;
 mod utils;
 pub mod zkp;
 
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;
 
 use errors::{InternalError, Result};
 use serialization::*;
@@ -43,8 +48,10 @@ use serialization::*;
 // ========= //
 ///////////////
 
-/// From the paper, needs to be 3 * security parameter
+/// From the paper, ELL needs to be 3 * security parameter
 const ELL: usize = 384;
+/// FIXME: setting to be equal to ELL for now
+const ELL_PRIME: usize = 384;
 /// From the paper, needs to be 3 * security parameter
 const EPSILON: usize = 384;
 /// Convenience constant
@@ -65,7 +72,7 @@ struct Ciphertext(libpaillier::Ciphertext);
 
 pub mod round_one {
     use super::*;
-    use crate::zkp::pienc::PiEncProof;
+    use crate::zkp::{pienc::PiEncProof, setup::ZkSetupParameters};
 
     #[derive(Debug)]
     pub struct Private {
@@ -150,6 +157,24 @@ pub mod round_one {
             let proof = PiEncProof::from_slice(&proof_bytes)?;
             Ok(Self { K, G, proof })
         }
+
+        /// Verify M(vrfy, Π^enc_i, (ssid, j), (I_ε, K_j), ψ_{i,j}) = 1
+        /// setup_params should be the receiving party's setup parameters
+        /// the modulus N should be the sending party's modulus N
+        pub fn verify(
+            &self,
+            receiver_setup_params: &ZkSetupParameters,
+            sender_modulus: &BigNumber,
+        ) -> Result<()> {
+            let input =
+                crate::zkp::pienc::PiEncInput::new(receiver_setup_params, &sender_modulus, &self.K);
+
+            if !self.proof.verify(&input) {
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            Ok(())
+        }
     }
 
     pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
@@ -162,6 +187,7 @@ pub mod round_two {
 
     use super::*;
 
+    use crate::key::KeygenPublic;
     use crate::zkp::piaffg::PiAffgProof;
     use crate::zkp::pilog::PiLogProof;
 
@@ -257,6 +283,34 @@ pub mod round_two {
                 psi_prime,
             })
         }
+
+        pub fn verify(
+            &self,
+            sender_keygen_public: &KeygenPublic,
+            receiver_keygen_public: &KeygenPublic,
+            receiver_r1_public: &round_one::Public,
+        ) -> Result<()> {
+            let g = k256::ProjectivePoint::generator();
+
+            let input = crate::zkp::piaffg::PiAffgInput::new(
+                &receiver_keygen_public.params,
+                &g,
+                &receiver_keygen_public.pk.n(),
+                &sender_keygen_public.pk.n(),
+                &receiver_r1_public.K.0,
+                &self.D.0,
+                &self.F.0,
+                &self.Gamma,
+            );
+
+            if !self.psi.verify(&input) {
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            // FIXME: Verify the remaining two proofs!
+
+            Ok(())
+        }
     }
 
     pub type Pair = super::Pair<Private, Public>;
@@ -285,7 +339,7 @@ pub mod round_three {
                 serialize(&self.k.to_bytes(), 2)?,
                 serialize(&self.chi.to_bytes(), 2)?,
                 serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-                serialize(&self.delta.to_bytes().to_vec(), 2)?,
+                serialize(&self.delta.to_bytes(), 2)?,
                 serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
             ]
             .concat();
@@ -333,7 +387,7 @@ pub mod round_three {
     impl Public {
         pub fn to_bytes(&self) -> Result<Vec<u8>> {
             let result = [
-                serialize(&self.delta.to_bytes().to_vec(), 2)?,
+                serialize(&self.delta.to_bytes(), 2)?,
                 serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
                 serialize(&self.psi_double_prime.to_bytes()?, 2)?,
             ]
@@ -364,6 +418,13 @@ pub mod round_three {
     }
 
     pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
+
+    /// Used to bundle the inputs passed to round_three() together
+    pub struct RoundThreeInput {
+        pub(crate) keygen_public: key::KeygenPublic,
+        pub(crate) r2_private: round_two::Private,
+        pub(crate) r2_public: round_two::Public,
+    }
 }
 
 pub type PresignCouncil = Vec<round_three::Public>;
@@ -422,7 +483,8 @@ lazy_static::lazy_static! {
     static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes();
 }
 
-pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
+/// FIXME: Should only expose this for testing purposes
+pub fn get_safe_primes() -> Vec<BigNumber> {
     let file_contents = std::fs::read_to_string("src/safe_primes_512.txt").unwrap();
     let mut safe_primes_str: Vec<&str> = file_contents.split('\n').collect();
     safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
@@ -433,6 +495,8 @@ pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
     safe_primes
 }
 
+/// We sample safe primes that are 512 bits long. This comes from the security parameter
+/// setting of κ = 128, and safe primes being of length 4κ (Figure 6, Round 1 of the CGGMP'21 paper)
 pub(crate) fn get_random_safe_prime_512() -> BigNumber {
     // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
     POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()

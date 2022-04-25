@@ -12,6 +12,7 @@ default = []
 flame_it = ["flame", "flamer"]
 
 [dependencies]
+anyhow = "1"
 k256 = { version = "0.9.6", features = ["arithmetic", "digest", "sha256", "ecdsa-core"] }
 libpaillier = "0.2.1"
 bincode = "1.3"
@@ -21,6 +22,7 @@ hex = "0.4.2"
 rand = "0.8"
 sha2 = "0.9"
 generic-array = "0.14.4"
+regex = "1.5"
 merlin = "3"
 integer-encoding = "3.0.2"
 lazy_static = "1.4"
@@ -30,3 +32,9 @@ flamer = { version = "0.3", optional = true }
 
 
 [dev-dependencies]
+criterion = "0.3"
+
+
+[[bench]]
+harness = false
+name = "modpow"

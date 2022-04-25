@@ -15,8 +15,9 @@ use std::convert::TryInto;
 
 use super::Proof;
 
-// Soundness parameter lambda: FIXME: This needs to be 128
+// Soundness parameter lambda.
 // Must be a multiple of 8
+// FIXME: determine what this value needs to be
 const LAMBDA: usize = 16;
 
 #[derive(Debug, Clone)]
@@ -98,10 +99,7 @@ impl Proof for PiPrmProof {
                 .map_err(|_| InternalError::Serialization)?,
         };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]

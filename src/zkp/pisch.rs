@@ -83,9 +83,6 @@ impl Proof for PiSchProof {
         let z = &alpha + &e * &secret.x;
 
         let proof = Self { alpha, A, e, z };
-
-        proof.verify(input);
-
         Ok(proof)
     }
 
