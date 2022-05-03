@@ -87,6 +87,15 @@ impl Proof for PiLogProof {
         // Sample alpha from 2^{ELL + EPSILON}
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
 
+        println!(
+            "prover, alpha: {}, N0: {}, C: {}, X: {}, gamma: {}",
+            &hex::encode(&alpha.to_bytes())[0..4],
+            &hex::encode(&input.N0.to_bytes())[0..4],
+            &hex::encode(&input.C.to_bytes())[0..4],
+            &hex::encode(&input.X.to_bytes())[0..4],
+            &hex::encode(&secret.x.to_bytes())[0..4],
+        );
+
         let r = random_bn_in_z_star(rng, &input.N0);
 
         // range = 2^{ELL+1} * N_hat
@@ -157,10 +166,7 @@ impl Proof for PiLogProof {
             z3,
         };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiLogProof"))]
@@ -193,12 +199,21 @@ impl Proof for PiLogProof {
 
         if e != self.e {
             // Fiat-Shamir consistency check failed
+            println!("FS consistency check failed");
             return false;
         }
 
         let N0_squared = &input.N0 * &input.N0;
 
         // Do equality checks
+
+        println!(
+            "verifier, alpha: {}, N0: {}, C: {}, X: {}",
+            &hex::encode(&self.alpha.to_bytes())[0..4],
+            &hex::encode(&input.N0.to_bytes())[0..4],
+            &hex::encode(&input.C.to_bytes())[0..4],
+            &hex::encode(&input.X.to_bytes())[0..4],
+        );
 
         let eq_check_1 = {
             let a = modpow(&(BigNumber::one() + &input.N0), &self.z1, &N0_squared);
@@ -210,6 +225,7 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_1 {
+            println!("eq1 check failed");
             return false;
         }
 
@@ -219,6 +235,7 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_2 {
+            println!("eq2 check failed");
             return false;
         }
 
@@ -233,6 +250,7 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_3 {
+            println!("eq3 check failed");
             return false;
         }
 
@@ -240,6 +258,7 @@ impl Proof for PiLogProof {
 
         let bound = BigNumber::one() << (ELL + EPSILON + 1);
         if self.z1 > bound {
+            println!("bound check failed");
             return false;
         }
 
@@ -308,7 +327,7 @@ mod tests {
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_log_proof(k_range: usize) -> Result<(PiLogInput, PiLogProof)> {
+    fn random_paillier_log_proof(k_range: usize) -> Result<()> {
         let mut rng = OsRng;
 
         let p0 = crate::get_random_safe_prime_512();
@@ -331,14 +350,17 @@ mod tests {
 
         let proof = PiLogProof::prove(&mut rng, &input, &PiLogSecret::new(&x, &rho))?;
 
-        Ok((input, proof))
+        match proof.verify(&input) {
+            true => Ok(()),
+            false => Err(InternalError::CouldNotGenerateProof),
+        }
     }
 
     #[test]
     fn test_paillier_log_proof() -> Result<()> {
         // Sampling x in the range 2^ELL should always succeed
-        let (input, proof) = random_paillier_log_proof(ELL)?;
-        assert!(proof.verify(&input));
+        let result = random_paillier_log_proof(ELL);
+        assert!(result.is_ok());
 
         // Sampling x in the range 2^{ELL + EPSILON + 100} should (usually) fail
         let result = random_paillier_log_proof(ELL + EPSILON + 100);

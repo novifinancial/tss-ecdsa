@@ -30,5 +30,4 @@ elliptic-curve = "0.10.6"
 flame = { version = "0.2.2", optional = true }
 flamer = { version = "0.3", optional = true }
 
-
 [dev-dependencies]

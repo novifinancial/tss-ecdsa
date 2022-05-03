@@ -135,10 +135,7 @@ impl Proof for PiEncProof {
             z3,
         };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
@@ -164,6 +161,7 @@ impl Proof for PiEncProof {
         let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
         if e != self.e {
             // Fiat-Shamir didn't verify
+            println!("Failing on Fiat-shamir verification!");
             return false;
         }
 
@@ -182,6 +180,7 @@ impl Proof for PiEncProof {
         };
         if !eq_check_1 {
             // Failed equality check 1
+            println!("Failing on equality check 1");
             return false;
         }
 
@@ -197,6 +196,7 @@ impl Proof for PiEncProof {
         };
         if !eq_check_2 {
             // Failed equality check 2
+            println!("Failing on equality check 2");
             return false;
         }
 
@@ -267,9 +267,7 @@ mod tests {
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_encryption_in_range_proof(
-        k_range: usize,
-    ) -> Result<(PiEncInput, PiEncProof)> {
+    fn random_paillier_encryption_in_range_proof(k_range: usize) -> Result<()> {
         let mut rng = OsRng;
 
         let p = crate::get_random_safe_prime_512();
@@ -296,14 +294,17 @@ mod tests {
         let roundtrip_proof_bytes = roundtrip_proof.to_bytes()?;
         assert_eq!(proof_bytes, roundtrip_proof_bytes);
 
-        Ok((input, proof))
+        match proof.verify(&input) {
+            true => Ok(()),
+            false => Err(InternalError::CouldNotGenerateProof),
+        }
     }
 
     #[test]
     fn test_paillier_encryption_in_range_proof() -> Result<()> {
         // Sampling k in the range 2^ELL should always succeed
-        let (input, proof) = random_paillier_encryption_in_range_proof(ELL)?;
-        assert!(proof.verify(&input));
+        let result = random_paillier_encryption_in_range_proof(ELL);
+        assert!(result.is_ok());
 
         // Sampling k in the range 2^{ELL + EPSILON + 100} should (usually) fail
         let result = random_paillier_encryption_in_range_proof(ELL + EPSILON + 100);

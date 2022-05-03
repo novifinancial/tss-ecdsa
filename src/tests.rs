@@ -5,21 +5,25 @@ use crate::key::{KeyInit, KeygenPublic};
 use ecdsa::signature::DigestVerifier;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
+use crate::protocol::ParticipantIdentifier;
+use std::collections::HashMap;
 
 /// Executes a test between two parties i and j
-#[cfg_attr(feature = "flame_it", flame)]
 #[test]
 fn run_test() -> Result<()> {
     let mut rng = OsRng;
     let NUM_PARTIES = 3;
     let safe_primes = get_safe_primes();
 
+    let participants = vec![ParticipantIdentifier::random(&mut rng); NUM_PARTIES];
+
     // Keygen
     // FIXME: Keygen needs to be done in multiple rounds, according
     // to the protocol
     println!("Beginning Keygen");
-    let mut keyshares = vec![];
-    for i in 0..NUM_PARTIES {
+    let mut keyshares = HashMap::new();
+    let mut i = 0;
+    for id in participants {
         let key_init = KeyInit::new(&mut rng);
         let keyshare = key::KeyShare::from_safe_primes_and_init(
             &mut rng,
@@ -27,12 +31,13 @@ fn run_test() -> Result<()> {
             &safe_primes[2 * i + 1],
             &key_init,
         );
-        keyshares.push(keyshare);
+        i += 1;
+        keyshares.insert(id, keyshare);
     }
 
-    let public_keys: Vec<Option<KeygenPublic>> = keyshares
+    let public_keys: HashMap<ParticipantIdentifier, KeygenPublic> = keyshares
         .iter()
-        .map(|x| {
+        .map(|(id, x)| {
             let priv_bytes = x.private.to_bytes().unwrap();
             let priv_roundtrip = crate::key::KeygenPrivate::from_slice(&priv_bytes).unwrap();
             let priv_roundtrip_bytes = priv_roundtrip.to_bytes().unwrap();
@@ -43,7 +48,7 @@ fn run_test() -> Result<()> {
             let pub_roundtrip_bytes = pub_roundtrip.to_bytes().unwrap();
             assert_eq!(pub_bytes, pub_roundtrip_bytes);
 
-            Some(x.public.clone())
+            (id.clone(), x.public.clone())
         })
         .collect();
 
@@ -219,9 +224,6 @@ fn run_test() -> Result<()> {
     let sig = ecdsa::Signature::from_scalars(r_scalars[0], s_acc).unwrap();
 
     assert!(vk.verify_digest(hasher, &sig).is_ok());
-
-    #[cfg(feature = "flame_it")]
-    flame::dump_html(&mut std::fs::File::create("stats/flame-graph.html").unwrap()).unwrap();
 
     Ok(())
 }

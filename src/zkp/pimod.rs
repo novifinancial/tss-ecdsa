@@ -105,10 +105,7 @@ impl Proof for PiModProof {
 
         let proof = Self { w, elements };
 
-        match proof.verify(input) {
-            true => Ok(proof),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        Ok(proof)
     }
 
     #[cfg_attr(feature = "flame_it", flame("PaillierBlumModulusProof"))]
