@@ -11,6 +11,9 @@ extern crate flame;
 #[macro_use]
 extern crate flamer;
 
+#[macro_use]
+extern crate anyhow;
+
 use ecdsa::hazmat::FromDigest;
 use generic_array::GenericArray;
 use k256::elliptic_curve::group::GroupEncoding;
@@ -27,8 +30,8 @@ pub mod serialization;
 mod utils;
 pub mod zkp;
 
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;
 
 use errors::{InternalError, Result};
 use serialization::*;
@@ -45,8 +48,10 @@ use serialization::*;
 // ========= //
 ///////////////
 
-/// From the paper, needs to be 3 * security parameter
+/// From the paper, ELL needs to be 3 * security parameter
 const ELL: usize = 384;
+/// FIXME: setting to be equal to ELL for now
+const ELL_PRIME: usize = 384;
 /// From the paper, needs to be 3 * security parameter
 const EPSILON: usize = 384;
 /// Convenience constant
@@ -67,7 +72,7 @@ struct Ciphertext(libpaillier::Ciphertext);
 
 pub mod round_one {
     use super::*;
-    use crate::zkp::pienc::PiEncProof;
+    use crate::zkp::{pienc::PiEncProof, setup::ZkSetupParameters};
 
     #[derive(Debug)]
     pub struct Private {
@@ -152,6 +157,24 @@ pub mod round_one {
             let proof = PiEncProof::from_slice(&proof_bytes)?;
             Ok(Self { K, G, proof })
         }
+
+        /// Verify M(vrfy, Π^enc_i, (ssid, j), (I_ε, K_j), ψ_{i,j}) = 1
+        /// setup_params should be the receiving party's setup parameters
+        /// the modulus N should be the sending party's modulus N
+        pub fn verify(
+            &self,
+            receiver_setup_params: &ZkSetupParameters,
+            sender_modulus: &BigNumber,
+        ) -> Result<()> {
+            let input =
+                crate::zkp::pienc::PiEncInput::new(receiver_setup_params, sender_modulus, &self.K);
+
+            if !self.proof.verify(&input) {
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            Ok(())
+        }
     }
 
     pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
@@ -164,8 +187,9 @@ pub mod round_two {
 
     use super::*;
 
-    use crate::zkp::piaffg::PiAffgProof;
-    use crate::zkp::pilog::PiLogProof;
+    use crate::key::KeygenPublic;
+    use crate::zkp::piaffg::{PiAffgInput, PiAffgProof};
+    use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
     #[derive(Clone)]
     pub struct Private {
@@ -259,6 +283,61 @@ pub mod round_two {
                 psi_prime,
             })
         }
+
+        pub fn verify(
+            &self,
+            receiver_keygen_public: &KeygenPublic,
+            sender_keygen_public: &KeygenPublic,
+            receiver_r1_private: &round_one::Private,
+            sender_r1_public: &round_one::Public,
+        ) -> Result<()> {
+            let g = k256::ProjectivePoint::generator();
+
+            // Verify the psi proof
+            let psi_input = PiAffgInput::new(
+                &receiver_keygen_public.params,
+                &g,
+                receiver_keygen_public.pk.n(),
+                sender_keygen_public.pk.n(),
+                &receiver_r1_private.K.0,
+                &self.D.0,
+                &self.F.0,
+                &self.Gamma,
+            );
+            if !self.psi.verify(&psi_input) {
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            // Verify the psi_hat proof
+            let psi_hat_input = PiAffgInput::new(
+                &receiver_keygen_public.params,
+                &g,
+                receiver_keygen_public.pk.n(),
+                sender_keygen_public.pk.n(),
+                &receiver_r1_private.K.0,
+                &self.D_hat.0,
+                &self.F_hat.0,
+                &sender_keygen_public.X,
+            );
+            if !self.psi_hat.verify(&psi_hat_input) {
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            // Verify the psi_prime proof
+            let psi_prime_input = PiLogInput::new(
+                &receiver_keygen_public.params,
+                &g,
+                sender_keygen_public.pk.n(),
+                &sender_r1_public.G.0,
+                &self.Gamma,
+            );
+            if !self.psi_prime.verify(&psi_prime_input) {
+                println!("Failed to verify psi_prime proof");
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            Ok(())
+        }
     }
 
     pub type Pair = super::Pair<Private, Public>;
@@ -271,7 +350,8 @@ pub mod round_three {
 
     use super::*;
 
-    use crate::zkp::pilog::PiLogProof;
+    use crate::key::KeygenPublic;
+    use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
     pub struct Private {
         pub(crate) k: BigNumber,
@@ -330,6 +410,8 @@ pub mod round_three {
         pub(crate) delta: Scalar,
         pub(crate) Delta: ProjectivePoint,
         pub(crate) psi_double_prime: PiLogProof,
+        /// Gamma value included for convenience
+        pub(crate) Gamma: ProjectivePoint,
     }
 
     impl Public {
@@ -338,6 +420,7 @@ pub mod round_three {
                 serialize(&self.delta.to_bytes(), 2)?,
                 serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
                 serialize(&self.psi_double_prime.to_bytes()?, 2)?,
+                serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
             ]
             .concat();
             Ok(result)
@@ -347,6 +430,7 @@ pub mod round_three {
             let (delta_bytes, input) = tokenize(input.as_ref(), 2)?;
             let (Delta_bytes, input) = tokenize(&input, 2)?;
             let (psi_double_prime_bytes, input) = tokenize(&input, 2)?;
+            let (Gamma_bytes, input) = tokenize(&input, 2)?;
             if !input.is_empty() {
                 // Should not be encountering any more bytes
                 return Err(InternalError::Serialization);
@@ -356,16 +440,49 @@ pub mod round_three {
                 &EncodedPoint::from_bytes(Delta_bytes).map_err(|_| InternalError::Serialization)?,
             )
             .ok_or(InternalError::Serialization)?;
+            let Gamma = ProjectivePoint::from_encoded_point(
+                &EncodedPoint::from_bytes(Gamma_bytes).map_err(|_| InternalError::Serialization)?,
+            )
+            .ok_or(InternalError::Serialization)?;
             let psi_double_prime = PiLogProof::from_slice(&psi_double_prime_bytes)?;
             Ok(Self {
                 delta,
                 Delta,
                 psi_double_prime,
+                Gamma,
             })
+        }
+
+        pub(crate) fn verify(
+            &self,
+            receiver_keygen_public: &KeygenPublic,
+            sender_keygen_public: &KeygenPublic,
+            sender_r1_public: &round_one::Public,
+        ) -> Result<()> {
+            let psi_double_prime_input = PiLogInput::new(
+                &receiver_keygen_public.params,
+                &self.Gamma,
+                sender_keygen_public.pk.n(),
+                &sender_r1_public.K.0,
+                &self.Delta,
+            );
+            if !self.psi_double_prime.verify(&psi_double_prime_input) {
+                println!("Failed to verify proof");
+                return Err(InternalError::FailedToVerifyProof);
+            }
+
+            Ok(())
         }
     }
 
     pub type PairWithMultiplePublics = super::PairWithMultiplePublics<Private, Public>;
+
+    /// Used to bundle the inputs passed to round_three() together
+    pub struct RoundThreeInput {
+        pub(crate) keygen_public: key::KeygenPublic,
+        pub(crate) r2_private: round_two::Private,
+        pub(crate) r2_public: round_two::Public,
+    }
 }
 
 pub type PresignCouncil = Vec<round_three::Public>;

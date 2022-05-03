@@ -32,9 +32,9 @@ impl PiSchInput {
     #[cfg(test)]
     pub(crate) fn new(g: &k256::ProjectivePoint, q: &BigNumber, X: &k256::ProjectivePoint) -> Self {
         Self {
-            g: g.clone(),
+            g: *g,
             q: q.clone(),
-            X: X.clone(),
+            X: *X,
         }
     }
 }
@@ -83,9 +83,6 @@ impl Proof for PiSchProof {
         let z = &alpha + &e * &secret.x;
 
         let proof = Self { alpha, A, e, z };
-
-        proof.verify(input);
-
         Ok(proof)
     }
 
@@ -173,7 +170,7 @@ mod tests {
         let mut x = crate::utils::random_bn(&mut rng, &q);
         let X = g * utils::bn_to_scalar(&x).unwrap();
         if additive {
-            x = x + crate::utils::random_bn(&mut rng, &q);
+            x += crate::utils::random_bn(&mut rng, &q);
         }
 
         let input = PiSchInput::new(&g, &q, &X);
