@@ -13,9 +13,8 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 
-// Soundness parameter lambda: This needs to be 128, but
-// right now it is too slow if it large
-static LAMBDA: usize = 2;
+// Soundness parameter lambda
+static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone)]
 pub struct PiModProof {

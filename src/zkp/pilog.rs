@@ -12,7 +12,10 @@ use crate::utils::{
     random_bn_in_z_star,
 };
 use crate::zkp::setup::ZkSetupParameters;
-use crate::{errors::*, ELL, EPSILON};
+use crate::{
+    errors::*,
+    parameters::{ELL, EPSILON},
+};
 use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -86,15 +89,6 @@ impl Proof for PiLogProof {
     ) -> Result<Self> {
         // Sample alpha from 2^{ELL + EPSILON}
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
-
-        println!(
-            "prover, alpha: {}, N0: {}, C: {}, X: {}, gamma: {}",
-            &hex::encode(&alpha.to_bytes())[0..4],
-            &hex::encode(&input.N0.to_bytes())[0..4],
-            &hex::encode(&input.C.to_bytes())[0..4],
-            &hex::encode(&input.X.to_bytes())[0..4],
-            &hex::encode(&secret.x.to_bytes())[0..4],
-        );
 
         let r = random_bn_in_z_star(rng, &input.N0);
 
@@ -199,21 +193,12 @@ impl Proof for PiLogProof {
 
         if e != self.e {
             // Fiat-Shamir consistency check failed
-            println!("FS consistency check failed");
             return false;
         }
 
         let N0_squared = &input.N0 * &input.N0;
 
         // Do equality checks
-
-        println!(
-            "verifier, alpha: {}, N0: {}, C: {}, X: {}",
-            &hex::encode(&self.alpha.to_bytes())[0..4],
-            &hex::encode(&input.N0.to_bytes())[0..4],
-            &hex::encode(&input.C.to_bytes())[0..4],
-            &hex::encode(&input.X.to_bytes())[0..4],
-        );
 
         let eq_check_1 = {
             let a = modpow(&(BigNumber::one() + &input.N0), &self.z1, &N0_squared);
@@ -225,7 +210,6 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_1 {
-            println!("eq1 check failed");
             return false;
         }
 
@@ -235,7 +219,6 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_2 {
-            println!("eq2 check failed");
             return false;
         }
 
@@ -250,7 +233,6 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_3 {
-            println!("eq3 check failed");
             return false;
         }
 
@@ -258,7 +240,6 @@ impl Proof for PiLogProof {
 
         let bound = BigNumber::one() << (ELL + EPSILON + 1);
         if self.z1 > bound {
-            println!("bound check failed");
             return false;
         }
 

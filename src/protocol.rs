@@ -3,10 +3,12 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::key::{KeyInit, KeyShare, KeygenPrivate, KeygenPublic};
+use crate::key::KeyShareAndInfo;
+use crate::key::{KeyInit, KeygenPrivate, KeygenPublic};
 use crate::messages::*;
 use crate::round_three::RoundThreeInput;
-use anyhow::Error;
+use crate::storage::*;
+use anyhow::{Error, Result};
 use k256::Secp256k1;
 use rand::prelude::IteratorRandom;
 use rand::{CryptoRng, Rng, RngCore};
@@ -27,7 +29,7 @@ pub struct Participant {
     /// An inbox for this participant containing messages sent from other participants
     inbox: Vec<String>,
     /// Local storage for this participant to store secrets
-    storage: HashMap<(StorableType, ParticipantIdentifier), String>,
+    storage: HashMap<String, Vec<u8>>,
     /// Contains the private and public keyshares that don't get rotated
     key_init: Option<KeyInit>,
     /// The presign record, starting out as None, but gets populated after
@@ -174,7 +176,7 @@ impl Participant {
         let two_safe_primes = safe_primes.iter().choose_multiple(rng, 2);
 
         let keyshare = match self.key_init.clone() {
-            Some(key_init) => Ok(KeyShare::from_safe_primes_and_init(
+            Some(key_init) => Ok(KeyShareAndInfo::from_safe_primes_and_init(
                 rng,
                 two_safe_primes[0],
                 two_safe_primes[1],
@@ -272,11 +274,11 @@ impl Participant {
         })?;
 
         // Get this participant's round 1 private value
-        let r1_priv = crate::round_one::Private::from_slice(
-            &self
-                .retrieve(StorableType::RoundOnePrivate, &message.to, false)?
-                .bytes,
-        )?;
+        let r1_priv = crate::round_one::Private::from_slice(&self.retrieve(
+            StorableType::RoundOnePrivate,
+            &message.to,
+            false,
+        )?)?;
 
         let r1_public = message.validate_to_round_one_public(&keyshare.public, keyshare_from)?;
 
@@ -287,10 +289,7 @@ impl Participant {
             bytes: r1_public.to_bytes()?,
         });
 
-        let crate::round_two::Pair {
-            private: r2_priv_ij,
-            public: r2_pub_ij,
-        } = keyshare.round_two(keyshare_from, &r1_priv, &r1_public);
+        let (r2_priv_ij, r2_pub_ij) = keyshare.round_two(keyshare_from, &r1_priv, &r1_public);
 
         // Store the private value for this round 2 pair
         self.store(Storable {
@@ -330,11 +329,11 @@ impl Participant {
         let round_three_hashmap = self.get_other_participants_round_three_values()?;
 
         // Get this participant's round 1 private value
-        let r1_priv = crate::round_one::Private::from_slice(
-            &self
-                .retrieve(StorableType::RoundOnePrivate, &self.id.clone(), false)?
-                .bytes,
-        )?;
+        let r1_priv = crate::round_one::Private::from_slice(&self.retrieve(
+            StorableType::RoundOnePrivate,
+            &self.id.clone(),
+            false,
+        )?)?;
 
         let (r3_private, r3_publics_map) = keyshare.round_three(&r1_priv, &round_three_hashmap)?;
 
@@ -368,11 +367,11 @@ impl Participant {
         let r3_pubs = self.get_other_participants_round_three_publics()?;
 
         // Get this participant's round 3 private value
-        let r3_private = crate::round_three::Private::from_slice(
-            &self
-                .retrieve(StorableType::RoundThreePrivate, &self.id.clone(), false)?
-                .bytes,
-        )?;
+        let r3_private = crate::round_three::Private::from_slice(&self.retrieve(
+            StorableType::RoundThreePrivate,
+            &self.id.clone(),
+            false,
+        )?)?;
 
         // Check consistency across all Gamma values
         for r3_pub in r3_pubs.iter() {
@@ -384,7 +383,7 @@ impl Participant {
         self.presign_record = Some(
             crate::RecordPair {
                 private: r3_private,
-                public: r3_pubs,
+                publics: r3_pubs,
             }
             .into(),
         );
@@ -443,16 +442,24 @@ impl Participant {
         }
     }
 
+    /*
+    /// Generates an [AuxInfoPrivate] and [AuxInfoPublic] and stores it
+    pub fn gen_aux_info<R: RngCore + CryptoRng>(&mut self, aux_info_id: AuxInfoIdentifier, rng: &mut R) -> Result<()> {
+        let (private, public) = crate::auxinfo::new_auxinfo(rng, 512)?;
+    }
+    */
+
     //////////////////////
     // Helper functions //
     //////////////////////
 
     fn store(&mut self, storable: Storable) {
-        let val = storable.to_string();
-        self.storage.insert(
-            (storable.storable_type, storable.associated_participant_id),
-            val,
-        );
+        let val = storable.bytes;
+        let key = StorableKey {
+            storable_type: storable.storable_type,
+            associated_participant_id: storable.associated_participant_id,
+        };
+        self.storage.insert(key.to_string(), val);
     }
 
     fn retrieve(
@@ -460,14 +467,19 @@ impl Participant {
         storable_type: StorableType,
         associated_participant_id: &ParticipantIdentifier,
         should_delete: bool,
-    ) -> Result<Storable, Error> {
-        let key = (storable_type.clone(), associated_participant_id.clone());
-        let ret = Storable::from_str(self.storage.get(&key).ok_or_else(|| {
-            anyhow!("Could not find {} when getting from storage", storable_type)
-        })?)?;
+    ) -> Result<Vec<u8>, Error> {
+        let key = StorableKey {
+            storable_type: storable_type.clone(),
+            associated_participant_id: associated_participant_id.clone(),
+        };
+        let ret = self
+            .storage
+            .get(&key.to_string())
+            .ok_or_else(|| anyhow!("Could not find {} when getting from storage", storable_type))?
+            .clone();
 
         if should_delete {
-            self.storage.remove(&key).ok_or_else(|| {
+            self.storage.remove(&key.to_string()).ok_or_else(|| {
                 anyhow!(
                     "Could not find {} when removing from storage",
                     storable_type
@@ -478,20 +490,16 @@ impl Participant {
         Ok(ret)
     }
 
-    fn get_keyshare(&mut self) -> Result<KeyShare, Error> {
+    fn get_keyshare(&mut self) -> Result<KeyShareAndInfo, Error> {
         // Reconstruct keyshare from local storage
         let id = self.id.clone();
-        let keyshare = KeyShare::from(
-            KeygenPublic::from_slice(
-                &self
-                    .retrieve(StorableType::PublicKeyshare, &id, false)?
-                    .bytes,
-            )?,
-            KeygenPrivate::from_slice(
-                &self
-                    .retrieve(StorableType::PrivateKeyshare, &id, false)?
-                    .bytes,
-            )?,
+        let keyshare = KeyShareAndInfo::from(
+            KeygenPublic::from_slice(&self.retrieve(StorableType::PublicKeyshare, &id, false)?)?,
+            KeygenPrivate::from_slice(&self.retrieve(
+                StorableType::PrivateKeyshare,
+                &id,
+                false,
+            )?)?,
         );
         Ok(keyshare)
     }
@@ -510,7 +518,7 @@ impl Participant {
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
             let val = self.retrieve(StorableType::PublicKeyshare, &other_participant_id, false)?;
-            hm.insert(other_participant_id, KeygenPublic::from_slice(val.bytes)?);
+            hm.insert(other_participant_id, KeygenPublic::from_slice(val)?);
         }
         Ok(hm)
     }
@@ -530,7 +538,7 @@ impl Participant {
         for other_participant_id in self.other_participant_ids.clone() {
             let val =
                 self.retrieve(StorableType::RoundThreePublic, &other_participant_id, false)?;
-            ret_vec.push(crate::round_three::Public::from_slice(val.bytes)?);
+            ret_vec.push(crate::round_three::Public::from_slice(val)?);
         }
         Ok(ret_vec)
     }
@@ -562,9 +570,9 @@ impl Participant {
             hm.insert(
                 other_participant_id.clone(),
                 RoundThreeInput {
-                    keygen_public: KeygenPublic::from_slice(public_keyshare.bytes)?,
-                    r2_private: crate::round_two::Private::from_slice(round_two_private.bytes)?,
-                    r2_public: crate::round_two::Public::from_slice(round_two_public.bytes)?,
+                    keygen_public: KeygenPublic::from_slice(public_keyshare)?,
+                    r2_private: crate::round_two::Private::from_slice(round_two_private)?,
+                    r2_public: crate::round_two::Public::from_slice(round_two_public)?,
                 },
             );
         }
@@ -586,26 +594,26 @@ impl Participant {
     }
 
     fn validate_and_store_round_two_public(&mut self, message: &Message) -> Result<(), Error> {
-        let receiver_keygen_public = KeygenPublic::from_slice(
-            &self
-                .retrieve(StorableType::PublicKeyshare, &message.to, false)?
-                .bytes,
-        )?;
-        let sender_keygen_public = KeygenPublic::from_slice(
-            &self
-                .retrieve(StorableType::PublicKeyshare, &message.from, false)?
-                .bytes,
-        )?;
-        let receiver_r1_private = crate::round_one::Private::from_slice(
-            &self
-                .retrieve(StorableType::RoundOnePrivate, &message.to, false)?
-                .bytes,
-        )?;
-        let sender_r1_public = crate::round_one::Public::from_slice(
-            &self
-                .retrieve(StorableType::RoundOnePublic, &message.from, false)?
-                .bytes,
-        )?;
+        let receiver_keygen_public = KeygenPublic::from_slice(&self.retrieve(
+            StorableType::PublicKeyshare,
+            &message.to,
+            false,
+        )?)?;
+        let sender_keygen_public = KeygenPublic::from_slice(&self.retrieve(
+            StorableType::PublicKeyshare,
+            &message.from,
+            false,
+        )?)?;
+        let receiver_r1_private = crate::round_one::Private::from_slice(&self.retrieve(
+            StorableType::RoundOnePrivate,
+            &message.to,
+            false,
+        )?)?;
+        let sender_r1_public = crate::round_one::Public::from_slice(&self.retrieve(
+            StorableType::RoundOnePublic,
+            &message.from,
+            false,
+        )?)?;
 
         let message_bytes = message
             .validate_to_round_two_public(
@@ -626,21 +634,21 @@ impl Participant {
     }
 
     fn validate_and_store_round_three_public(&mut self, message: &Message) -> Result<(), Error> {
-        let receiver_keygen_public = KeygenPublic::from_slice(
-            &self
-                .retrieve(StorableType::PublicKeyshare, &message.to, false)?
-                .bytes,
-        )?;
-        let sender_keygen_public = KeygenPublic::from_slice(
-            &self
-                .retrieve(StorableType::PublicKeyshare, &message.from, false)?
-                .bytes,
-        )?;
-        let sender_r1_public = crate::round_one::Public::from_slice(
-            &self
-                .retrieve(StorableType::RoundOnePublic, &message.from, false)?
-                .bytes,
-        )?;
+        let receiver_keygen_public = KeygenPublic::from_slice(&self.retrieve(
+            StorableType::PublicKeyshare,
+            &message.to,
+            false,
+        )?)?;
+        let sender_keygen_public = KeygenPublic::from_slice(&self.retrieve(
+            StorableType::PublicKeyshare,
+            &message.from,
+            false,
+        )?)?;
+        let sender_r1_public = crate::round_one::Public::from_slice(&self.retrieve(
+            StorableType::RoundOnePublic,
+            &message.from,
+            false,
+        )?)?;
 
         let message_bytes = message
             .validate_to_round_three_public(
