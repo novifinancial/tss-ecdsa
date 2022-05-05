@@ -14,7 +14,11 @@ use crate::utils::{
     bn_random_from_transcript, k256_order, modpow, random_bn_in_range, random_bn_in_z_star,
 };
 use crate::zkp::setup::ZkSetupParameters;
-use crate::{errors::*, Ciphertext, ELL, EPSILON};
+use crate::{
+    errors::*,
+    parameters::{ELL, EPSILON},
+    Ciphertext,
+};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};

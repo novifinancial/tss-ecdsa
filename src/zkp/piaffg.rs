@@ -17,7 +17,10 @@ use crate::utils::{
     random_bn_in_z_star,
 };
 use crate::zkp::setup::ZkSetupParameters;
-use crate::{errors::*, ELL, ELL_PRIME, EPSILON};
+use crate::{
+    errors::*,
+    parameters::{ELL, ELL_PRIME, EPSILON},
+};
 use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -259,7 +262,6 @@ impl Proof for PiAffgProof {
 
         if e != self.e {
             // Fiat-Shamir consistency check failed
-            println!("Fiat-Shamir consistency check failed!");
             return false;
         }
 

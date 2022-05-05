@@ -17,8 +17,7 @@ use super::Proof;
 
 // Soundness parameter lambda.
 // Must be a multiple of 8
-// FIXME: determine what this value needs to be
-const LAMBDA: usize = 16;
+const LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone)]
 pub struct PiPrmProof {
