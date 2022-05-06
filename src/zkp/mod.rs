@@ -14,7 +14,6 @@ pub(crate) mod setup;
 use crate::errors::Result;
 use rand::{CryptoRng, RngCore};
 use serde::{de::DeserializeOwned, Serialize};
-
 pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
     type CommonInput;
     type ProverSecret;
@@ -25,5 +24,5 @@ pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
         secret: &Self::ProverSecret,
     ) -> Result<Self>;
 
-    fn verify(&self, input: &Self::CommonInput) -> bool;
+    fn verify(&self, input: &Self::CommonInput) -> Result<()>;
 }

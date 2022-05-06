@@ -87,7 +87,7 @@ impl Proof for PiSchProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
-    fn verify(&self, input: &Self::CommonInput) -> bool {
+    fn verify(&self, input: &Self::CommonInput) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
 
         let mut transcript = Transcript::new(b"PiSchProof");
@@ -106,8 +106,7 @@ impl Proof for PiSchProof {
         // Verifier samples e in F_q
         let e = bn_random_from_transcript(&mut transcript, &input.q);
         if e != self.e {
-            // Fiat-Shamir didn't verify
-            return false;
+            return verify_err!("Fiat-Shamir consistency check failed");
         }
 
         // Do equality checks
@@ -118,11 +117,10 @@ impl Proof for PiSchProof {
             lhs == rhs
         };
         if !eq_check_1 {
-            // Failed equality check 1
-            return false;
+            return verify_err!("eq_check_1 failed");
         }
 
-        true
+        Ok(())
     }
 }
 
@@ -152,10 +150,10 @@ mod tests {
     #[test]
     fn test_schnorr_proof() -> Result<()> {
         let (input, proof) = random_schnorr_proof(false)?;
-        assert!(proof.verify(&input));
+        assert!(proof.verify(&input).is_ok());
 
         let (input, proof) = random_schnorr_proof(true)?;
-        assert!(!proof.verify(&input));
+        assert!(!proof.verify(&input).is_ok());
 
         Ok(())
     }

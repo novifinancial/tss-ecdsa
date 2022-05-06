@@ -5,9 +5,9 @@
 
 //! Creates a [KeySharePublic] and [KeySharePrivate]
 
+use crate::errors::Result;
 use crate::key::{KeyInit, KeygenPrivate, KeygenPublic};
 use crate::zkp::setup::ZkSetupParameters;
-use anyhow::{Context, Result};
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 
@@ -28,7 +28,8 @@ pub(crate) fn new_keyshare<R: RngCore + CryptoRng>(
     let order = crate::utils::k256_order();
     let x = BigNumber::random(&order);
     let g = k256::ProjectivePoint::GENERATOR;
-    let X = g * crate::utils::bn_to_scalar(&x).context("Could not generate public component")?;
+    let X = g * crate::utils::bn_to_scalar(&x)
+        .ok_or_else(|| bail_context!("Could not generate public component"))?;
 
     Ok((KeySharePrivate { x }, KeySharePublic { X }))
 }

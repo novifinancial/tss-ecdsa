@@ -62,10 +62,10 @@ impl ZkSetupParameters {
         })
     }
 
-    pub(crate) fn verify(&self) -> bool {
-        self.pimod.verify(&PiModInput::new(&self.N))
-            && self
-                .piprm
-                .verify(&PiPrmInput::new(&self.N, &self.s, &self.t))
+    pub(crate) fn verify(&self) -> Result<()> {
+        self.pimod.verify(&PiModInput::new(&self.N))?;
+        self.piprm
+            .verify(&PiPrmInput::new(&self.N, &self.s, &self.t))?;
+        Ok(())
     }
 }

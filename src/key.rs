@@ -3,6 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::errors::Result;
 use crate::utils::CurvePoint;
 use crate::zkp::setup::ZkSetupParameters;
 use libpaillier::{unknown_order::BigNumber, *};
@@ -28,8 +29,12 @@ pub struct KeygenPublic {
 impl KeygenPublic {
     /// Verifies that the public key's modulus matches the ZKSetupParameters modulus
     /// N, and that the parameters have appropriate s and t values.
-    pub(crate) fn verify(&self) -> bool {
-        self.pk.n() == &self.params.N && self.params.verify()
+    pub(crate) fn verify(&self) -> Result<()> {
+        if self.pk.n() != &self.params.N {
+            return verify_err!("Mismatch with pk.n() and params.N");
+        }
+
+        self.params.verify()
     }
 }
 
