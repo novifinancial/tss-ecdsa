@@ -8,61 +8,21 @@
 //! for a description.
 
 use crate::errors::*;
-use crate::serialization::*;
 use crate::zkp::pimod::{PiModInput, PiModProof, PiModSecret};
 use libpaillier::unknown_order::BigNumber;
 
 use super::piprm::{PiPrmInput, PiPrmProof, PiPrmSecret};
 use crate::zkp::Proof;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZkSetupParameters {
     pub(crate) N: BigNumber,
     pub(crate) s: BigNumber,
     pub(crate) t: BigNumber,
     pimod: PiModProof,
     piprm: PiPrmProof,
-}
-
-impl ZkSetupParameters {
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.N.to_bytes(), 2)?,
-            serialize(&self.s.to_bytes(), 2)?,
-            serialize(&self.t.to_bytes(), 2)?,
-            serialize(&self.pimod.to_bytes()?, 2)?,
-            serialize(&self.piprm.to_bytes()?, 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    pub fn from_slice(input: &[u8]) -> Result<Self> {
-        let (n_bytes, input) = tokenize(input, 2)?;
-        let (s_bytes, input) = tokenize(&input, 2)?;
-        let (t_bytes, input) = tokenize(&input, 2)?;
-        let (pimod_bytes, input) = tokenize(&input, 2)?;
-        let (piprm_bytes, input) = tokenize(&input, 2)?;
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let N = BigNumber::from_slice(n_bytes);
-        let s = BigNumber::from_slice(s_bytes);
-        let t = BigNumber::from_slice(t_bytes);
-        let pimod = PiModProof::from_slice(pimod_bytes)?;
-        let piprm = PiPrmProof::from_slice(&piprm_bytes)?;
-
-        Ok(ZkSetupParameters {
-            N,
-            s,
-            t,
-            pimod,
-            piprm,
-        })
-    }
 }
 
 impl ZkSetupParameters {

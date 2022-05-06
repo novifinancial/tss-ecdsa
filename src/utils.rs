@@ -3,24 +3,53 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::errors::*;
-use ecdsa::elliptic_curve::group::GroupEncoding;
 use generic_array::GenericArray;
 use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
+use k256::elliptic_curve::AffinePoint;
 use k256::elliptic_curve::Curve;
+use k256::Secp256k1;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const MAX_ITER: usize = 50_000usize;
 
-// Convert bytes into a k256::ProjectivePoint
-pub(crate) fn point_from_bytes(bytes: &[u8]) -> Result<k256::ProjectivePoint> {
-    Option::from(k256::ProjectivePoint::from_bytes(
-        generic_array::GenericArray::from_slice(bytes),
-    ))
-    .ok_or(InternalError::Serialization)
+/// Wrapper around k256::ProjectivePoint so that we can define our own
+/// serialization/deserialization for it
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub struct CurvePoint(pub k256::ProjectivePoint);
+
+impl CurvePoint {
+    pub const GENERATOR: Self = CurvePoint(k256::ProjectivePoint::GENERATOR);
+    pub const IDENTITY: Self = CurvePoint(k256::ProjectivePoint::IDENTITY);
+}
+
+impl From<k256::ProjectivePoint> for CurvePoint {
+    fn from(p: k256::ProjectivePoint) -> Self {
+        Self(p)
+    }
+}
+
+impl Serialize for CurvePoint {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let afp = AffinePoint::<Secp256k1>::from(self.0);
+        afp.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CurvePoint {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let p = AffinePoint::<Secp256k1>::deserialize(deserializer)?;
+        Ok(Self(p.into()))
+    }
 }
 
 /// Computes a^e (mod n)
@@ -78,7 +107,9 @@ pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
 
     let mut slice = vec![0u8; 32 - bytes.len()];
     slice.extend_from_slice(&bytes);
-    k256::Scalar::from_repr(GenericArray::clone_from_slice(&slice))
+    Option::from(k256::Scalar::from_repr(GenericArray::clone_from_slice(
+        &slice,
+    )))
 }
 
 pub(crate) fn k256_order() -> BigNumber {

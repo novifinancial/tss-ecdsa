@@ -76,7 +76,7 @@ impl Message {
         if self.message_type != MessageType::PublicKeyshare {
             bail!("Wrong message type, expected MessageType::PublicKeyshare");
         }
-        let keygen_public = KeygenPublic::from_slice(&self.unverified_bytes)?;
+        let keygen_public: KeygenPublic = bincode::deserialize(&self.unverified_bytes)?;
 
         match keygen_public.verify() {
             true => Ok(keygen_public),
@@ -92,7 +92,7 @@ impl Message {
         if self.message_type != MessageType::RoundOne {
             bail!("Wrong message type, expected MessageType::RoundOne");
         }
-        let round_one_public = RoundOnePublic::from_slice(&self.unverified_bytes)?;
+        let round_one_public: RoundOnePublic = bincode::deserialize(&self.unverified_bytes)?;
 
         match round_one_public.verify(&receiver_keygen_public.params, sender_keygen_public.pk.n()) {
             Ok(()) => Ok(round_one_public),
@@ -110,7 +110,7 @@ impl Message {
         if self.message_type != MessageType::RoundTwo {
             bail!("Wrong message type, expected MessageType::RoundTwo");
         }
-        let round_two_public = RoundTwoPublic::from_slice(&self.unverified_bytes)?;
+        let round_two_public: RoundTwoPublic = bincode::deserialize(&self.unverified_bytes)?;
 
         match round_two_public.verify(
             receiver_keygen_public,
@@ -133,7 +133,7 @@ impl Message {
             bail!("Wrong message type, expected MessageType::RoundThree");
         }
 
-        let round_three_public = RoundThreePublic::from_slice(&self.unverified_bytes)?;
+        let round_three_public: RoundThreePublic = bincode::deserialize(&self.unverified_bytes)?;
 
         match round_three_public.verify(
             receiver_keygen_public,

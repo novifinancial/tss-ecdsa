@@ -14,7 +14,6 @@ extern crate flamer;
 #[macro_use]
 extern crate anyhow;
 
-use k256::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use rand::Rng;
 
@@ -28,7 +27,6 @@ pub mod messages;
 mod parameters;
 mod presign;
 pub mod protocol;
-pub mod serialization;
 mod storage;
 mod utils;
 pub mod zkp;
@@ -37,8 +35,9 @@ pub mod zkp;
 //mod tests;
 
 use crate::presign::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Ciphertext(libpaillier::Ciphertext);
 
 // Generate safe primes from a file. Usually, generating safe primes takes
