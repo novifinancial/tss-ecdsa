@@ -11,7 +11,6 @@
 //! FIXME: need to make a distinction here between L and L'
 
 use super::Proof;
-use crate::serialization::*;
 use crate::utils::{
     self, bn_random_from_transcript, k256_order, modpow, random_bn, random_bn_in_range,
     random_bn_in_z_star,
@@ -21,19 +20,20 @@ use crate::{
     errors::*,
     parameters::{ELL, ELL_PRIME, EPSILON},
 };
-use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
+use utils::CurvePoint;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiAffgProof {
     alpha: BigNumber,
     beta: BigNumber,
     S: BigNumber,
     T: BigNumber,
     A: BigNumber,
-    B_x: k256::ProjectivePoint,
+    B_x: CurvePoint,
     B_y: BigNumber,
     E: BigNumber,
     F: BigNumber,
@@ -48,26 +48,26 @@ pub struct PiAffgProof {
 
 pub(crate) struct PiAffgInput {
     setup_params: ZkSetupParameters,
-    g: k256::ProjectivePoint,
+    g: CurvePoint,
     N0: BigNumber,
     N1: BigNumber,
     C: BigNumber,
     D: BigNumber,
     Y: BigNumber,
-    X: k256::ProjectivePoint,
+    X: CurvePoint,
 }
 
 impl PiAffgInput {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         setup_params: &ZkSetupParameters,
-        g: &k256::ProjectivePoint,
+        g: &CurvePoint,
         N0: &BigNumber,
         N1: &BigNumber,
         C: &BigNumber,
         D: &BigNumber,
         Y: &BigNumber,
-        X: &k256::ProjectivePoint,
+        X: &CurvePoint,
     ) -> Self {
         Self {
             setup_params: setup_params.clone(),
@@ -144,7 +144,7 @@ impl Proof for PiAffgProof {
             };
             a.modmul(&b, &N0_squared)
         };
-        let B_x = input.g * utils::bn_to_scalar(&alpha).unwrap();
+        let B_x = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
         let B_y = {
             let a = modpow(&(BigNumber::one() + &input.N1), &beta, &N1_squared);
             let b = modpow(&r_y, &input.N1, &N1_squared);
@@ -187,7 +187,7 @@ impl Proof for PiAffgProof {
                 S.to_bytes(),
                 T.to_bytes(),
                 A.to_bytes(),
-                B_x.to_bytes().to_vec(),
+                bincode::serialize(&B_x).unwrap(),
                 B_y.to_bytes(),
                 E.to_bytes(),
                 F.to_bytes(),
@@ -197,7 +197,8 @@ impl Proof for PiAffgProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
+        let e =
+            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
 
         let z1 = &alpha + &e * &secret.x;
         let z2 = &beta + &e * &secret.y;
@@ -248,7 +249,7 @@ impl Proof for PiAffgProof {
                 self.S.to_bytes(),
                 self.T.to_bytes(),
                 self.A.to_bytes(),
-                self.B_x.to_bytes().to_vec(),
+                bincode::serialize(&self.B_x).unwrap(),
                 self.B_y.to_bytes(),
                 self.E.to_bytes(),
                 self.F.to_bytes(),
@@ -258,7 +259,8 @@ impl Proof for PiAffgProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
+        let e =
+            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
 
         if e != self.e {
             // Fiat-Shamir consistency check failed
@@ -285,8 +287,8 @@ impl Proof for PiAffgProof {
         }
 
         let eq_check_2 = {
-            let lhs = input.g * utils::bn_to_scalar(&self.z1).unwrap();
-            let rhs = self.B_x + input.X * utils::bn_to_scalar(&self.e).unwrap();
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1).unwrap());
+            let rhs = CurvePoint(self.B_x.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
             lhs == rhs
         };
         if !eq_check_2 {
@@ -344,89 +346,6 @@ impl Proof for PiAffgProof {
 
         true
     }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.alpha.to_bytes(), 2)?,
-            serialize(&self.beta.to_bytes(), 2)?,
-            serialize(&self.S.to_bytes(), 2)?,
-            serialize(&self.T.to_bytes(), 2)?,
-            serialize(&self.A.to_bytes(), 2)?,
-            serialize(&self.B_x.to_bytes(), 2)?,
-            serialize(&self.B_y.to_bytes(), 2)?,
-            serialize(&self.E.to_bytes(), 2)?,
-            serialize(&self.F.to_bytes(), 2)?,
-            serialize(&self.e.to_bytes(), 2)?,
-            serialize(&self.z1.to_bytes(), 2)?,
-            serialize(&self.z2.to_bytes(), 2)?,
-            serialize(&self.z3.to_bytes(), 2)?,
-            serialize(&self.z4.to_bytes(), 2)?,
-            serialize(&self.w.to_bytes(), 2)?,
-            serialize(&self.w_y.to_bytes(), 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let (alpha_bytes, input) = tokenize(buf.as_ref(), 2)?;
-        let (beta_bytes, input) = tokenize(&input, 2)?;
-        let (S_bytes, input) = tokenize(&input, 2)?;
-        let (T_bytes, input) = tokenize(&input, 2)?;
-        let (A_bytes, input) = tokenize(&input, 2)?;
-        let (B_x_bytes, input) = tokenize(&input, 2)?;
-        let (B_y_bytes, input) = tokenize(&input, 2)?;
-        let (E_bytes, input) = tokenize(&input, 2)?;
-        let (F_bytes, input) = tokenize(&input, 2)?;
-        let (e_bytes, input) = tokenize(&input, 2)?;
-        let (z1_bytes, input) = tokenize(&input, 2)?;
-        let (z2_bytes, input) = tokenize(&input, 2)?;
-        let (z3_bytes, input) = tokenize(&input, 2)?;
-        let (z4_bytes, input) = tokenize(&input, 2)?;
-        let (w_bytes, input) = tokenize(&input, 2)?;
-        let (w_y_bytes, input) = tokenize(&input, 2)?;
-
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let alpha = BigNumber::from_slice(alpha_bytes);
-        let beta = BigNumber::from_slice(beta_bytes);
-        let S = BigNumber::from_slice(S_bytes);
-        let T = BigNumber::from_slice(T_bytes);
-        let A = BigNumber::from_slice(A_bytes);
-        let B_x = utils::point_from_bytes(&B_x_bytes)?;
-        let B_y = BigNumber::from_slice(B_y_bytes);
-        let E = BigNumber::from_slice(E_bytes);
-        let F = BigNumber::from_slice(F_bytes);
-        let e = BigNumber::from_slice(e_bytes);
-        let z1 = BigNumber::from_slice(z1_bytes);
-        let z2 = BigNumber::from_slice(z2_bytes);
-        let z3 = BigNumber::from_slice(z3_bytes);
-        let z4 = BigNumber::from_slice(z4_bytes);
-        let w = BigNumber::from_slice(w_bytes);
-        let w_y = BigNumber::from_slice(w_y_bytes);
-
-        Ok(Self {
-            alpha,
-            beta,
-            S,
-            T,
-            A,
-            B_x,
-            B_y,
-            E,
-            F,
-            e,
-            z1,
-            z2,
-            z3,
-            z4,
-            w,
-            w_y,
-        })
-    }
 }
 
 #[cfg(test)]
@@ -455,9 +374,9 @@ mod tests {
         let x = random_bn_in_range(&mut rng, k_range);
         let y = random_bn_in_range(&mut rng, k_range);
 
-        let g = k256::ProjectivePoint::generator();
+        let g = k256::ProjectivePoint::GENERATOR;
 
-        let X = g * utils::bn_to_scalar(&x).unwrap();
+        let X = CurvePoint(g * utils::bn_to_scalar(&x).unwrap());
         let (Y, rho_y) = pk1.encrypt(&y.to_bytes(), None).unwrap();
 
         let N0_squared = &N0 * &N0;
@@ -472,7 +391,7 @@ mod tests {
 
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
-        let input = PiAffgInput::new(&setup_params, &g, &N0, &N1, &C, &D, &Y, &X);
+        let input = PiAffgInput::new(&setup_params, &CurvePoint(g), &N0, &N1, &C, &D, &Y, &X);
         let proof = PiAffgProof::prove(&mut rng, &input, &PiAffgSecret::new(&x, &y, &rho, &rho_y))?;
 
         match proof.verify(&input) {

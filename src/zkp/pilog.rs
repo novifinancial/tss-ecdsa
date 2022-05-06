@@ -6,7 +6,6 @@
 //! Implements the ZKP from Figure 25 of https://eprint.iacr.org/2021/060.pdf
 
 use super::Proof;
-use crate::serialization::*;
 use crate::utils::{
     self, bn_random_from_transcript, k256_order, modpow, random_bn, random_bn_in_range,
     random_bn_in_z_star,
@@ -16,17 +15,18 @@ use crate::{
     errors::*,
     parameters::{ELL, EPSILON},
 };
-use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
+use utils::CurvePoint;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiLogProof {
     alpha: BigNumber,
     S: BigNumber,
     A: BigNumber,
-    Y: k256::ProjectivePoint,
+    Y: CurvePoint,
     D: BigNumber,
     e: BigNumber,
     z1: BigNumber,
@@ -36,19 +36,19 @@ pub struct PiLogProof {
 
 pub(crate) struct PiLogInput {
     setup_params: ZkSetupParameters,
-    g: k256::ProjectivePoint,
+    g: CurvePoint,
     N0: BigNumber,
     C: BigNumber,
-    X: k256::ProjectivePoint,
+    X: CurvePoint,
 }
 
 impl PiLogInput {
     pub(crate) fn new(
         setup_params: &ZkSetupParameters,
-        g: &k256::ProjectivePoint,
+        g: &CurvePoint,
         N0: &BigNumber,
         C: &BigNumber,
-        X: &k256::ProjectivePoint,
+        X: &CurvePoint,
     ) -> Self {
         Self {
             setup_params: setup_params.clone(),
@@ -112,7 +112,7 @@ impl Proof for PiLogProof {
             let b = modpow(&r, &input.N0, &N0_squared);
             a.modmul(&b, &N0_squared)
         };
-        let Y = input.g * utils::bn_to_scalar(&alpha).unwrap();
+        let Y = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
         let D = {
             let a = modpow(&input.setup_params.s, &alpha, &input.setup_params.N);
             let b = modpow(&input.setup_params.t, &gamma, &input.setup_params.N);
@@ -134,7 +134,7 @@ impl Proof for PiLogProof {
             &[
                 S.to_bytes(),
                 A.to_bytes(),
-                Y.to_bytes().to_vec(),
+                bincode::serialize(&Y).unwrap(),
                 D.to_bytes(),
             ]
             .concat(),
@@ -181,7 +181,7 @@ impl Proof for PiLogProof {
             &[
                 self.S.to_bytes(),
                 self.A.to_bytes(),
-                self.Y.to_bytes().to_vec(),
+                bincode::serialize(&self.Y).unwrap(),
                 self.D.to_bytes(),
             ]
             .concat(),
@@ -189,7 +189,8 @@ impl Proof for PiLogProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
+        let e =
+            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
 
         if e != self.e {
             // Fiat-Shamir consistency check failed
@@ -214,8 +215,8 @@ impl Proof for PiLogProof {
         }
 
         let eq_check_2 = {
-            let lhs = input.g * utils::bn_to_scalar(&self.z1).unwrap();
-            let rhs = self.Y + input.X * utils::bn_to_scalar(&self.e).unwrap();
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1).unwrap());
+            let rhs = CurvePoint(self.Y.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
             lhs == rhs
         };
         if !eq_check_2 {
@@ -245,61 +246,6 @@ impl Proof for PiLogProof {
 
         true
     }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.alpha.to_bytes(), 2)?,
-            serialize(&self.S.to_bytes(), 2)?,
-            serialize(&self.A.to_bytes(), 2)?,
-            serialize(&self.Y.to_bytes(), 2)?,
-            serialize(&self.D.to_bytes(), 2)?,
-            serialize(&self.e.to_bytes(), 2)?,
-            serialize(&self.z1.to_bytes(), 2)?,
-            serialize(&self.z2.to_bytes(), 2)?,
-            serialize(&self.z3.to_bytes(), 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let (alpha_bytes, input) = tokenize(buf.as_ref(), 2)?;
-        let (S_bytes, input) = tokenize(&input, 2)?;
-        let (A_bytes, input) = tokenize(&input, 2)?;
-        let (Y_bytes, input) = tokenize(&input, 2)?;
-        let (D_bytes, input) = tokenize(&input, 2)?;
-        let (e_bytes, input) = tokenize(&input, 2)?;
-        let (z1_bytes, input) = tokenize(&input, 2)?;
-        let (z2_bytes, input) = tokenize(&input, 2)?;
-        let (z3_bytes, input) = tokenize(&input, 2)?;
-
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let alpha = BigNumber::from_slice(alpha_bytes);
-        let S = BigNumber::from_slice(S_bytes);
-        let A = BigNumber::from_slice(A_bytes);
-        let Y = utils::point_from_bytes(&Y_bytes)?;
-        let D = BigNumber::from_slice(D_bytes);
-        let e = BigNumber::from_slice(e_bytes);
-        let z1 = BigNumber::from_slice(z1_bytes);
-        let z2 = BigNumber::from_slice(z2_bytes);
-        let z3 = BigNumber::from_slice(z3_bytes);
-
-        Ok(Self {
-            alpha,
-            S,
-            A,
-            Y,
-            D,
-            e,
-            z1,
-            z2,
-            z3,
-        })
-    }
 }
 
 #[cfg(test)]
@@ -320,9 +266,9 @@ mod tests {
 
         let x = random_bn_in_range(&mut rng, k_range);
 
-        let g = k256::ProjectivePoint::generator();
+        let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
-        let X = g * utils::bn_to_scalar(&x).unwrap();
+        let X = CurvePoint(g.0 * utils::bn_to_scalar(&x).unwrap());
         let (C, rho) = pk.encrypt(&x.to_bytes(), None).unwrap();
 
         let setup_params = ZkSetupParameters::gen(&mut rng)?;

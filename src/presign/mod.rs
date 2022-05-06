@@ -5,16 +5,15 @@
 
 //! Converts a [KeyShare] into a [PresignRecord]
 
-use generic_array::GenericArray;
 use libpaillier::unknown_order::BigNumber;
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 use crate::errors::{InternalError, Result};
 use crate::key::KeyShareAndInfo;
 use crate::key::KeygenPublic;
-use crate::parameters::COMPRESSED;
 use crate::parameters::*;
 use crate::protocol::ParticipantIdentifier;
-use crate::serialization::*;
 use crate::utils::*;
 use crate::zkp::piaffg::*;
 use crate::zkp::pienc::*;
@@ -34,7 +33,7 @@ pub mod round_one {
     use super::*;
     use crate::zkp::{pienc::PiEncProof, setup::ZkSetupParameters};
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct Private {
         pub(crate) k: BigNumber,
         pub(crate) rho: BigNumber,
@@ -43,50 +42,7 @@ pub mod round_one {
         pub(crate) G: Ciphertext, // Technically can be public but is only one per party
         pub(crate) K: Ciphertext, // Technically can be public but is only one per party
     }
-
-    impl Private {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.k.to_bytes(), 2)?,
-                serialize(&self.rho.to_bytes(), 2)?,
-                serialize(&self.gamma.to_bytes(), 2)?,
-                serialize(&self.nu.to_bytes(), 2)?,
-                serialize(&self.G.0.to_bytes(), 2)?,
-                serialize(&self.K.0.to_bytes(), 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (k_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (rho_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (gamma_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (nu_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (G_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (K_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let k = BigNumber::from_slice(k_bytes);
-            let rho = BigNumber::from_slice(rho_bytes);
-            let gamma = BigNumber::from_slice(gamma_bytes);
-            let nu = BigNumber::from_slice(nu_bytes);
-            let G = Ciphertext(libpaillier::Ciphertext::from_slice(G_bytes));
-            let K = Ciphertext(libpaillier::Ciphertext::from_slice(K_bytes));
-            Ok(Self {
-                k,
-                rho,
-                gamma,
-                nu,
-                G,
-                K,
-            })
-        }
-    }
-
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct Public {
         pub(crate) K: Ciphertext,
         pub(crate) G: Ciphertext,
@@ -94,30 +50,6 @@ pub mod round_one {
     }
 
     impl Public {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.K.0.to_bytes(), 2)?,
-                serialize(&self.G.0.to_bytes(), 2)?,
-                serialize(&self.proof.to_bytes()?, 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (K_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (G_bytes, input) = tokenize(&input, 2)?;
-            let (proof_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let K = Ciphertext(libpaillier::Ciphertext::from_slice(K_bytes));
-            let G = Ciphertext(libpaillier::Ciphertext::from_slice(G_bytes));
-            let proof = PiEncProof::from_slice(&proof_bytes)?;
-            Ok(Self { K, G, proof })
-        }
-
         /// Verify M(vrfy, Π^enc_i, (ssid, j), (I_ε, K_j), ψ_{i,j}) = 1
         /// setup_params should be the receiving party's setup parameters
         /// the modulus N should be the sending party's modulus N
@@ -139,9 +71,6 @@ pub mod round_one {
 }
 
 pub mod round_two {
-    use ecdsa::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-    use elliptic_curve::sec1::EncodedPoint;
-    use k256::ProjectivePoint;
 
     use super::*;
 
@@ -149,99 +78,25 @@ pub mod round_two {
     use crate::zkp::piaffg::{PiAffgInput, PiAffgProof};
     use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
-    #[derive(Clone)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct Private {
         pub(crate) beta: BigNumber,
         pub(crate) beta_hat: BigNumber,
     }
 
-    impl Private {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.beta.to_bytes(), 2)?,
-                serialize(&self.beta_hat.to_bytes(), 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (beta_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (beta_hat_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let beta = BigNumber::from_slice(beta_bytes);
-            let beta_hat = BigNumber::from_slice(beta_hat_bytes);
-            Ok(Self { beta, beta_hat })
-        }
-    }
-
-    #[derive(Clone)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct Public {
         pub(crate) D: Ciphertext,
         pub(crate) D_hat: Ciphertext,
         pub(crate) F: Ciphertext,
         pub(crate) F_hat: Ciphertext,
-        pub(crate) Gamma: ProjectivePoint,
+        pub(crate) Gamma: CurvePoint,
         pub(crate) psi: PiAffgProof,
         pub(crate) psi_hat: PiAffgProof,
         pub(crate) psi_prime: PiLogProof,
     }
 
     impl Public {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.D.0.to_bytes(), 2)?,
-                serialize(&self.D_hat.0.to_bytes(), 2)?,
-                serialize(&self.F.0.to_bytes(), 2)?,
-                serialize(&self.F_hat.0.to_bytes(), 2)?,
-                serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-                serialize(&self.psi.to_bytes()?, 2)?,
-                serialize(&self.psi_hat.to_bytes()?, 2)?,
-                serialize(&self.psi_prime.to_bytes()?, 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (D_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (D_hat_bytes, input) = tokenize(&input, 2)?;
-            let (F_bytes, input) = tokenize(&input, 2)?;
-            let (F_hat_bytes, input) = tokenize(&input, 2)?;
-            let (Gamma_bytes, input) = tokenize(&input, 2)?;
-            let (psi_bytes, input) = tokenize(&input, 2)?;
-            let (psi_hat_bytes, input) = tokenize(&input, 2)?;
-            let (psi_prime_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let D = Ciphertext(libpaillier::Ciphertext::from_slice(D_bytes));
-            let D_hat = Ciphertext(libpaillier::Ciphertext::from_slice(D_hat_bytes));
-            let F = Ciphertext(libpaillier::Ciphertext::from_slice(F_bytes));
-            let F_hat = Ciphertext(libpaillier::Ciphertext::from_slice(F_hat_bytes));
-            let Gamma = ProjectivePoint::from_encoded_point(
-                &EncodedPoint::from_bytes(Gamma_bytes).map_err(|_| InternalError::Serialization)?,
-            )
-            .ok_or(InternalError::Serialization)?;
-            let psi = PiAffgProof::from_slice(&psi_bytes)?;
-            let psi_hat = PiAffgProof::from_slice(&psi_hat_bytes)?;
-            let psi_prime = PiLogProof::from_slice(&psi_prime_bytes)?;
-            Ok(Self {
-                D,
-                D_hat,
-                F,
-                F_hat,
-                Gamma,
-                psi,
-                psi_hat,
-                psi_prime,
-            })
-        }
-
         pub fn verify(
             &self,
             receiver_keygen_public: &KeygenPublic,
@@ -249,7 +104,7 @@ pub mod round_two {
             receiver_r1_private: &round_one::Private,
             sender_r1_public: &round_one::Public,
         ) -> Result<()> {
-            let g = k256::ProjectivePoint::generator();
+            let g = CurvePoint::GENERATOR;
 
             // Verify the psi proof
             let psi_input = PiAffgInput::new(
@@ -299,115 +154,32 @@ pub mod round_two {
 }
 
 pub mod round_three {
-    use ecdsa::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-    use elliptic_curve::sec1::EncodedPoint;
-    use k256::{ProjectivePoint, Scalar};
+    use k256::Scalar;
 
     use super::*;
 
     use crate::key::KeygenPublic;
     use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct Private {
         pub(crate) k: BigNumber,
         pub(crate) chi: Scalar,
-        pub(crate) Gamma: ProjectivePoint,
+        pub(crate) Gamma: CurvePoint,
         pub(crate) delta: Scalar,
-        pub(crate) Delta: ProjectivePoint,
+        pub(crate) Delta: CurvePoint,
     }
 
-    impl Private {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.k.to_bytes(), 2)?,
-                serialize(&self.chi.to_bytes(), 2)?,
-                serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-                serialize(&self.delta.to_bytes(), 2)?,
-                serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (k_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (chi_bytes, input) = tokenize(&input, 2)?;
-            let (Gamma_bytes, input) = tokenize(&input, 2)?;
-            let (delta_bytes, input) = tokenize(&input, 2)?;
-            let (Delta_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let k = BigNumber::from_slice(&k_bytes);
-            let chi = Scalar::from_bytes_reduced(&GenericArray::clone_from_slice(&chi_bytes));
-            let Gamma = ProjectivePoint::from_encoded_point(
-                &EncodedPoint::from_bytes(Gamma_bytes).map_err(|_| InternalError::Serialization)?,
-            )
-            .ok_or(InternalError::Serialization)?;
-            let delta = Scalar::from_bytes_reduced(&GenericArray::clone_from_slice(&delta_bytes));
-            let Delta = ProjectivePoint::from_encoded_point(
-                &EncodedPoint::from_bytes(Delta_bytes).map_err(|_| InternalError::Serialization)?,
-            )
-            .ok_or(InternalError::Serialization)?;
-            Ok(Self {
-                k,
-                chi,
-                Gamma,
-                delta,
-                Delta,
-            })
-        }
-    }
-
-    #[derive(Clone)]
+    #[derive(Clone, Serialize, Deserialize)]
     pub struct Public {
         pub(crate) delta: Scalar,
-        pub(crate) Delta: ProjectivePoint,
+        pub(crate) Delta: CurvePoint,
         pub(crate) psi_double_prime: PiLogProof,
         /// Gamma value included for convenience
-        pub(crate) Gamma: ProjectivePoint,
+        pub(crate) Gamma: CurvePoint,
     }
 
     impl Public {
-        pub fn to_bytes(&self) -> Result<Vec<u8>> {
-            let result = [
-                serialize(&self.delta.to_bytes(), 2)?,
-                serialize(self.Delta.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-                serialize(&self.psi_double_prime.to_bytes()?, 2)?,
-                serialize(self.Gamma.to_encoded_point(COMPRESSED).as_bytes(), 2)?,
-            ]
-            .concat();
-            Ok(result)
-        }
-
-        pub fn from_slice<B: Clone + AsRef<[u8]>>(input: B) -> Result<Self> {
-            let (delta_bytes, input) = tokenize(input.as_ref(), 2)?;
-            let (Delta_bytes, input) = tokenize(&input, 2)?;
-            let (psi_double_prime_bytes, input) = tokenize(&input, 2)?;
-            let (Gamma_bytes, input) = tokenize(&input, 2)?;
-            if !input.is_empty() {
-                // Should not be encountering any more bytes
-                return Err(InternalError::Serialization);
-            }
-            let delta = Scalar::from_bytes_reduced(&GenericArray::clone_from_slice(&delta_bytes));
-            let Delta = ProjectivePoint::from_encoded_point(
-                &EncodedPoint::from_bytes(Delta_bytes).map_err(|_| InternalError::Serialization)?,
-            )
-            .ok_or(InternalError::Serialization)?;
-            let Gamma = ProjectivePoint::from_encoded_point(
-                &EncodedPoint::from_bytes(Gamma_bytes).map_err(|_| InternalError::Serialization)?,
-            )
-            .ok_or(InternalError::Serialization)?;
-            let psi_double_prime = PiLogProof::from_slice(&psi_double_prime_bytes)?;
-            Ok(Self {
-                delta,
-                Delta,
-                psi_double_prime,
-                Gamma,
-            })
-        }
-
         pub(crate) fn verify(
             &self,
             receiver_keygen_public: &KeygenPublic,
@@ -540,8 +312,8 @@ impl KeyShareAndInfo {
         let (F, r) = self.public.pk.encrypt(beta.to_bytes(), None).unwrap();
         let (F_hat, r_hat) = self.public.pk.encrypt(beta_hat.to_bytes(), None).unwrap();
 
-        let g = k256::ProjectivePoint::generator();
-        let Gamma = g * bn_to_scalar(&sender_r1_priv.gamma).unwrap();
+        let g = CurvePoint::GENERATOR;
+        let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
 
         // Generate three proofs
 
@@ -623,8 +395,8 @@ impl KeyShareAndInfo {
         let mut delta: BigNumber = sender_r1_priv.gamma.modmul(&sender_r1_priv.k, &order);
         let mut chi: BigNumber = self.private.x.modmul(&sender_r1_priv.k, &order);
 
-        let g = k256::ProjectivePoint::generator();
-        let mut Gamma = g * bn_to_scalar(&sender_r1_priv.gamma).unwrap();
+        let g = CurvePoint::GENERATOR;
+        let mut Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
 
         for round_three_input in other_participant_inputs.values() {
             let r2_pub_j = round_three_input.r2_public.clone();
@@ -637,10 +409,10 @@ impl KeyShareAndInfo {
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
 
-            Gamma += r2_pub_j.Gamma;
+            Gamma = CurvePoint(Gamma.0 + r2_pub_j.Gamma.0);
         }
 
-        let Delta = Gamma * bn_to_scalar(&sender_r1_priv.k).unwrap();
+        let Delta = CurvePoint(Gamma.0 * bn_to_scalar(&sender_r1_priv.k).unwrap());
 
         let delta_scalar = bn_to_scalar(&delta).unwrap();
         let chi_scalar = bn_to_scalar(&chi).unwrap();
@@ -691,7 +463,7 @@ pub(crate) struct RecordPair {
 }
 
 pub struct PresignRecord {
-    R: k256::ProjectivePoint,
+    R: CurvePoint,
     k: BigNumber,
     chi: k256::Scalar,
 }
@@ -702,16 +474,16 @@ impl From<RecordPair> for PresignRecord {
         let mut Delta = private.Delta;
         for p in publics {
             delta += &p.delta;
-            Delta += p.Delta;
+            Delta = CurvePoint(Delta.0 + p.Delta.0);
         }
 
-        let g = k256::ProjectivePoint::generator();
-        if g * delta != Delta {
+        let g = CurvePoint::GENERATOR;
+        if CurvePoint(g.0 * delta) != Delta {
             // Error, failed to validate
             panic!("Error, failed to validate");
         }
 
-        let R = private.Gamma * delta.invert().unwrap();
+        let R = CurvePoint(private.Gamma.0 * delta.invert().unwrap());
 
         PresignRecord {
             R,
@@ -721,18 +493,19 @@ impl From<RecordPair> for PresignRecord {
     }
 }
 
-use ecdsa::hazmat::FromDigest;
-use elliptic_curve::group::GroupEncoding;
+//use ecdsa::hazmat::FromDigest;
+use k256::elliptic_curve::AffineXCoordinate;
+use k256::elliptic_curve::PrimeField;
 
 impl PresignRecord {
-    fn x_from_point(p: &k256::ProjectivePoint) -> k256::Scalar {
-        let r = &p.to_affine().to_bytes()[1..32 + 1];
-        k256::Scalar::from_bytes_reduced(&GenericArray::clone_from_slice(r))
+    fn x_from_point(p: &CurvePoint) -> k256::Scalar {
+        let r = &p.0.to_affine().x();
+        k256::Scalar::from_repr(*r).unwrap()
     }
 
     pub(crate) fn sign(&self, d: sha2::Sha256) -> (k256::Scalar, k256::Scalar) {
         let r = Self::x_from_point(&self.R);
-        let m = k256::Scalar::from_digest(d);
+        let m = k256::Scalar::from_repr(d.finalize()).unwrap();
         let s = bn_to_scalar(&self.k).unwrap() * m + r * self.chi;
 
         (r, s)

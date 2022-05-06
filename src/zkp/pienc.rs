@@ -9,7 +9,6 @@
 //! [1, 2^{ELL+EPSILON+1}]
 
 use super::Proof;
-use crate::serialization::*;
 use crate::utils::{
     bn_random_from_transcript, k256_order, modpow, random_bn_in_range, random_bn_in_z_star,
 };
@@ -22,8 +21,9 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiEncProof {
     alpha: BigNumber,
     S: BigNumber,
@@ -212,57 +212,6 @@ impl Proof for PiEncProof {
 
         true
     }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.alpha.to_bytes(), 2)?,
-            serialize(&self.S.to_bytes(), 2)?,
-            serialize(&self.A.to_bytes(), 2)?,
-            serialize(&self.C.to_bytes(), 2)?,
-            serialize(&self.e.to_bytes(), 2)?,
-            serialize(&self.z1.to_bytes(), 2)?,
-            serialize(&self.z2.to_bytes(), 2)?,
-            serialize(&self.z3.to_bytes(), 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let (alpha_bytes, input) = tokenize(buf.as_ref(), 2)?;
-        let (S_bytes, input) = tokenize(&input, 2)?;
-        let (A_bytes, input) = tokenize(&input, 2)?;
-        let (C_bytes, input) = tokenize(&input, 2)?;
-        let (e_bytes, input) = tokenize(&input, 2)?;
-        let (z1_bytes, input) = tokenize(&input, 2)?;
-        let (z2_bytes, input) = tokenize(&input, 2)?;
-        let (z3_bytes, input) = tokenize(&input, 2)?;
-
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let alpha = BigNumber::from_slice(alpha_bytes);
-        let S = BigNumber::from_slice(S_bytes);
-        let A = BigNumber::from_slice(A_bytes);
-        let C = BigNumber::from_slice(C_bytes);
-        let e = BigNumber::from_slice(e_bytes);
-        let z1 = BigNumber::from_slice(z1_bytes);
-        let z2 = BigNumber::from_slice(z2_bytes);
-        let z3 = BigNumber::from_slice(z3_bytes);
-
-        Ok(Self {
-            alpha,
-            S,
-            A,
-            C,
-            e,
-            z1,
-            z2,
-            z3,
-        })
-    }
 }
 
 #[cfg(test)]
@@ -293,9 +242,9 @@ mod tests {
 
         let proof = PiEncProof::prove(&mut rng, &input, &PiEncSecret { k, rho })?;
 
-        let proof_bytes = proof.to_bytes()?;
-        let roundtrip_proof = PiEncProof::from_slice(&proof_bytes)?;
-        let roundtrip_proof_bytes = roundtrip_proof.to_bytes()?;
+        let proof_bytes = bincode::serialize(&proof).unwrap();
+        let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
+        let roundtrip_proof_bytes = bincode::serialize(&roundtrip_proof).unwrap();
         assert_eq!(proof_bytes, roundtrip_proof_bytes);
 
         match proof.verify(&input) {

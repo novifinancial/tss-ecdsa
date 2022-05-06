@@ -1,14 +1,15 @@
 use super::*;
 
 use crate::errors::*;
-use crate::key::{KeyInit, KeygenPublic};
+use crate::key::{KeyInit, KeygenPublic, KeyShareAndInfo};
 use ecdsa::signature::DigestVerifier;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use crate::protocol::ParticipantIdentifier;
 use std::collections::HashMap;
 
-/// Executes a test between two parties i and j
+/// Executes a presign operation between two parties i and j
+/// Tests that each object can be serialized and deserialized properly
 #[test]
 fn run_test() -> Result<()> {
     let mut rng = OsRng;
@@ -25,7 +26,7 @@ fn run_test() -> Result<()> {
     let mut i = 0;
     for id in participants {
         let key_init = KeyInit::new(&mut rng);
-        let keyshare = key::KeyShare::from_safe_primes_and_init(
+        let keyshare = KeyShareAndInfo::from_safe_primes_and_init(
             &mut rng,
             &safe_primes[2 * i],
             &safe_primes[2 * i + 1],

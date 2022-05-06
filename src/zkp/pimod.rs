@@ -8,22 +8,22 @@
 use super::Proof;
 use crate::errors::*;
 use crate::utils::*;
-use integer_encoding::VarInt;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 
 // Soundness parameter lambda
 static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiModProof {
     w: BigNumber,
     // (x, a, b, z),
     elements: Vec<PiModProofElements>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiModProofElements {
     x: BigNumber,
     a: usize,
@@ -162,64 +162,6 @@ impl Proof for PiModProof {
         }
 
         true
-    }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-
-        let buf_w = self.w.to_bytes();
-        let buf_w_len = buf_w.len();
-
-        out.extend(
-            (0..buf_w_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_w_len.encode_var(&mut out[offset..]);
-        out.extend(buf_w);
-        offset += buf_w_len;
-
-        out.extend(
-            (0..self.elements.len().required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = self.elements.len().encode_var(&mut out[offset..]);
-
-        for element in self.elements.iter() {
-            out.extend(element.to_bytes());
-        }
-
-        Ok(out)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-
-        let (buf_w_len, _w_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _w_len;
-        let w = BigNumber::from_slice(&buf[offset..offset + buf_w_len]);
-        offset += buf_w_len;
-
-        let (num_elements, num_elements_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += num_elements_len;
-
-        let mut elements = Vec::new();
-        for _ in 0..num_elements {
-            let serialized = buf[offset..].to_vec();
-            let element = PiModProofElements::from_slice(serialized)
-                .map(Ok)
-                .unwrap_or(Err(InternalError::Serialization))?;
-            offset += element.to_bytes().len();
-            elements.push(element);
-        }
-        Ok(Self { w, elements })
     }
 }
 
@@ -419,103 +361,6 @@ fn bn_random(transcript: &mut Transcript, n: &BigNumber) -> BigNumber {
     }
 }
 
-impl PiModProofElements {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut offset = 0;
-
-        let buf_x = self.x.to_bytes();
-        let buf_x_len = buf_x.len();
-
-        out.extend(
-            (0..buf_x_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_x_len.encode_var(&mut out[offset..]);
-        out.extend(buf_x);
-        offset += buf_x_len;
-
-        let buf_y = self.y.to_bytes();
-        let buf_y_len = buf_y.len();
-
-        out.extend(
-            (0..buf_y_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_y_len.encode_var(&mut out[offset..]);
-        out.extend(buf_y);
-        offset += buf_y_len;
-
-        let buf_z = self.z.to_bytes();
-        let buf_z_len = buf_z.len();
-
-        out.extend(
-            (0..buf_z_len.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += buf_z_len.encode_var(&mut out[offset..]);
-        out.extend(buf_z);
-        offset += buf_z_len;
-
-        out.extend(
-            (0..self.a.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        offset += self.a.encode_var(&mut out[offset..]);
-
-        out.extend(
-            (0..self.b.required_space())
-                .map(|_| 0u8)
-                .collect::<Vec<u8>>(),
-        );
-        let _ = self.b.encode_var(&mut out[offset..]);
-
-        out
-    }
-
-    #[allow(clippy::many_single_char_names)]
-    pub fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let mut offset = 0;
-        let buf = buf.as_ref();
-        let (buf_x_len, _x_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-
-        offset += _x_len;
-        let x = BigNumber::from_slice(&buf[offset..offset + buf_x_len]);
-        offset += buf_x_len;
-
-        let (buf_y_len, _y_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _y_len;
-        let y = BigNumber::from_slice(&buf[offset..offset + buf_y_len]);
-        offset += buf_y_len;
-
-        let (buf_z_len, _z_len): (usize, usize) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += _z_len;
-        let z = BigNumber::from_slice(&buf[offset..offset + buf_z_len]);
-        offset += buf_z_len;
-
-        let (a, a_len) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-        offset += a_len;
-
-        let (b, _) = VarInt::decode_var(&buf[offset..])
-            .map(Ok)
-            .unwrap_or(Err(InternalError::Serialization))?;
-
-        Ok(Self { x, a, b, y, z })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -687,9 +532,9 @@ mod tests {
     #[test]
     fn test_blum_modulus_proof_elements_roundtrip() {
         let pbelement = random_pbmpe();
-        let buf = pbelement.to_bytes();
-        let roundtrip_pbelement = PiModProofElements::from_slice(buf.clone()).unwrap();
-        assert_eq!(buf, roundtrip_pbelement.to_bytes());
+        let buf = bincode::serialize(&pbelement).unwrap();
+        let roundtrip_pbelement: PiModProofElements = bincode::deserialize(&buf).unwrap();
+        assert_eq!(buf, bincode::serialize(&roundtrip_pbelement).unwrap());
     }
 
     #[test]
@@ -702,8 +547,8 @@ mod tests {
             .collect::<Vec<PiModProofElements>>();
 
         let pbmp = PiModProof { w, elements };
-        let buf = pbmp.to_bytes().unwrap();
-        let roundtrip_pbmp = PiModProof::from_slice(buf.clone()).unwrap();
-        assert_eq!(buf, roundtrip_pbmp.to_bytes().unwrap());
+        let buf = bincode::serialize(&pbmp).unwrap();
+        let roundtrip_pbmp: PiModProof = bincode::deserialize(&buf).unwrap();
+        assert_eq!(buf, bincode::serialize(&roundtrip_pbmp).unwrap());
     }
 }

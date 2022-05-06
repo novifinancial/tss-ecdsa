@@ -7,30 +7,30 @@
 
 use super::Proof;
 use crate::errors::*;
-use crate::serialization::*;
 use crate::utils::{self, bn_random_from_transcript};
-use ecdsa::elliptic_curve::group::GroupEncoding;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
+use utils::CurvePoint;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PiSchProof {
     alpha: BigNumber,
-    A: k256::ProjectivePoint,
+    A: CurvePoint,
     e: BigNumber,
     z: BigNumber,
 }
 
 pub(crate) struct PiSchInput {
-    g: k256::ProjectivePoint,
+    g: CurvePoint,
     q: BigNumber,
-    X: k256::ProjectivePoint,
+    X: CurvePoint,
 }
 
 impl PiSchInput {
     #[cfg(test)]
-    pub(crate) fn new(g: &k256::ProjectivePoint, q: &BigNumber, X: &k256::ProjectivePoint) -> Self {
+    pub(crate) fn new(g: &CurvePoint, q: &BigNumber, X: &CurvePoint) -> Self {
         Self {
             g: *g,
             q: q.clone(),
@@ -62,20 +62,20 @@ impl Proof for PiSchProof {
     ) -> Result<Self> {
         // Sample alpha from F_q
         let alpha = crate::utils::random_bn(rng, &input.q);
-        let A = input.g * utils::bn_to_scalar(&alpha).unwrap();
+        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
 
         let mut transcript = Transcript::new(b"PiSchProof");
         transcript.append_message(
             b"(g, q, X)",
             &[
-                input.g.to_bytes().to_vec(),
+                bincode::serialize(&input.g).unwrap(),
                 input.q.to_bytes(),
-                input.X.to_bytes().to_vec(),
+                bincode::serialize(&input.X).unwrap(),
             ]
             .concat(),
         );
         transcript.append_message(b"alpha", &alpha.to_bytes());
-        transcript.append_message(b"A", &A.to_bytes());
+        transcript.append_message(b"A", &bincode::serialize(&A).unwrap());
 
         // Verifier samples e in F_q
         let e = bn_random_from_transcript(&mut transcript, &input.q);
@@ -94,14 +94,14 @@ impl Proof for PiSchProof {
         transcript.append_message(
             b"(g, q, X)",
             &[
-                input.g.to_bytes().to_vec(),
+                bincode::serialize(&input.g).unwrap(),
                 input.q.to_bytes(),
-                input.X.to_bytes().to_vec(),
+                bincode::serialize(&input.X).unwrap(),
             ]
             .concat(),
         );
         transcript.append_message(b"alpha", &self.alpha.to_bytes());
-        transcript.append_message(b"A", &self.A.to_bytes());
+        transcript.append_message(b"A", &bincode::serialize(&self.A).unwrap());
 
         // Verifier samples e in F_q
         let e = bn_random_from_transcript(&mut transcript, &input.q);
@@ -113,8 +113,8 @@ impl Proof for PiSchProof {
         // Do equality checks
 
         let eq_check_1 = {
-            let lhs = input.g * utils::bn_to_scalar(&self.z).unwrap();
-            let rhs = self.A + input.X * utils::bn_to_scalar(&self.e).unwrap();
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z).unwrap());
+            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
             lhs == rhs
         };
         if !eq_check_1 {
@@ -123,36 +123,6 @@ impl Proof for PiSchProof {
         }
 
         true
-    }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize(&self.alpha.to_bytes(), 2)?,
-            serialize(&self.A.to_bytes(), 2)?,
-            serialize(&self.e.to_bytes(), 2)?,
-            serialize(&self.z.to_bytes(), 2)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let (alpha_bytes, input) = tokenize(buf.as_ref(), 2)?;
-        let (A_bytes, input) = tokenize(&input, 2)?;
-        let (e_bytes, input) = tokenize(&input, 2)?;
-        let (z_bytes, input) = tokenize(&input, 2)?;
-
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-
-        let alpha = BigNumber::from_slice(alpha_bytes);
-        let A = utils::point_from_bytes(&A_bytes)?;
-        let e = BigNumber::from_slice(e_bytes);
-        let z = BigNumber::from_slice(z_bytes);
-
-        Ok(Self { alpha, A, e, z })
     }
 }
 
@@ -165,10 +135,10 @@ mod tests {
         let mut rng = OsRng;
 
         let q = crate::utils::k256_order();
-        let g = k256::ProjectivePoint::generator();
+        let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
         let mut x = crate::utils::random_bn(&mut rng, &q);
-        let X = g * utils::bn_to_scalar(&x).unwrap();
+        let X = CurvePoint(g.0 * utils::bn_to_scalar(&x).unwrap());
         if additive {
             x += crate::utils::random_bn(&mut rng, &q);
         }

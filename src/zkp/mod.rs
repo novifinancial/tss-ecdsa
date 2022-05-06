@@ -13,8 +13,9 @@ pub(crate) mod setup;
 
 use crate::errors::Result;
 use rand::{CryptoRng, RngCore};
+use serde::{de::DeserializeOwned, Serialize};
 
-pub(crate) trait Proof: Sized {
+pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
     type CommonInput;
     type ProverSecret;
 
@@ -25,8 +26,4 @@ pub(crate) trait Proof: Sized {
     ) -> Result<Self>;
 
     fn verify(&self, input: &Self::CommonInput) -> bool;
-
-    fn to_bytes(&self) -> Result<Vec<u8>>;
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self>;
 }

@@ -27,7 +27,7 @@ pub(crate) fn new_keyshare<R: RngCore + CryptoRng>(
 ) -> Result<(KeySharePrivate, KeySharePublic)> {
     let order = crate::utils::k256_order();
     let x = BigNumber::random(&order);
-    let g = k256::ProjectivePoint::generator();
+    let g = k256::ProjectivePoint::GENERATOR;
     let X = g * crate::utils::bn_to_scalar(&x).context("Could not generate public component")?;
 
     Ok((KeySharePrivate { x }, KeySharePublic { X }))

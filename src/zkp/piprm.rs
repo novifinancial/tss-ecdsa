@@ -6,11 +6,11 @@
 //! Implements the ZKP from Figure 17 of https://eprint.iacr.org/2021/060.pdf
 
 use crate::errors::*;
-use crate::serialization::*;
 use crate::utils::*;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
 use super::Proof;
@@ -19,7 +19,7 @@ use super::Proof;
 // Must be a multiple of 8
 const LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiPrmProof {
     a_values: [BigNumber; LAMBDA],
     e_values: [bool; LAMBDA],
@@ -134,41 +134,6 @@ impl Proof for PiPrmProof {
 
         true
     }
-
-    fn to_bytes(&self) -> Result<Vec<u8>> {
-        let result = [
-            serialize_vec(&self.a_values)?,
-            self.e_values.to_vec().iter().map(|&x| x as u8).collect(),
-            serialize_vec(&self.z_values)?,
-        ]
-        .concat();
-        Ok(result)
-    }
-
-    fn from_slice<B: Clone + AsRef<[u8]>>(buf: B) -> Result<Self> {
-        let (a_values, input) = tokenize_vec(buf.as_ref())?;
-
-        if input.len() < LAMBDA {
-            // Not enough bytes remaining to deserialize properly
-            return Err(InternalError::Serialization);
-        }
-
-        let e_values_vec: Vec<bool> = input[..LAMBDA].iter().map(|&x| x != 0).collect();
-        let (z_values, input) = tokenize_vec(&input[LAMBDA..])?;
-
-        if !input.is_empty() {
-            // Should not be encountering any more bytes
-            return Err(InternalError::Serialization);
-        }
-        let mut e_values = [false; LAMBDA];
-        e_values[..].clone_from_slice(&e_values_vec[..]);
-
-        Ok(Self {
-            a_values,
-            e_values,
-            z_values,
-        })
-    }
 }
 
 #[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
@@ -184,28 +149,6 @@ fn generate_e_from_a(a_values: &[BigNumber]) -> [bool; LAMBDA] {
     }
 
     e_values
-}
-
-fn serialize_vec(input: &[BigNumber; LAMBDA]) -> Result<Vec<u8>> {
-    let mut result = vec![];
-    for x in input {
-        result.extend_from_slice(&serialize(&x.to_bytes(), 2)?);
-    }
-    Ok(result)
-}
-
-fn tokenize_vec(input: &[u8]) -> Result<([BigNumber; LAMBDA], Vec<u8>)> {
-    let mut bytes = input.to_vec();
-    let mut result = vec![];
-    for _ in 0..LAMBDA {
-        let (value, bytes_copy) = tokenize(&bytes, 2)?;
-        bytes = bytes_copy;
-        result.push(BigNumber::from_slice(&value));
-    }
-    let result_arr = result
-        .try_into()
-        .map_err(|_| InternalError::Serialization)?;
-    Ok((result_arr, bytes))
 }
 
 #[cfg(test)]
@@ -239,9 +182,9 @@ mod tests {
     #[test]
     fn test_ring_pedersen_proof_roundtrip() -> Result<()> {
         let (_, proof) = random_ring_pedersen_proof()?;
-        let buf = proof.to_bytes()?;
-        let orig = PiPrmProof::from_slice(&buf).unwrap();
-        assert_eq!(buf, orig.to_bytes()?);
+        let buf = bincode::serialize(&proof).unwrap();
+        let orig: PiPrmProof = bincode::deserialize(&buf).unwrap();
+        assert_eq!(buf, bincode::serialize(&orig).unwrap());
         Ok(())
     }
 }

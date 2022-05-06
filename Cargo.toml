@@ -13,22 +13,20 @@ flame_it = ["flame", "flamer"]
 
 [dependencies]
 anyhow = "1"
-k256 = { version = "0.9.6", features = ["arithmetic", "digest", "sha256", "ecdsa-core"] }
-libpaillier = "0.2.1"
-bincode = "1.3"
+k256 = { version = "0.10", features = ["arithmetic", "digest", "sha256", "ecdsa", "serde"] }
+libpaillier = "0.2"
+bincode = "1"
 displaydoc = { version = "0.2", default-features = false }
-ecdsa = { version = "0.12", features = ["hazmat"] }
-hex = "0.4.2"
+hex = "0.4"
 rand = "0.8"
 sha2 = "0.9"
 serde = "1"
-generic-array = "0.14.4"
-regex = "1.5"
+generic-array = "0.14"
+regex = "1"
 merlin = "3"
-integer-encoding = "3.0.2"
-lazy_static = "1.4"
-elliptic-curve = "0.10.6"
-flame = { version = "0.2.2", optional = true }
+integer-encoding = "3"
+lazy_static = "1"
+flame = { version = "0.2", optional = true }
 flamer = { version = "0.3", optional = true }
 
 [dev-dependencies]
