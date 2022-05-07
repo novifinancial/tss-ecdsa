@@ -108,19 +108,15 @@ impl Proof for PiModProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PaillierBlumModulusProof"))]
-    fn verify(&self, input: &Self::CommonInput) -> bool {
+    fn verify(&self, input: &Self::CommonInput) -> Result<()> {
         // Verify that N is an odd composite number
 
-        if &input.N % BigNumber::from(2) == BigNumber::zero() {
-            // N is even
-            println!("N is even");
-            return false;
+        if &input.N % BigNumber::from(2u64) == BigNumber::zero() {
+            return verify_err!("N is even");
         }
 
         if input.N.is_prime() {
-            // N is not composite
-            println!("N is not composite");
-            return false;
+            return verify_err!("N is not composite");
         }
 
         let mut transcript = Transcript::new(b"PaillierBlumModulusProof");
@@ -130,38 +126,29 @@ impl Proof for PiModProof {
             // First, check that y came from Fiat-Shamir transcript
             let y = bn_random(&mut transcript, &input.N);
             if y != elements.y {
-                // y does not match Fiat-Shamir challenge
-                return false;
+                return verify_err!("y does not match Fiat-Shamir challenge");
             }
 
             let y_candidate = modpow(&elements.z, &input.N, &input.N);
             if elements.y != y_candidate {
-                // z^N != y (mod N)
-                println!("z^N != y (mod N)");
-                return false;
+                return verify_err!("z^N != y (mod N)");
             }
 
             if elements.a != 0 && elements.a != 1 {
-                // a not in {0,1}
-                println!("a not in 0,1");
-                return false;
+                return verify_err!("a not in {0,1}");
             }
 
             if elements.b != 0 && elements.b != 1 {
-                // b not in {0,1}
-                println!("b not in 0,1");
-                return false;
+                return verify_err!("b not in {0,1}");
             }
 
             let y_prime = y_prime_from_y(&elements.y, &self.w, elements.a, elements.b, &input.N);
-            if modpow(&elements.x, &BigNumber::from(4), &input.N) != y_prime {
-                // x^4 != y' (mod N)
-                println!("x^4 != y' (mod N)");
-                return false;
+            if modpow(&elements.x, &BigNumber::from(4u64), &input.N) != y_prime {
+                return verify_err!("x^4 != y' (mod N)");
             }
         }
 
-        true
+        Ok(())
     }
 }
 

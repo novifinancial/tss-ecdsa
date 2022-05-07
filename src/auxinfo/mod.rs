@@ -5,8 +5,8 @@
 
 //! Creates an [AuxInfoPublic] and [AuxInfoPrivate]
 
+use crate::errors::Result;
 use crate::zkp::setup::ZkSetupParameters;
-use anyhow::{Context, Result};
 use libpaillier::{unknown_order::BigNumber, *};
 use rand::{CryptoRng, RngCore};
 
@@ -26,7 +26,7 @@ pub(crate) fn new_auxinfo<R: RngCore + CryptoRng>(
     let p = BigNumber::safe_prime(prime_bits);
     let q = BigNumber::safe_prime(prime_bits);
     let sk = DecryptionKey::with_safe_primes_unchecked(&p, &q)
-        .context("Could not generate AuxInfoPrivate")?;
+        .ok_or_else(|| bail_context!("Could not generate decryption key"))?;
 
     let pk = EncryptionKey::from(&sk);
     let params = ZkSetupParameters::gen_from_primes(rng, &(&p * &q), &p, &q)?;

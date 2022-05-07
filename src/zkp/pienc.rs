@@ -143,7 +143,7 @@ impl Proof for PiEncProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
-    fn verify(&self, input: &Self::CommonInput) -> bool {
+    fn verify(&self, input: &Self::CommonInput) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
 
         let mut transcript = Transcript::new(b"PiEncProof");
@@ -162,11 +162,10 @@ impl Proof for PiEncProof {
             &[self.S.to_bytes(), self.A.to_bytes(), self.C.to_bytes()].concat(),
         );
 
-        let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
+        let e =
+            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
         if e != self.e {
-            // Fiat-Shamir didn't verify
-            println!("Failing on Fiat-shamir verification!");
-            return false;
+            return verify_err!("Fiat-Shamir didn't verify");
         }
 
         let N0_squared = &input.N0 * &input.N0;
@@ -183,9 +182,7 @@ impl Proof for PiEncProof {
             lhs == rhs
         };
         if !eq_check_1 {
-            // Failed equality check 1
-            println!("Failing on equality check 1");
-            return false;
+            return verify_err!("eq_check_1 failed");
         }
 
         let eq_check_2 = {
@@ -199,18 +196,16 @@ impl Proof for PiEncProof {
             lhs == rhs
         };
         if !eq_check_2 {
-            // Failed equality check 2
-            println!("Failing on equality check 2");
-            return false;
+            return verify_err!("eq_check_2 failed");
         }
 
         // Do range check
         let bound = BigNumber::one() << (ELL + EPSILON + 1);
         if self.z1 > bound {
-            return false;
+            return verify_err!("self.z1 > bound check failed");
         }
 
-        true
+        Ok(())
     }
 }
 
@@ -247,10 +242,7 @@ mod tests {
         let roundtrip_proof_bytes = bincode::serialize(&roundtrip_proof).unwrap();
         assert_eq!(proof_bytes, roundtrip_proof_bytes);
 
-        match proof.verify(&input) {
-            true => Ok(()),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        proof.verify(&input)
     }
 
     #[test]
@@ -260,11 +252,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Sampling k in the range 2^{ELL + EPSILON + 100} should (usually) fail
-        let result = random_paillier_encryption_in_range_proof(ELL + EPSILON + 100);
-        assert!(match result {
-            Err(InternalError::CouldNotGenerateProof) => true,
-            _ => false,
-        });
+        assert!(random_paillier_encryption_in_range_proof(ELL + EPSILON + 100).is_err());
 
         Ok(())
     }

@@ -3,17 +3,18 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use crate::errors::{InternalError, Result};
 use crate::key::KeyShareAndInfo;
 use crate::key::{KeyInit, KeygenPublic};
 use crate::messages::*;
 use crate::round_three::RoundThreeInput;
 use crate::storage::*;
 use crate::utils::CurvePoint;
-use anyhow::{Error, Result};
 use k256::elliptic_curve::Field;
 use k256::elliptic_curve::IsHigh;
 use rand::prelude::IteratorRandom;
 use rand::{CryptoRng, Rng, RngCore};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
@@ -29,9 +30,9 @@ pub struct Participant {
     /// A list of all other participant identifiers participating in the protocol
     other_participant_ids: Vec<ParticipantIdentifier>,
     /// An inbox for this participant containing messages sent from other participants
-    inbox: Vec<String>,
+    inbox: Vec<Vec<u8>>,
     /// Local storage for this participant to store secrets
-    storage: HashMap<String, Vec<u8>>,
+    storage: Storage,
     /// Contains the private and public keyshares that don't get rotated
     key_init: Option<KeyInit>,
     /// The presign record, starting out as None, but gets populated after
@@ -46,14 +47,14 @@ impl Participant {
     pub fn new_quorum<R: RngCore + CryptoRng>(
         quorum_size: usize,
         rng: &mut R,
-    ) -> Result<Vec<Self>, Error> {
+    ) -> Result<Vec<Self>> {
         let mut participant_ids = vec![];
         for _ in 0..quorum_size {
             participant_ids.push(ParticipantIdentifier::random(rng));
         }
         let participants = participant_ids
             .iter()
-            .map(|participant_id| {
+            .map(|participant_id| -> Result<Participant> {
                 // Filter out current participant id from list of other ids
                 let mut other_ids = vec![];
                 for id in participant_ids.iter() {
@@ -62,24 +63,23 @@ impl Participant {
                     }
                 }
 
-                Participant {
+                Ok(Participant {
                     id: participant_id.clone(),
                     other_participant_ids: other_ids,
                     // Initialize a single message for begin key generation in each
                     // participant's inbox
-                    inbox: vec![(Message {
+                    inbox: vec![serialize!(&Message {
                         message_type: MessageType::BeginKeyGeneration,
                         from: ParticipantIdentifier("".to_string()), // No "from" for this message
                         to: ParticipantIdentifier("".to_string()),   // No "to" for this message
                         unverified_bytes: vec![],
-                    })
-                    .to_string()],
-                    storage: HashMap::new(),
+                    })?],
+                    storage: Storage::new(),
                     key_init: None,
                     presign_record: None,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<Participant>>>()?;
         Ok(participants)
     }
 
@@ -90,11 +90,11 @@ impl Participant {
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-    ) -> Result<Vec<Message>, Error> {
-        let message = Message::from_str(&self.inbox.remove(0))?;
+    ) -> Result<Vec<Message>> {
+        let message: Message = deserialize!(&self.inbox.remove(0))?;
 
         println!(
-            "processing participant: {}, with message type: {}",
+            "processing participant: {}, with message type: {:?}",
             &self.id.0[0..4],
             &message.message_type,
         );
@@ -104,13 +104,13 @@ impl Participant {
             MessageType::PublicKeyshare => {
                 // First, verify the bytes of the public keyshare, and then
                 // store it locally
-                let message_bytes = bincode::serialize(&message.validate_to_keygen_public()?)?;
+                let message_bytes = serialize!(&message.validate_to_keygen_public()?)?;
 
-                self.store(Storable {
-                    associated_participant_id: message.from,
-                    storable_type: StorableType::PublicKeyshare,
-                    bytes: message_bytes,
-                });
+                self.storage.store_presign(
+                    StorableType::PublicKeyshare,
+                    &message.from,
+                    &message_bytes,
+                )?;
 
                 // Check if storage has all of the other participants' public keyshares,
                 // and call do_round_one() if so
@@ -157,9 +157,9 @@ impl Participant {
     ///
     /// Produces the private x and public X shares corresponding to the actual ECDSA key
     #[cfg_attr(feature = "flame_it", flame)]
-    pub fn do_init<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<(), Error> {
+    pub fn do_init<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<()> {
         if self.key_init.is_some() {
-            bail!("Attempting to initialize key shares when they were already initialized");
+            return bail!("Attempting to initialize key shares when they were already initialized");
         }
         self.key_init = Some(KeyInit::new(rng));
         Ok(())
@@ -170,7 +170,7 @@ impl Participant {
     /// During keygen, each participant produces and stores their own secret values, and then
     /// publishes the same public component to every other participant.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_keygen<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<Vec<Message>, Error> {
+    fn do_keygen<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<Vec<Message>> {
         // Pull in pre-generated safe primes from text file (not a safe operation!).
         // This is meant to save on the time needed to generate these primes, but
         // should not be done in a production environment!
@@ -184,24 +184,22 @@ impl Participant {
                 two_safe_primes[1],
                 &key_init,
             )),
-            None => Err(anyhow!(
-                "Cannot do keygen before calling init on key shares"
-            )),
+            None => bail!("Cannot do keygen before calling init on key shares"),
         }?;
 
-        let public_keyshare_bytes = bincode::serialize(&keyshare.public)?;
+        let public_keyshare_bytes = serialize!(&keyshare.public)?;
 
         // Store private and public keyshares locally
-        self.store(Storable {
-            storable_type: StorableType::PrivateKeyshare,
-            associated_participant_id: self.id.clone(),
-            bytes: bincode::serialize(&keyshare.private)?,
-        });
-        self.store(Storable {
-            storable_type: StorableType::PublicKeyshare,
-            associated_participant_id: self.id.clone(),
-            bytes: public_keyshare_bytes.clone(),
-        });
+        self.storage.store_presign(
+            StorableType::PrivateKeyshare,
+            &self.id,
+            &serialize!(&keyshare.private)?,
+        )?;
+        self.storage.store_presign(
+            StorableType::PublicKeyshare,
+            &self.id,
+            &public_keyshare_bytes,
+        )?;
 
         // Publish public keyshare to all other participants on the channel
         Ok(self
@@ -223,7 +221,7 @@ impl Participant {
     ///
     /// This can only be run after all participants have finished with key generation.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_round_one(&mut self) -> Result<Vec<Message>, Error> {
+    fn do_round_one(&mut self) -> Result<Vec<Message>> {
         // Reconstruct keyshare and other participants' public keyshares from local storage
         let keyshare = self.get_keyshare()?;
         let other_public_keyshares = self.get_other_participants_public_keyshares()?;
@@ -232,11 +230,11 @@ impl Participant {
         let (private, r1_publics) = keyshare.round_one(&other_public_keyshares)?;
 
         // Store private r1 value locally
-        self.store(Storable {
-            storable_type: StorableType::RoundOnePrivate,
-            associated_participant_id: self.id.clone(),
-            bytes: bincode::serialize(&private)?,
-        });
+        self.storage.store_presign(
+            StorableType::RoundOnePrivate,
+            &self.id,
+            &serialize!(&private)?,
+        )?;
 
         // Publish public r1 to all other participants on the channel
         let mut ret_messages = vec![];
@@ -245,7 +243,7 @@ impl Participant {
                 message_type: MessageType::RoundOne,
                 from: self.id.clone(),
                 to: other_id.clone(),
-                unverified_bytes: bincode::serialize(&r1_public)?,
+                unverified_bytes: serialize!(&r1_public)?,
             });
         }
 
@@ -263,7 +261,7 @@ impl Participant {
     /// These round two messages are returned in response to the sender, without having to
     /// rely on any other round one messages from other participants aside from the sender.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_round_two(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
+    fn do_round_two(&mut self, message: &Message) -> Result<Vec<Message>> {
         // Reconstruct keyshare and other participants' public keyshares from local storage
         let keyshare = self.get_keyshare()?;
         let other_public_keyshares = self.get_other_participants_public_keyshares()?;
@@ -272,40 +270,38 @@ impl Participant {
 
         // Find the keyshare corresponding to the "from" participant
         let keyshare_from = other_public_keyshares.get(&message.from).ok_or_else(|| {
-            anyhow!("Could not find corresponding public keyshare for participant in round 2")
+            bail_context!("Could not find corresponding public keyshare for participant in round 2")
         })?;
 
         // Get this participant's round 1 private value
-        let r1_priv = bincode::deserialize(&self.retrieve(
-            StorableType::RoundOnePrivate,
-            &message.to,
-            false,
-        )?)?;
+        let r1_priv = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundOnePrivate, &message.to)?)?;
 
         let r1_public = message.validate_to_round_one_public(&keyshare.public, keyshare_from)?;
 
         // Store the round 1 public value as well
-        self.store(Storable {
-            storable_type: StorableType::RoundOnePublic,
-            associated_participant_id: message.from.clone(),
-            bytes: bincode::serialize(&r1_public)?,
-        });
+        self.storage.store_presign(
+            StorableType::RoundOnePublic,
+            &message.from,
+            &serialize!(&r1_public)?,
+        )?;
 
         let (r2_priv_ij, r2_pub_ij) = keyshare.round_two(keyshare_from, &r1_priv, &r1_public);
 
         // Store the private value for this round 2 pair
-        self.store(Storable {
-            storable_type: StorableType::RoundTwoPrivate,
-            associated_participant_id: message.from.clone(),
-            bytes: bincode::serialize(&r2_priv_ij)?,
-        });
+        self.storage.store_presign(
+            StorableType::RoundTwoPrivate,
+            &message.from,
+            &serialize!(&r2_priv_ij)?,
+        )?;
 
         // Only a single message to be output here
         let message = Message {
             message_type: MessageType::RoundTwo,
             from: self.id.clone(),
             to: message.from.clone(), // This is a essentially response to that sender
-            unverified_bytes: bincode::serialize(&r2_pub_ij)?,
+            unverified_bytes: serialize!(&r2_pub_ij)?,
         };
         Ok(vec![message])
     }
@@ -324,27 +320,25 @@ impl Participant {
     ///
     /// Each participant is only going to run round three once.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_round_three(&mut self) -> Result<Vec<Message>, Error> {
+    fn do_round_three(&mut self) -> Result<Vec<Message>> {
         // Reconstruct keyshare from local storage
         let keyshare = self.get_keyshare()?;
 
         let round_three_hashmap = self.get_other_participants_round_three_values()?;
 
         // Get this participant's round 1 private value
-        let r1_priv = bincode::deserialize(&self.retrieve(
-            StorableType::RoundOnePrivate,
-            &self.id.clone(),
-            false,
-        )?)?;
+        let r1_priv = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundOnePrivate, &self.id,)?)?;
 
         let (r3_private, r3_publics_map) = keyshare.round_three(&r1_priv, &round_three_hashmap)?;
 
         // Store round 3 private value
-        self.store(Storable {
-            storable_type: StorableType::RoundThreePrivate,
-            associated_participant_id: self.id.clone(),
-            bytes: bincode::serialize(&r3_private)?,
-        });
+        self.storage.store_presign(
+            StorableType::RoundThreePrivate,
+            &self.id,
+            &serialize!(&r3_private)?,
+        )?;
 
         // Publish public r3 values to all other participants on the channel
         let mut ret_messages = vec![];
@@ -353,7 +347,7 @@ impl Participant {
                 message_type: MessageType::RoundThree,
                 from: self.id.clone(),
                 to: id.clone(),
-                unverified_bytes: bincode::serialize(&r3_public)?,
+                unverified_bytes: serialize!(&r3_public)?,
             });
         }
 
@@ -365,20 +359,18 @@ impl Participant {
     /// In this step, the participant simply collects all r3 public values and its r3
     /// private value, and assembles them into a PresignRecord.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_presign_finish(&mut self) -> Result<(), Error> {
+    fn do_presign_finish(&mut self) -> Result<()> {
         let r3_pubs = self.get_other_participants_round_three_publics()?;
 
         // Get this participant's round 3 private value
-        let r3_private: crate::round_three::Private = bincode::deserialize(&self.retrieve(
-            StorableType::RoundThreePrivate,
-            &self.id.clone(),
-            false,
-        )?)?;
+        let r3_private: crate::round_three::Private = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundThreePrivate, &self.id,)?)?;
 
         // Check consistency across all Gamma values
         for r3_pub in r3_pubs.iter() {
             if r3_pub.Gamma != r3_private.Gamma {
-                bail!("Inconsistency in presign finish -- Gamma mismatch");
+                return bail!("Inconsistency in presign finish -- Gamma mismatch");
             }
         }
 
@@ -394,22 +386,23 @@ impl Participant {
     }
 
     /// Consumer can use this function to "give" a message to this participant
-    pub fn accept_message(&mut self, message: &Message) -> Result<(), Error> {
+    pub fn accept_message(&mut self, message: &Message) -> Result<()> {
         if message.to != self.id {
-            return Err(Error::msg(format!(
+            return bail!(
                 "Attempting to deliver to recipient {} the message:\n {}",
-                self.id, message,
-            )));
+                self.id,
+                message,
+            );
         }
 
-        self.inbox.push(message.to_string());
+        self.inbox.push(serialize!(&message)?);
 
         Ok(())
     }
 
     /// Caller can use this to check if the participant is ready to issue a signature
     /// (meaning that the presigning phase has completed)
-    pub fn is_ready_to_sign(&self) -> Result<bool, Error> {
+    pub fn is_ready_to_sign(&self) -> Result<bool> {
         if self.presign_record.is_some() {
             return Ok(true);
         }
@@ -420,7 +413,7 @@ impl Participant {
         !self.inbox.is_empty()
     }
 
-    pub fn get_public_share(&self) -> Result<CurvePoint, Error> {
+    pub fn get_public_share(&self) -> Result<CurvePoint> {
         match &self.key_init {
             Some(key_init) => Ok(key_init.X),
             None => bail!("Need to call init first before trying to get public share"),
@@ -429,7 +422,7 @@ impl Participant {
 
     /// If presign record is populated, then this participant is ready to issue
     /// a signature
-    pub fn sign(&mut self, digest: sha2::Sha256) -> Result<SignatureShare, Error> {
+    pub fn sign(&mut self, digest: sha2::Sha256) -> Result<SignatureShare> {
         match &self.presign_record {
             Some(record) => {
                 let (r, s) = record.sign(digest);
@@ -455,49 +448,16 @@ impl Participant {
     // Helper functions //
     //////////////////////
 
-    fn store(&mut self, storable: Storable) {
-        let val = storable.bytes;
-        let key = StorableKey {
-            storable_type: storable.storable_type,
-            associated_participant_id: storable.associated_participant_id,
-        };
-        self.storage.insert(key.to_string(), val);
-    }
-
-    fn retrieve(
-        &mut self,
-        storable_type: StorableType,
-        associated_participant_id: &ParticipantIdentifier,
-        should_delete: bool,
-    ) -> Result<Vec<u8>, Error> {
-        let key = StorableKey {
-            storable_type: storable_type.clone(),
-            associated_participant_id: associated_participant_id.clone(),
-        };
-        let ret = self
-            .storage
-            .get(&key.to_string())
-            .ok_or_else(|| anyhow!("Could not find {} when getting from storage", storable_type))?
-            .clone();
-
-        if should_delete {
-            self.storage.remove(&key.to_string()).ok_or_else(|| {
-                anyhow!(
-                    "Could not find {} when removing from storage",
-                    storable_type
-                )
-            })?;
-        }
-
-        Ok(ret)
-    }
-
-    fn get_keyshare(&mut self) -> Result<KeyShareAndInfo, Error> {
+    fn get_keyshare(&mut self) -> Result<KeyShareAndInfo> {
         // Reconstruct keyshare from local storage
         let id = self.id.clone();
         let keyshare = KeyShareAndInfo::from(
-            bincode::deserialize(&self.retrieve(StorableType::PublicKeyshare, &id, false)?)?,
-            bincode::deserialize(&self.retrieve(StorableType::PrivateKeyshare, &id, false)?)?,
+            deserialize!(&self
+                .storage
+                .retrieve_presign(StorableType::PublicKeyshare, &id)?)?,
+            deserialize!(&self
+                .storage
+                .retrieve_presign(StorableType::PrivateKeyshare, &id)?)?,
         );
         Ok(keyshare)
     }
@@ -508,15 +468,17 @@ impl Participant {
     /// This returns a HashMap with the key as the participant id and the value as the KeygenPublic
     fn get_other_participants_public_keyshares(
         &mut self,
-    ) -> Result<HashMap<ParticipantIdentifier, KeygenPublic>, Error> {
+    ) -> Result<HashMap<ParticipantIdentifier, KeygenPublic>> {
         if !self.has_collected_all_of_others(StorableType::PublicKeyshare)? {
-            bail!("Not ready to get other participants public keyshares just yet!");
+            return bail!("Not ready to get other participants public keyshares just yet!");
         }
 
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
-            let val = self.retrieve(StorableType::PublicKeyshare, &other_participant_id, false)?;
-            hm.insert(other_participant_id, bincode::deserialize(&val)?);
+            let val = self
+                .storage
+                .retrieve_presign(StorableType::PublicKeyshare, &other_participant_id)?;
+            hm.insert(other_participant_id, deserialize!(&val)?);
         }
         Ok(hm)
     }
@@ -527,16 +489,17 @@ impl Participant {
     /// This returns a Vec with the values
     fn get_other_participants_round_three_publics(
         &mut self,
-    ) -> Result<Vec<crate::round_three::Public>, Error> {
+    ) -> Result<Vec<crate::round_three::Public>> {
         if !self.has_collected_all_of_others(StorableType::RoundThreePublic)? {
-            bail!("Not ready to get other participants round three publics just yet!");
+            return bail!("Not ready to get other participants round three publics just yet!");
         }
 
         let mut ret_vec = vec![];
         for other_participant_id in self.other_participant_ids.clone() {
-            let val =
-                self.retrieve(StorableType::RoundThreePublic, &other_participant_id, false)?;
-            ret_vec.push(bincode::deserialize::<crate::round_three::Public>(&val)?);
+            let val = self
+                .storage
+                .retrieve_presign(StorableType::RoundThreePublic, &other_participant_id)?;
+            ret_vec.push(deserialize!(&val)?);
         }
         Ok(ret_vec)
     }
@@ -549,28 +512,31 @@ impl Participant {
     /// This returns a HashMap with the key as the participant id and these values being mapped
     fn get_other_participants_round_three_values(
         &mut self,
-    ) -> Result<HashMap<ParticipantIdentifier, RoundThreeInput>, Error> {
+    ) -> Result<HashMap<ParticipantIdentifier, RoundThreeInput>> {
         if !self.has_collected_all_of_others(StorableType::PublicKeyshare)?
             || !self.has_collected_all_of_others(StorableType::RoundTwoPrivate)?
             || !self.has_collected_all_of_others(StorableType::RoundTwoPublic)?
         {
-            bail!("Not ready to get other participants round three values just yet!");
+            return bail!("Not ready to get other participants round three values just yet!");
         }
 
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
-            let public_keyshare =
-                self.retrieve(StorableType::PublicKeyshare, &other_participant_id, false)?;
-            let round_two_private =
-                self.retrieve(StorableType::RoundTwoPrivate, &other_participant_id, false)?;
-            let round_two_public =
-                self.retrieve(StorableType::RoundTwoPublic, &other_participant_id, false)?;
+            let public_keyshare = self
+                .storage
+                .retrieve_presign(StorableType::PublicKeyshare, &other_participant_id)?;
+            let round_two_private = self
+                .storage
+                .retrieve_presign(StorableType::RoundTwoPrivate, &other_participant_id)?;
+            let round_two_public = self
+                .storage
+                .retrieve_presign(StorableType::RoundTwoPublic, &other_participant_id)?;
             hm.insert(
                 other_participant_id.clone(),
                 RoundThreeInput {
-                    keygen_public: bincode::deserialize(&public_keyshare)?,
-                    r2_private: bincode::deserialize(&round_two_private)?,
-                    r2_public: bincode::deserialize(&round_two_public)?,
+                    keygen_public: deserialize!(&public_keyshare)?,
+                    r2_private: deserialize!(&round_two_private)?,
+                    r2_public: deserialize!(&round_two_public)?,
                 },
             );
         }
@@ -579,10 +545,11 @@ impl Participant {
 
     /// Returns true if in storage, there is one storable_type for each other
     /// participant in the quorum.
-    fn has_collected_all_of_others(&mut self, storable_type: StorableType) -> Result<bool, Error> {
+    fn has_collected_all_of_others(&mut self, storable_type: StorableType) -> Result<bool> {
         for other_participant_id in self.other_participant_ids.clone() {
             if self
-                .retrieve(storable_type.clone(), &other_participant_id, false)
+                .storage
+                .retrieve_presign(storable_type.clone(), &other_participant_id)
                 .is_err()
             {
                 return Ok(false);
@@ -591,72 +558,55 @@ impl Participant {
         Ok(true)
     }
 
-    fn validate_and_store_round_two_public(&mut self, message: &Message) -> Result<(), Error> {
-        let receiver_keygen_public = bincode::deserialize(&self.retrieve(
-            StorableType::PublicKeyshare,
-            &message.to,
-            false,
-        )?)?;
-        let sender_keygen_public = bincode::deserialize(&self.retrieve(
-            StorableType::PublicKeyshare,
-            &message.from,
-            false,
-        )?)?;
-        let receiver_r1_private = bincode::deserialize(&self.retrieve(
-            StorableType::RoundOnePrivate,
-            &message.to,
-            false,
-        )?)?;
-        let sender_r1_public = bincode::deserialize(&self.retrieve(
-            StorableType::RoundOnePublic,
-            &message.from,
-            false,
-        )?)?;
+    fn validate_and_store_round_two_public(&mut self, message: &Message) -> Result<()> {
+        let receiver_keygen_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::PublicKeyshare, &message.to,)?)?;
+        let sender_keygen_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::PublicKeyshare, &message.from,)?)?;
+        let receiver_r1_private = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundOnePrivate, &message.to,)?)?;
+        let sender_r1_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundOnePublic, &message.from,)?)?;
 
-        let message_bytes = bincode::serialize(&message.validate_to_round_two_public(
+        let message_bytes = serialize!(&message.validate_to_round_two_public(
             &receiver_keygen_public,
             &sender_keygen_public,
             &receiver_r1_private,
             &sender_r1_public,
         )?)?;
 
-        self.store(Storable {
-            storable_type: StorableType::RoundTwoPublic,
-            associated_participant_id: message.from.clone(),
-            bytes: message_bytes,
-        });
+        self.storage
+            .store_presign(StorableType::RoundTwoPublic, &message.from, &message_bytes)?;
 
         Ok(())
     }
 
-    fn validate_and_store_round_three_public(&mut self, message: &Message) -> Result<(), Error> {
-        let receiver_keygen_public = bincode::deserialize(&self.retrieve(
-            StorableType::PublicKeyshare,
-            &message.to,
-            false,
-        )?)?;
-        let sender_keygen_public = bincode::deserialize(&self.retrieve(
-            StorableType::PublicKeyshare,
-            &message.from,
-            false,
-        )?)?;
-        let sender_r1_public = bincode::deserialize(&self.retrieve(
-            StorableType::RoundOnePublic,
-            &message.from,
-            false,
-        )?)?;
+    fn validate_and_store_round_three_public(&mut self, message: &Message) -> Result<()> {
+        let receiver_keygen_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::PublicKeyshare, &message.to,)?)?;
+        let sender_keygen_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::PublicKeyshare, &message.from,)?)?;
+        let sender_r1_public = deserialize!(&self
+            .storage
+            .retrieve_presign(StorableType::RoundOnePublic, &message.from,)?)?;
 
-        let message_bytes = bincode::serialize(&message.validate_to_round_three_public(
+        let message_bytes = serialize!(&message.validate_to_round_three_public(
             &receiver_keygen_public,
             &sender_keygen_public,
             &sender_r1_public,
         )?)?;
 
-        self.store(Storable {
-            storable_type: StorableType::RoundThreePublic,
-            associated_participant_id: message.from.clone(),
-            bytes: message_bytes,
-        });
+        self.storage.store_presign(
+            StorableType::RoundThreePublic,
+            &message.from,
+            &message_bytes,
+        )?;
 
         Ok(())
     }
@@ -682,12 +632,12 @@ impl SignatureShare {
         }
     }
 
-    pub fn chain(&self, share: Self) -> Result<Self, Error> {
+    pub fn chain(&self, share: Self) -> Result<Self> {
         let r = match (self.r, share.r) {
-            (_, None) => Err(anyhow::anyhow!("Invalid format for share, r scalar = 0")),
+            (_, None) => bail!("Invalid format for share, r scalar = 0"),
             (Some(prev_r), Some(new_r)) => {
                 if prev_r != new_r {
-                    return Err(anyhow::anyhow!("Cannot chain as r values don't match"));
+                    return bail!("Cannot chain as r values don't match");
                 }
                 Ok(prev_r)
             }
@@ -701,24 +651,23 @@ impl SignatureShare {
         })
     }
 
-    pub fn finish(&self) -> Result<k256::ecdsa::Signature, Error> {
+    pub fn finish(&self) -> Result<k256::ecdsa::Signature> {
         let mut s = self.s;
         if s.is_high().unwrap_u8() == 1 {
             s = s.negate();
         }
 
         let sig = match self.r {
-            Some(r) => Ok(k256::ecdsa::Signature::from_scalars(r, s)?),
-            None => Err(anyhow::anyhow!(
-                "Cannot produce a signature without including shares"
-            )),
+            Some(r) => Ok(k256::ecdsa::Signature::from_scalars(r, s)
+                .map_err(|_| bail_context!("Could not construct signature from scalars"))?),
+            None => bail!("Cannot produce a signature without including shares"),
         }?;
 
         Ok(sig)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ParticipantIdentifier(String);
 
 impl ParticipantIdentifier {
@@ -736,8 +685,8 @@ impl Display for ParticipantIdentifier {
 }
 
 impl FromStr for ParticipantIdentifier {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    type Err = InternalError;
+    fn from_str(s: &str) -> Result<Self> {
         Ok(Self(s.to_string()))
     }
 }
@@ -750,12 +699,12 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     /// Delivers a message into a participant's inbox
-    fn deliver_one(message: &Message, recipient: &mut Participant) -> Result<(), Error> {
+    fn deliver_one(message: &Message, recipient: &mut Participant) -> Result<()> {
         recipient.accept_message(message)
     }
 
     /// Delivers all messages into their respective participant's inboxes
-    fn deliver_all(messages: &[Message], quorum: &mut Vec<Participant>) -> Result<(), Error> {
+    fn deliver_all(messages: &[Message], quorum: &mut Vec<Participant>) -> Result<()> {
         for message in messages {
             for participant in &mut *quorum {
                 if participant.id == message.to {
@@ -767,7 +716,7 @@ mod tests {
         Ok(())
     }
 
-    fn is_presigning_done(quorum: &[Participant]) -> Result<bool, Error> {
+    fn is_presigning_done(quorum: &[Participant]) -> Result<bool> {
         for participant in quorum {
             if !(participant.is_ready_to_sign()?) {
                 return Ok(false);
@@ -788,7 +737,7 @@ mod tests {
     ///
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
-    fn test_run_protocol() -> Result<(), Error> {
+    fn test_run_protocol() -> Result<()> {
         let mut rng = OsRng;
         let mut quorum = Participant::new_quorum(3, &mut rng)?;
 
@@ -801,7 +750,8 @@ mod tests {
             vk_point = CurvePoint(vk_point.0 + X.0);
         }
         let verification_key =
-            k256::ecdsa::VerifyingKey::from_encoded_point(&vk_point.0.to_affine().into())?;
+            k256::ecdsa::VerifyingKey::from_encoded_point(&vk_point.0.to_affine().into())
+                .map_err(|_| bail_context!("Could not construct verification key"))?;
 
         while !is_presigning_done(&quorum)? {
             // Pick a random participant to process

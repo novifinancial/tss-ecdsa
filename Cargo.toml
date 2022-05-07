@@ -12,7 +12,7 @@ default = []
 flame_it = ["flame", "flamer"]
 
 [dependencies]
-anyhow = "1"
+thiserror = "1"
 k256 = { version = "0.10", features = ["arithmetic", "digest", "sha256", "ecdsa", "serde"] }
 libpaillier = "0.2"
 bincode = "1"
@@ -22,7 +22,6 @@ rand = "0.8"
 sha2 = "0.9"
 serde = "1"
 generic-array = "0.14"
-regex = "1"
 merlin = "3"
 integer-encoding = "3"
 lazy_static = "1"

@@ -11,15 +11,14 @@ extern crate flame;
 #[macro_use]
 extern crate flamer;
 
-#[macro_use]
-extern crate anyhow;
-
 use libpaillier::unknown_order::BigNumber;
 use rand::Rng;
 
+#[macro_use]
+pub mod errors;
+
 #[allow(unused)]
 mod auxinfo;
-pub mod errors;
 pub mod key;
 #[allow(unused)]
 mod keygen;

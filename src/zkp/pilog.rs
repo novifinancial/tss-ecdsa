@@ -164,7 +164,7 @@ impl Proof for PiLogProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiLogProof"))]
-    fn verify(&self, input: &Self::CommonInput) -> bool {
+    fn verify(&self, input: &Self::CommonInput) -> Result<()> {
         // First, do Fiat-Shamir consistency check
         let mut transcript = Transcript::new(b"PiLogProof");
         transcript.append_message(
@@ -193,8 +193,7 @@ impl Proof for PiLogProof {
             bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
 
         if e != self.e {
-            // Fiat-Shamir consistency check failed
-            return false;
+            return verify_err!("Fiat-Shamir consistency check failed");
         }
 
         let N0_squared = &input.N0 * &input.N0;
@@ -211,7 +210,7 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_1 {
-            return false;
+            return verify_err!("eq_check_1 failed");
         }
 
         let eq_check_2 = {
@@ -220,7 +219,7 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_2 {
-            return false;
+            return verify_err!("eq_check_2 failed");
         }
 
         let eq_check_3 = {
@@ -234,17 +233,17 @@ impl Proof for PiLogProof {
             lhs == rhs
         };
         if !eq_check_3 {
-            return false;
+            return verify_err!("eq_check_4 failed");
         }
 
         // Do range check
 
         let bound = BigNumber::one() << (ELL + EPSILON + 1);
         if self.z1 > bound {
-            return false;
+            return verify_err!("self.z1 > bound check failed");
         }
 
-        true
+        Ok(())
     }
 }
 
@@ -277,10 +276,7 @@ mod tests {
 
         let proof = PiLogProof::prove(&mut rng, &input, &PiLogSecret::new(&x, &rho))?;
 
-        match proof.verify(&input) {
-            true => Ok(()),
-            false => Err(InternalError::CouldNotGenerateProof),
-        }
+        proof.verify(&input)
     }
 
     #[test]
@@ -290,11 +286,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Sampling x in the range 2^{ELL + EPSILON + 100} should (usually) fail
-        let result = random_paillier_log_proof(ELL + EPSILON + 100);
-        assert!(match result {
-            Err(InternalError::CouldNotGenerateProof) => true,
-            _ => false,
-        });
+        assert!(random_paillier_log_proof(ELL + EPSILON + 100).is_err());
 
         Ok(())
     }

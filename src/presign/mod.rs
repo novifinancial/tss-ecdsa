@@ -9,7 +9,7 @@ use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::errors::{InternalError, Result};
+use crate::errors::Result;
 use crate::key::KeyShareAndInfo;
 use crate::key::KeygenPublic;
 use crate::parameters::*;
@@ -61,11 +61,7 @@ pub mod round_one {
             let input =
                 crate::zkp::pienc::PiEncInput::new(receiver_setup_params, sender_modulus, &self.K);
 
-            if !self.proof.verify(&input) {
-                return Err(InternalError::FailedToVerifyProof);
-            }
-
-            Ok(())
+            self.proof.verify(&input)
         }
     }
 }
@@ -117,9 +113,7 @@ pub mod round_two {
                 &self.F.0,
                 &self.Gamma,
             );
-            if !self.psi.verify(&psi_input) {
-                return Err(InternalError::FailedToVerifyProof);
-            }
+            self.psi.verify(&psi_input)?;
 
             // Verify the psi_hat proof
             let psi_hat_input = PiAffgInput::new(
@@ -132,9 +126,7 @@ pub mod round_two {
                 &self.F_hat.0,
                 &sender_keygen_public.X,
             );
-            if !self.psi_hat.verify(&psi_hat_input) {
-                return Err(InternalError::FailedToVerifyProof);
-            }
+            self.psi_hat.verify(&psi_hat_input)?;
 
             // Verify the psi_prime proof
             let psi_prime_input = PiLogInput::new(
@@ -144,9 +136,7 @@ pub mod round_two {
                 &sender_r1_public.G.0,
                 &self.Gamma,
             );
-            if !self.psi_prime.verify(&psi_prime_input) {
-                return Err(InternalError::FailedToVerifyProof);
-            }
+            self.psi_prime.verify(&psi_prime_input)?;
 
             Ok(())
         }
@@ -193,9 +183,7 @@ pub mod round_three {
                 &sender_r1_public.K.0,
                 &self.Delta,
             );
-            if !self.psi_double_prime.verify(&psi_double_prime_input) {
-                return Err(InternalError::FailedToVerifyProof);
-            }
+            self.psi_double_prime.verify(&psi_double_prime_input)?;
 
             Ok(())
         }

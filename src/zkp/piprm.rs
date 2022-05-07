@@ -102,13 +102,13 @@ impl Proof for PiPrmProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
-    fn verify(&self, input: &Self::CommonInput) -> bool {
+    fn verify(&self, input: &Self::CommonInput) -> Result<()> {
         if self.a_values.len() != LAMBDA
             || self.e_values.len() != LAMBDA
             || self.z_values.len() != LAMBDA
         {
             // Ensure that everything should be the same length LAMBDA
-            return false;
+            return verify_err!("Check that everything should be the same length LAMBDA failed");
         }
 
         // FIXME: Also need to check that s and t are mod N, as well as a and z values
@@ -117,7 +117,7 @@ impl Proof for PiPrmProof {
 
         // Check Fiat-Shamir consistency
         if e_values != self.e_values {
-            return false;
+            return verify_err!("Fiat-Shamir consistency check failed");
         }
 
         for (i, e) in e_values.iter().enumerate() {
@@ -128,11 +128,11 @@ impl Proof for PiPrmProof {
                 false => self.a_values[i].modadd(&BigNumber::zero(), &input.N),
             };
             if lhs != rhs {
-                return false;
+                return verify_err!("Verify that t^z = A * s^e (mod N) check failed");
             }
         }
 
-        true
+        Ok(())
     }
 }
 
@@ -175,7 +175,8 @@ mod tests {
     #[test]
     fn test_ring_pedersen_proof() -> Result<()> {
         let (input, proof) = random_ring_pedersen_proof()?;
-        assert!(proof.verify(&input));
+        assert!(proof.verify(&input).is_ok());
+
         Ok(())
     }
 
