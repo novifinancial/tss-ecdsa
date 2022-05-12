@@ -3,27 +3,28 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-use crate::errors::{InternalError, Result};
-use crate::key::KeyShareAndInfo;
-use crate::key::{KeyInit, KeygenPublic};
+use crate::auxinfo::AuxInfoPublic;
+use crate::errors::Result;
+use crate::keygen::KeySharePublic;
 use crate::messages::*;
+use crate::presign::PresignKeyShareAndInfo;
+use crate::presign::PresignRecord;
 use crate::round_three::RoundThreeInput;
 use crate::storage::*;
 use crate::utils::CurvePoint;
 use k256::elliptic_curve::Field;
 use k256::elliptic_curve::IsHigh;
-use rand::prelude::IteratorRandom;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
-use std::str::FromStr;
+use std::fmt::Debug;
 
 /////////////////////
 // Participant API //
 /////////////////////
 
 /// Each participant has an inbox which can contain messages.
+#[derive(Serialize, Deserialize)]
 pub struct Participant {
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
@@ -33,17 +34,13 @@ pub struct Participant {
     inbox: Vec<Vec<u8>>,
     /// Local storage for this participant to store secrets
     storage: Storage,
-    /// Contains the private and public keyshares that don't get rotated
-    key_init: Option<KeyInit>,
-    /// The presign record, starting out as None, but gets populated after
-    /// the presign phase completes
-    presign_record: Option<crate::PresignRecord>,
+    /// presign -> {keyshare, auxinfo} map
+    presign_map: HashMap<Identifier, (Identifier, Identifier)>,
 }
 
 impl Participant {
     /// Instantiate a new quorum of participants of a specified size. Random identifiers
     /// are selected
-    #[cfg_attr(feature = "flame_it", flame)]
     pub fn new_quorum<R: RngCore + CryptoRng>(
         quorum_size: usize,
         rng: &mut R,
@@ -66,17 +63,10 @@ impl Participant {
                 Ok(Participant {
                     id: participant_id.clone(),
                     other_participant_ids: other_ids,
-                    // Initialize a single message for begin key generation in each
-                    // participant's inbox
-                    inbox: vec![serialize!(&Message {
-                        message_type: MessageType::BeginKeyGeneration,
-                        from: ParticipantIdentifier("".to_string()), // No "from" for this message
-                        to: ParticipantIdentifier("".to_string()),   // No "to" for this message
-                        unverified_bytes: vec![],
-                    })?],
+                    // Initialize an empty inbox
+                    inbox: vec![],
                     storage: Storage::new(),
-                    key_init: None,
-                    presign_record: None,
+                    presign_map: HashMap::new(),
                 })
             })
             .collect::<Result<Vec<Participant>>>()?;
@@ -95,56 +85,86 @@ impl Participant {
 
         println!(
             "processing participant: {}, with message type: {:?}",
-            &self.id.0[0..4],
-            &message.message_type,
+            &self.id, &message.message_type,
         );
 
         match message.message_type {
-            MessageType::BeginKeyGeneration => self.do_keygen(rng),
-            MessageType::PublicKeyshare => {
-                // First, verify the bytes of the public keyshare, and then
+            MessageType::BeginKeyGeneration => self.do_keygen(rng, &message),
+            MessageType::BeginAuxInfoGeneration => self.do_auxinfo_gen(rng, &message),
+            MessageType::BeginPresign => self.do_round_one(&message),
+            MessageType::AuxInfoPublic => {
+                // First, verify the bytes of the public auxinfo, and then
                 // store it locally
-                let message_bytes = serialize!(&message.validate_to_keygen_public()?)?;
-
-                self.storage.store_presign(
-                    StorableType::PublicKeyshare,
+                let message_bytes = serialize!(&message.validate_to_auxinfo_public()?)?;
+                self.storage.store(
+                    StorableType::AuxInfoPublic,
+                    &message.identifier,
                     &message.from,
                     &message_bytes,
                 )?;
 
-                // Check if storage has all of the other participants' public keyshares,
-                // and call do_round_one() if so
-                match self.has_collected_all_of_others(StorableType::PublicKeyshare)? {
-                    true => self.do_round_one(),
-                    false => Ok(vec![]),
-                }
+                Ok(vec![])
             }
-            MessageType::RoundOne => self.do_round_two(&message),
-            MessageType::RoundTwo => {
+            MessageType::PublicKeyshare => {
+                // First, verify the bytes of the public keyshare, and then
+                // store it locally
+                let message_bytes = serialize!(&message.validate_to_keyshare_public()?)?;
+
+                self.storage.store(
+                    StorableType::PublicKeyshare,
+                    &message.identifier,
+                    &message.from,
+                    &message_bytes,
+                )?;
+
+                Ok(vec![])
+            }
+            MessageType::PresignRoundOne => self.do_round_two(&message),
+            MessageType::PresignRoundTwo => {
+                let (auxinfo_identifier, keyshare_identifier) =
+                    self.get_associated_identifiers_for_presign(&message.identifier)?;
+
                 // First, verify the bytes of the round two value, and then
                 // store it locally. In order to v
-                self.validate_and_store_round_two_public(&message)?;
+                self.validate_and_store_round_two_public(
+                    &message,
+                    &auxinfo_identifier,
+                    &keyshare_identifier,
+                )?;
 
                 // Since we are in round 2, it should certainly be the case that all
-                // public keyshares for other participants have been stored, since
+                // public auxinfo for other participants have been stored, since
                 // this was a requirement to proceed for round 1.
-                assert!(self.has_collected_all_of_others(StorableType::PublicKeyshare)?);
+                assert!(self.has_collected_all_of_others(
+                    StorableType::AuxInfoPublic,
+                    &auxinfo_identifier
+                )?);
 
                 // Check if storage has all of the other participants' round two values (both
                 // private and public), and call do_round_three() if so
-                match self.has_collected_all_of_others(StorableType::RoundTwoPrivate)?
-                    && self.has_collected_all_of_others(StorableType::RoundTwoPublic)?
-                {
-                    true => self.do_round_three(),
+                match self.has_collected_all_of_others(
+                    StorableType::RoundTwoPrivate,
+                    &message.identifier,
+                )? && self.has_collected_all_of_others(
+                    StorableType::RoundTwoPublic,
+                    &message.identifier,
+                )? {
+                    true => self.do_round_three(&message),
                     false => Ok(vec![]),
                 }
             }
-            MessageType::RoundThree => {
-                // First, verify and store the round three value locally
-                self.validate_and_store_round_three_public(&message)?;
+            MessageType::PresignRoundThree => {
+                let (auxinfo_identifier, _) =
+                    self.get_associated_identifiers_for_presign(&message.identifier)?;
 
-                if self.has_collected_all_of_others(StorableType::RoundThreePublic)? {
-                    self.do_presign_finish()?;
+                // First, verify and store the round three value locally
+                self.validate_and_store_round_three_public(&message, &auxinfo_identifier)?;
+
+                if self.has_collected_all_of_others(
+                    StorableType::RoundThreePublic,
+                    &message.identifier,
+                )? {
+                    self.do_presign_finish(&message)?;
                 }
 
                 // No messages to return
@@ -153,16 +173,115 @@ impl Participant {
         }
     }
 
-    /// Key Init
-    ///
-    /// Produces the private x and public X shares corresponding to the actual ECDSA key
-    #[cfg_attr(feature = "flame_it", flame)]
-    pub fn do_init<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<()> {
-        if self.key_init.is_some() {
-            return bail!("Attempting to initialize key shares when they were already initialized");
+    /// Public API function used to create an aux info
+    pub fn initialize_auxinfo(&mut self, auxinfo_identifier: &Identifier) -> Result<()> {
+        self.accept_message(&Message::new(
+            MessageType::BeginAuxInfoGeneration,
+            auxinfo_identifier,
+            &self.id,
+            &self.id,
+            &[],
+        ))
+    }
+
+    /// Public API function used to create keyshares
+    pub fn initialize_keyshares(&mut self, keyshare_identifier: &Identifier) -> Result<()> {
+        self.accept_message(&Message::new(
+            MessageType::BeginKeyGeneration,
+            keyshare_identifier,
+            &self.id,
+            &self.id,
+            &[],
+        ))
+    }
+
+    pub fn initialize_presign(
+        &mut self,
+        auxinfo_identifier: &Identifier,
+        keyshare_identifier: &Identifier,
+        identifier: &Identifier,
+    ) -> Result<()> {
+        // Check if storage has all of the other participants' public auxinfo and
+        // key shares, a requirement before running presign
+        if !self.has_collected_all_of_others(StorableType::AuxInfoPublic, auxinfo_identifier)? {
+            return bail!(
+                "Need to initialize auxinfo for {} first",
+                auxinfo_identifier
+            );
         }
-        self.key_init = Some(KeyInit::new(rng));
-        Ok(())
+        if !self.has_collected_all_of_others(StorableType::PublicKeyshare, keyshare_identifier)? {
+            return bail!(
+                "Need to initialize keyshares for {} first",
+                auxinfo_identifier
+            );
+        }
+
+        // Set the presign map internally
+        self.presign_map.insert(
+            identifier.clone(),
+            (auxinfo_identifier.clone(), keyshare_identifier.clone()),
+        );
+
+        self.accept_message(&Message::new(
+            MessageType::BeginPresign,
+            identifier,
+            &self.id,
+            &self.id,
+            &[],
+        ))
+    }
+
+    fn get_associated_identifiers_for_presign(
+        &self,
+        presign_identifier: &Identifier,
+    ) -> Result<(Identifier, Identifier)> {
+        let (id1, id2) = self.presign_map.get(presign_identifier).ok_or_else(
+            || bail_context!("Could not find associated auxinfo and keyshare identifiers for this presign identifier")
+        )?;
+
+        Ok((id1.clone(), id2.clone()))
+    }
+
+    /// Aux Info Generation
+    ///
+    ///
+    #[cfg_attr(feature = "flame_it", flame)]
+    fn do_auxinfo_gen<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
+        let (auxinfo_private, auxinfo_public) = crate::auxinfo::new_auxinfo(rng, 512)?;
+        let auxinfo_public_bytes = serialize!(&auxinfo_public)?;
+
+        // Store private and public keyshares locally
+        self.storage.store(
+            StorableType::AuxInfoPrivate,
+            &message.identifier,
+            &self.id,
+            &serialize!(&auxinfo_private)?,
+        )?;
+        self.storage.store(
+            StorableType::AuxInfoPublic,
+            &message.identifier,
+            &self.id,
+            &auxinfo_public_bytes,
+        )?;
+
+        // Publish public keyshare to all other participants on the channel
+        Ok(self
+            .other_participant_ids
+            .iter()
+            .map(|other_participant_id| {
+                Message::new(
+                    MessageType::AuxInfoPublic,
+                    &message.identifier,
+                    &self.id,
+                    other_participant_id,
+                    &auxinfo_public_bytes,
+                )
+            })
+            .collect())
     }
 
     /// Key Generation
@@ -170,46 +289,40 @@ impl Participant {
     /// During keygen, each participant produces and stores their own secret values, and then
     /// publishes the same public component to every other participant.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_keygen<R: RngCore + CryptoRng>(&mut self, rng: &mut R) -> Result<Vec<Message>> {
-        // Pull in pre-generated safe primes from text file (not a safe operation!).
-        // This is meant to save on the time needed to generate these primes, but
-        // should not be done in a production environment!
-        let safe_primes = crate::get_safe_primes();
-        let two_safe_primes = safe_primes.iter().choose_multiple(rng, 2);
-
-        let keyshare = match self.key_init.clone() {
-            Some(key_init) => Ok(KeyShareAndInfo::from_safe_primes_and_init(
-                rng,
-                two_safe_primes[0],
-                two_safe_primes[1],
-                &key_init,
-            )),
-            None => bail!("Cannot do keygen before calling init on key shares"),
-        }?;
-
-        let public_keyshare_bytes = serialize!(&keyshare.public)?;
+    fn do_keygen<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
+        let (keyshare_private, keyshare_public) = crate::keygen::new_keyshare(rng)?;
+        let keyshare_public_bytes = serialize!(&keyshare_public)?;
 
         // Store private and public keyshares locally
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::PrivateKeyshare,
+            &message.identifier,
             &self.id,
-            &serialize!(&keyshare.private)?,
+            &serialize!(&keyshare_private)?,
         )?;
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::PublicKeyshare,
+            &message.identifier,
             &self.id,
-            &public_keyshare_bytes,
+            &keyshare_public_bytes,
         )?;
 
         // Publish public keyshare to all other participants on the channel
         Ok(self
             .other_participant_ids
             .iter()
-            .map(|other_participant_id| Message {
-                message_type: MessageType::PublicKeyshare,
-                from: self.id.clone(),
-                to: other_participant_id.clone(),
-                unverified_bytes: public_keyshare_bytes.clone(),
+            .map(|other_participant_id| {
+                Message::new(
+                    MessageType::PublicKeyshare,
+                    &message.identifier,
+                    &self.id,
+                    other_participant_id,
+                    &keyshare_public_bytes,
+                )
             })
             .collect())
     }
@@ -221,17 +334,22 @@ impl Participant {
     ///
     /// This can only be run after all participants have finished with key generation.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_round_one(&mut self) -> Result<Vec<Message>> {
+    fn do_round_one(&mut self, message: &Message) -> Result<Vec<Message>> {
+        let (auxinfo_identifier, keyshare_identifier) =
+            self.get_associated_identifiers_for_presign(&message.identifier)?;
+
         // Reconstruct keyshare and other participants' public keyshares from local storage
-        let keyshare = self.get_keyshare()?;
-        let other_public_keyshares = self.get_other_participants_public_keyshares()?;
+        let keyshare = self.get_keyshare(&auxinfo_identifier, &keyshare_identifier)?;
+        let other_public_auxinfo =
+            self.get_other_participants_public_auxinfo(&auxinfo_identifier)?;
 
         // Run Round One
-        let (private, r1_publics) = keyshare.round_one(&other_public_keyshares)?;
+        let (private, r1_publics) = keyshare.round_one(&other_public_auxinfo)?;
 
         // Store private r1 value locally
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::RoundOnePrivate,
+            &message.identifier,
             &self.id,
             &serialize!(&private)?,
         )?;
@@ -239,12 +357,13 @@ impl Participant {
         // Publish public r1 to all other participants on the channel
         let mut ret_messages = vec![];
         for (other_id, r1_public) in r1_publics {
-            ret_messages.push(Message {
-                message_type: MessageType::RoundOne,
-                from: self.id.clone(),
-                to: other_id.clone(),
-                unverified_bytes: serialize!(&r1_public)?,
-            });
+            ret_messages.push(Message::new(
+                MessageType::PresignRoundOne,
+                &message.identifier,
+                &self.id,
+                &other_id,
+                &serialize!(&r1_public)?,
+            ));
         }
 
         Ok(ret_messages)
@@ -262,9 +381,13 @@ impl Participant {
     /// rely on any other round one messages from other participants aside from the sender.
     #[cfg_attr(feature = "flame_it", flame)]
     fn do_round_two(&mut self, message: &Message) -> Result<Vec<Message>> {
+        let (auxinfo_identifier, keyshare_identifier) =
+            self.get_associated_identifiers_for_presign(&message.identifier)?;
+
         // Reconstruct keyshare and other participants' public keyshares from local storage
-        let keyshare = self.get_keyshare()?;
-        let other_public_keyshares = self.get_other_participants_public_keyshares()?;
+        let keyshare = self.get_keyshare(&auxinfo_identifier, &keyshare_identifier)?;
+        let other_public_keyshares =
+            self.get_other_participants_public_auxinfo(&auxinfo_identifier)?;
 
         assert_eq!(message.to, self.id);
 
@@ -274,15 +397,19 @@ impl Participant {
         })?;
 
         // Get this participant's round 1 private value
-        let r1_priv = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundOnePrivate, &message.to)?)?;
+        let r1_priv = deserialize!(&self.storage.retrieve(
+            StorableType::RoundOnePrivate,
+            &message.identifier,
+            &message.to
+        )?)?;
 
-        let r1_public = message.validate_to_round_one_public(&keyshare.public, keyshare_from)?;
+        let r1_public =
+            message.validate_to_round_one_public(&keyshare.aux_info_public, keyshare_from)?;
 
         // Store the round 1 public value as well
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::RoundOnePublic,
+            &message.identifier,
             &message.from,
             &serialize!(&r1_public)?,
         )?;
@@ -290,19 +417,21 @@ impl Participant {
         let (r2_priv_ij, r2_pub_ij) = keyshare.round_two(keyshare_from, &r1_priv, &r1_public);
 
         // Store the private value for this round 2 pair
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::RoundTwoPrivate,
+            &message.identifier,
             &message.from,
             &serialize!(&r2_priv_ij)?,
         )?;
 
         // Only a single message to be output here
-        let message = Message {
-            message_type: MessageType::RoundTwo,
-            from: self.id.clone(),
-            to: message.from.clone(), // This is a essentially response to that sender
-            unverified_bytes: serialize!(&r2_pub_ij)?,
-        };
+        let message = Message::new(
+            MessageType::PresignRoundTwo,
+            &message.identifier,
+            &self.id,
+            &message.from, // This is a essentially response to that sender
+            &serialize!(&r2_pub_ij)?,
+        );
         Ok(vec![message])
     }
 
@@ -320,22 +449,29 @@ impl Participant {
     ///
     /// Each participant is only going to run round three once.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_round_three(&mut self) -> Result<Vec<Message>> {
-        // Reconstruct keyshare from local storage
-        let keyshare = self.get_keyshare()?;
+    fn do_round_three(&mut self, message: &Message) -> Result<Vec<Message>> {
+        let (auxinfo_identifier, keyshare_identifier) =
+            self.get_associated_identifiers_for_presign(&message.identifier)?;
 
-        let round_three_hashmap = self.get_other_participants_round_three_values()?;
+        // Reconstruct keyshare from local storage
+        let keyshare = self.get_keyshare(&auxinfo_identifier, &keyshare_identifier)?;
+
+        let round_three_hashmap = self
+            .get_other_participants_round_three_values(&message.identifier, &auxinfo_identifier)?;
 
         // Get this participant's round 1 private value
-        let r1_priv = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundOnePrivate, &self.id,)?)?;
+        let r1_priv = deserialize!(&self.storage.retrieve(
+            StorableType::RoundOnePrivate,
+            &message.identifier,
+            &self.id
+        )?)?;
 
         let (r3_private, r3_publics_map) = keyshare.round_three(&r1_priv, &round_three_hashmap)?;
 
         // Store round 3 private value
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::RoundThreePrivate,
+            &message.identifier,
             &self.id,
             &serialize!(&r3_private)?,
         )?;
@@ -343,12 +479,13 @@ impl Participant {
         // Publish public r3 values to all other participants on the channel
         let mut ret_messages = vec![];
         for (id, r3_public) in r3_publics_map {
-            ret_messages.push(Message {
-                message_type: MessageType::RoundThree,
-                from: self.id.clone(),
-                to: id.clone(),
-                unverified_bytes: serialize!(&r3_public)?,
-            });
+            ret_messages.push(Message::new(
+                MessageType::PresignRoundThree,
+                &message.identifier,
+                &self.id,
+                &id,
+                &serialize!(&r3_public)?,
+            ));
         }
 
         Ok(ret_messages)
@@ -359,13 +496,15 @@ impl Participant {
     /// In this step, the participant simply collects all r3 public values and its r3
     /// private value, and assembles them into a PresignRecord.
     #[cfg_attr(feature = "flame_it", flame)]
-    fn do_presign_finish(&mut self) -> Result<()> {
-        let r3_pubs = self.get_other_participants_round_three_publics()?;
+    fn do_presign_finish(&mut self, message: &Message) -> Result<()> {
+        let r3_pubs = self.get_other_participants_round_three_publics(&message.identifier)?;
 
         // Get this participant's round 3 private value
-        let r3_private: crate::round_three::Private = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundThreePrivate, &self.id,)?)?;
+        let r3_private: crate::round_three::Private = deserialize!(&self.storage.retrieve(
+            StorableType::RoundThreePrivate,
+            &message.identifier,
+            &self.id
+        )?)?;
 
         // Check consistency across all Gamma values
         for r3_pub in r3_pubs.iter() {
@@ -374,13 +513,18 @@ impl Participant {
             }
         }
 
-        self.presign_record = Some(
-            crate::RecordPair {
-                private: r3_private,
-                publics: r3_pubs,
-            }
-            .into(),
-        );
+        let presign_record: PresignRecord = crate::RecordPair {
+            private: r3_private,
+            publics: r3_pubs,
+        }
+        .into();
+
+        self.storage.store(
+            StorableType::PresignRecord,
+            &message.identifier,
+            &self.id,
+            &serialize!(&presign_record)?,
+        )?;
 
         Ok(())
     }
@@ -389,7 +533,7 @@ impl Participant {
     pub fn accept_message(&mut self, message: &Message) -> Result<()> {
         if message.to != self.id {
             return bail!(
-                "Attempting to deliver to recipient {} the message:\n {}",
+                "Attempting to deliver to recipient {:?} the message:\n {}",
                 self.id,
                 message,
             );
@@ -402,39 +546,91 @@ impl Participant {
 
     /// Caller can use this to check if the participant is ready to issue a signature
     /// (meaning that the presigning phase has completed)
-    pub fn is_ready_to_sign(&self) -> Result<bool> {
-        if self.presign_record.is_some() {
-            return Ok(true);
+    pub fn is_presigning_done(&self, presign_identifier: &Identifier) -> Result<()> {
+        self.storage.contains_batch(&[(
+            StorableType::PresignRecord,
+            presign_identifier.clone(),
+            self.id.clone(),
+        )])
+    }
+
+    pub fn is_auxinfo_done(&self, auxinfo_identifier: &Identifier) -> Result<()> {
+        let mut fetch = vec![];
+        for participant in self.other_participant_ids.clone() {
+            fetch.push((
+                StorableType::AuxInfoPublic,
+                auxinfo_identifier.clone(),
+                participant.clone(),
+            ));
         }
-        Ok(false)
+        fetch.push((
+            StorableType::AuxInfoPublic,
+            auxinfo_identifier.clone(),
+            self.id.clone(),
+        ));
+        fetch.push((
+            StorableType::AuxInfoPrivate,
+            auxinfo_identifier.clone(),
+            self.id.clone(),
+        ));
+
+        self.storage.contains_batch(&fetch)
+    }
+
+    pub fn is_keygen_done(&self, keygen_identifier: &Identifier) -> Result<()> {
+        let mut fetch = vec![];
+        for participant in self.other_participant_ids.clone() {
+            fetch.push((
+                StorableType::PublicKeyshare,
+                keygen_identifier.clone(),
+                participant.clone(),
+            ));
+        }
+        fetch.push((
+            StorableType::PublicKeyshare,
+            keygen_identifier.clone(),
+            self.id.clone(),
+        ));
+        fetch.push((
+            StorableType::PrivateKeyshare,
+            keygen_identifier.clone(),
+            self.id.clone(),
+        ));
+
+        self.storage.contains_batch(&fetch)
     }
 
     pub fn has_messages(&self) -> bool {
         !self.inbox.is_empty()
     }
 
-    pub fn get_public_share(&self) -> Result<CurvePoint> {
-        match &self.key_init {
-            Some(key_init) => Ok(key_init.X),
-            None => bail!("Need to call init first before trying to get public share"),
-        }
+    pub fn get_public_keyshare(&mut self, identifier: &Identifier) -> Result<CurvePoint> {
+        let keyshare_public: KeySharePublic = deserialize!(&self.storage.retrieve(
+            StorableType::PublicKeyshare,
+            identifier,
+            &self.id,
+        )?)?;
+        Ok(keyshare_public.X)
     }
 
     /// If presign record is populated, then this participant is ready to issue
     /// a signature
-    pub fn sign(&mut self, digest: sha2::Sha256) -> Result<SignatureShare> {
-        match &self.presign_record {
-            Some(record) => {
-                let (r, s) = record.sign(digest);
-                let ret = SignatureShare { r: Some(r), s };
+    pub fn sign(
+        &mut self,
+        presign_identifier: &Identifier,
+        digest: sha2::Sha256,
+    ) -> Result<SignatureShare> {
+        let presign_record: PresignRecord = deserialize!(&self.storage.retrieve(
+            StorableType::PresignRecord,
+            presign_identifier,
+            &self.id
+        )?)?;
+        let (r, s) = presign_record.sign(digest);
+        let ret = SignatureShare { r: Some(r), s };
 
-                // Clear the presign record after being used once
-                self.presign_record = None;
+        // FIXME: Need to clear the presign record after being used once
 
-                Ok(ret)
-            }
-            None => bail!("No presign record, not ready to sign yet"),
-        }
+        Ok(ret)
     }
 
     /*
@@ -448,36 +644,57 @@ impl Participant {
     // Helper functions //
     //////////////////////
 
-    fn get_keyshare(&mut self) -> Result<KeyShareAndInfo> {
+    fn get_keyshare(
+        &mut self,
+        auxinfo_identifier: &Identifier,
+        keyshare_identifier: &Identifier,
+    ) -> Result<PresignKeyShareAndInfo> {
         // Reconstruct keyshare from local storage
         let id = self.id.clone();
-        let keyshare = KeyShareAndInfo::from(
-            deserialize!(&self
-                .storage
-                .retrieve_presign(StorableType::PublicKeyshare, &id)?)?,
-            deserialize!(&self
-                .storage
-                .retrieve_presign(StorableType::PrivateKeyshare, &id)?)?,
-        );
-        Ok(keyshare)
+        let keyshare_and_info = PresignKeyShareAndInfo {
+            aux_info_private: deserialize!(&self.storage.retrieve(
+                StorableType::AuxInfoPrivate,
+                auxinfo_identifier,
+                &id
+            )?)?,
+            aux_info_public: deserialize!(&self.storage.retrieve(
+                StorableType::AuxInfoPublic,
+                auxinfo_identifier,
+                &id
+            )?)?,
+            keyshare_private: deserialize!(&self.storage.retrieve(
+                StorableType::PrivateKeyshare,
+                keyshare_identifier,
+                &id
+            )?)?,
+            keyshare_public: deserialize!(&self.storage.retrieve(
+                StorableType::PublicKeyshare,
+                keyshare_identifier,
+                &id
+            )?)?,
+        };
+        Ok(keyshare_and_info)
     }
 
     /// Aggregate the other participants' public keyshares from storage. But don't remove them
     /// from storage.
     ///
     /// This returns a HashMap with the key as the participant id and the value as the KeygenPublic
-    fn get_other_participants_public_keyshares(
+    fn get_other_participants_public_auxinfo(
         &mut self,
-    ) -> Result<HashMap<ParticipantIdentifier, KeygenPublic>> {
-        if !self.has_collected_all_of_others(StorableType::PublicKeyshare)? {
-            return bail!("Not ready to get other participants public keyshares just yet!");
+        identifier: &Identifier,
+    ) -> Result<HashMap<ParticipantIdentifier, AuxInfoPublic>> {
+        if !self.has_collected_all_of_others(StorableType::AuxInfoPublic, identifier)? {
+            return bail!("Not ready to get other participants public auxinfo just yet!");
         }
 
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
-            let val = self
-                .storage
-                .retrieve_presign(StorableType::PublicKeyshare, &other_participant_id)?;
+            let val = self.storage.retrieve(
+                StorableType::AuxInfoPublic,
+                identifier,
+                &other_participant_id,
+            )?;
             hm.insert(other_participant_id, deserialize!(&val)?);
         }
         Ok(hm)
@@ -489,16 +706,19 @@ impl Participant {
     /// This returns a Vec with the values
     fn get_other_participants_round_three_publics(
         &mut self,
+        identifier: &Identifier,
     ) -> Result<Vec<crate::round_three::Public>> {
-        if !self.has_collected_all_of_others(StorableType::RoundThreePublic)? {
+        if !self.has_collected_all_of_others(StorableType::RoundThreePublic, identifier)? {
             return bail!("Not ready to get other participants round three publics just yet!");
         }
 
         let mut ret_vec = vec![];
         for other_participant_id in self.other_participant_ids.clone() {
-            let val = self
-                .storage
-                .retrieve_presign(StorableType::RoundThreePublic, &other_participant_id)?;
+            let val = self.storage.retrieve(
+                StorableType::RoundThreePublic,
+                identifier,
+                &other_participant_id,
+            )?;
             ret_vec.push(deserialize!(&val)?);
         }
         Ok(ret_vec)
@@ -512,29 +732,37 @@ impl Participant {
     /// This returns a HashMap with the key as the participant id and these values being mapped
     fn get_other_participants_round_three_values(
         &mut self,
+        identifier: &Identifier,
+        auxinfo_identifier: &Identifier,
     ) -> Result<HashMap<ParticipantIdentifier, RoundThreeInput>> {
-        if !self.has_collected_all_of_others(StorableType::PublicKeyshare)?
-            || !self.has_collected_all_of_others(StorableType::RoundTwoPrivate)?
-            || !self.has_collected_all_of_others(StorableType::RoundTwoPublic)?
+        if !self.has_collected_all_of_others(StorableType::AuxInfoPublic, auxinfo_identifier)?
+            || !self.has_collected_all_of_others(StorableType::RoundTwoPrivate, identifier)?
+            || !self.has_collected_all_of_others(StorableType::RoundTwoPublic, identifier)?
         {
             return bail!("Not ready to get other participants round three values just yet!");
         }
 
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
-            let public_keyshare = self
-                .storage
-                .retrieve_presign(StorableType::PublicKeyshare, &other_participant_id)?;
-            let round_two_private = self
-                .storage
-                .retrieve_presign(StorableType::RoundTwoPrivate, &other_participant_id)?;
-            let round_two_public = self
-                .storage
-                .retrieve_presign(StorableType::RoundTwoPublic, &other_participant_id)?;
+            let auxinfo_public = self.storage.retrieve(
+                StorableType::AuxInfoPublic,
+                auxinfo_identifier,
+                &other_participant_id,
+            )?;
+            let round_two_private = self.storage.retrieve(
+                StorableType::RoundTwoPrivate,
+                identifier,
+                &other_participant_id,
+            )?;
+            let round_two_public = self.storage.retrieve(
+                StorableType::RoundTwoPublic,
+                identifier,
+                &other_participant_id,
+            )?;
             hm.insert(
                 other_participant_id.clone(),
                 RoundThreeInput {
-                    keygen_public: deserialize!(&public_keyshare)?,
+                    auxinfo_public: deserialize!(&auxinfo_public)?,
                     r2_private: deserialize!(&round_two_private)?,
                     r2_public: deserialize!(&round_two_public)?,
                 },
@@ -545,65 +773,105 @@ impl Participant {
 
     /// Returns true if in storage, there is one storable_type for each other
     /// participant in the quorum.
-    fn has_collected_all_of_others(&mut self, storable_type: StorableType) -> Result<bool> {
-        for other_participant_id in self.other_participant_ids.clone() {
-            if self
-                .storage
-                .retrieve_presign(storable_type.clone(), &other_participant_id)
-                .is_err()
-            {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+    fn has_collected_all_of_others(
+        &mut self,
+        storable_type: StorableType,
+        identifier: &Identifier,
+    ) -> Result<bool> {
+        let indices: Vec<(StorableType, Identifier, ParticipantIdentifier)> = self
+            .other_participant_ids
+            .iter()
+            .map(|participant_id| {
+                (
+                    storable_type.clone(),
+                    identifier.clone(),
+                    participant_id.clone(),
+                )
+            })
+            .collect();
+        Ok(self.storage.contains_batch(&indices).is_ok())
     }
 
-    fn validate_and_store_round_two_public(&mut self, message: &Message) -> Result<()> {
-        let receiver_keygen_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::PublicKeyshare, &message.to,)?)?;
-        let sender_keygen_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::PublicKeyshare, &message.from,)?)?;
-        let receiver_r1_private = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundOnePrivate, &message.to,)?)?;
-        let sender_r1_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundOnePublic, &message.from,)?)?;
+    fn validate_and_store_round_two_public(
+        &mut self,
+        message: &Message,
+        auxinfo_identifier: &Identifier,
+        keyshare_identifier: &Identifier,
+    ) -> Result<()> {
+        let receiver_auxinfo_public = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoPublic,
+            auxinfo_identifier,
+            &message.to
+        )?)?;
+        let sender_auxinfo_public = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoPublic,
+            auxinfo_identifier,
+            &message.from
+        )?)?;
+        let sender_keyshare_public = deserialize!(&self.storage.retrieve(
+            StorableType::PublicKeyshare,
+            keyshare_identifier,
+            &message.from
+        )?)?;
+        let receiver_r1_private = deserialize!(&self.storage.retrieve(
+            StorableType::RoundOnePrivate,
+            &message.identifier,
+            &message.to
+        )?)?;
+        let sender_r1_public = deserialize!(&self.storage.retrieve(
+            StorableType::RoundOnePublic,
+            &message.identifier,
+            &message.from,
+        )?)?;
 
         let message_bytes = serialize!(&message.validate_to_round_two_public(
-            &receiver_keygen_public,
-            &sender_keygen_public,
+            &receiver_auxinfo_public,
+            &sender_auxinfo_public,
+            &sender_keyshare_public,
             &receiver_r1_private,
             &sender_r1_public,
         )?)?;
 
-        self.storage
-            .store_presign(StorableType::RoundTwoPublic, &message.from, &message_bytes)?;
+        self.storage.store(
+            StorableType::RoundTwoPublic,
+            &message.identifier,
+            &message.from,
+            &message_bytes,
+        )?;
 
         Ok(())
     }
 
-    fn validate_and_store_round_three_public(&mut self, message: &Message) -> Result<()> {
-        let receiver_keygen_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::PublicKeyshare, &message.to,)?)?;
-        let sender_keygen_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::PublicKeyshare, &message.from,)?)?;
-        let sender_r1_public = deserialize!(&self
-            .storage
-            .retrieve_presign(StorableType::RoundOnePublic, &message.from,)?)?;
+    fn validate_and_store_round_three_public(
+        &mut self,
+        message: &Message,
+        auxinfo_identifier: &Identifier,
+    ) -> Result<()> {
+        let receiver_auxinfo_public = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoPublic,
+            auxinfo_identifier,
+            &message.to
+        )?)?;
+        let sender_auxinfo_public = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoPublic,
+            auxinfo_identifier,
+            &message.from
+        )?)?;
+        let sender_r1_public = deserialize!(&self.storage.retrieve(
+            StorableType::RoundOnePublic,
+            &message.identifier,
+            &message.from
+        )?)?;
 
         let message_bytes = serialize!(&message.validate_to_round_three_public(
-            &receiver_keygen_public,
-            &sender_keygen_public,
+            &receiver_auxinfo_public,
+            &sender_auxinfo_public,
             &sender_r1_public,
         )?)?;
 
-        self.storage.store_presign(
+        self.storage.store(
             StorableType::RoundThreePublic,
+            &message.identifier,
             &message.from,
             &message_bytes,
         )?;
@@ -668,28 +936,42 @@ impl SignatureShare {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ParticipantIdentifier(String);
+pub struct ParticipantIdentifier(Identifier);
 
 impl ParticipantIdentifier {
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+        ParticipantIdentifier(Identifier::random(rng))
+    }
+}
+
+impl std::fmt::Display for ParticipantIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "ParticipantId({})", hex::encode(&self.0 .0[..2]))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Identifier([u8; 32]);
+
+impl Identifier {
+    pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         // Sample random 32 bytes and convert to hex
         let random_bytes = rng.gen::<[u8; 32]>();
-        Self(hex::encode(random_bytes))
+        Self(random_bytes)
     }
 }
 
-impl Display for ParticipantIdentifier {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+impl std::fmt::Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Id({})", hex::encode(&self.0[..2]))
     }
 }
 
-impl FromStr for ParticipantIdentifier {
-    type Err = InternalError;
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(Self(s.to_string()))
-    }
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AuxInfoIdentifier(Identifier);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct KeyshareIdentifier(Identifier);
 
 #[cfg(test)]
 mod tests {
@@ -716,54 +998,84 @@ mod tests {
         Ok(())
     }
 
-    fn is_presigning_done(quorum: &[Participant]) -> Result<bool> {
+    fn is_presigning_done(quorum: &[Participant], presign_identifier: &Identifier) -> Result<()> {
         for participant in quorum {
-            if !(participant.is_ready_to_sign()?) {
-                return Ok(false);
+            if participant.is_presigning_done(presign_identifier).is_err() {
+                return bail!("Presign not done");
             }
         }
-        Ok(true)
+        Ok(())
     }
 
-    /// For N participants, a typical flow for a single participant looks like:
-    ///
-    /// Step 0. 1 keygen
-    /// Step 1. 1 round one, only after all keygens are done
-    ///         Each round one produces N-1 public components
-    /// Step 2. N-1 round twos, one for each sender. Each round
-    ///         two only relies on that sender's round one
-    ///         information, and produces a single public value
-    ///         for round two as well.
-    ///
+    fn is_auxinfo_done(quorum: &[Participant], auxinfo_identifier: &Identifier) -> Result<()> {
+        for participant in quorum {
+            if participant.is_auxinfo_done(auxinfo_identifier).is_err() {
+                return bail!("Auxinfo not done");
+            }
+        }
+        Ok(())
+    }
+
+    fn is_keygen_done(quorum: &[Participant], keygen_identifier: &Identifier) -> Result<()> {
+        for participant in quorum {
+            if participant.is_keygen_done(keygen_identifier).is_err() {
+                return bail!("Keygen not done");
+            }
+        }
+        Ok(())
+    }
+
+    fn process_messages<R: RngCore + CryptoRng>(
+        quorum: &mut Vec<Participant>,
+        rng: &mut R,
+    ) -> Result<()> {
+        // Pick a random participant to process
+        let index = rng.gen_range(0..quorum.len());
+
+        if !quorum[index].has_messages() {
+            // No messages to process for this participant, so pick another participant
+            return Ok(());
+        }
+
+        let messages = quorum[index].process_single_message(rng)?;
+        deliver_all(&messages, quorum)?;
+
+        Ok(())
+    }
+
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_run_protocol() -> Result<()> {
         let mut rng = OsRng;
         let mut quorum = Participant::new_quorum(3, &mut rng)?;
 
-        // Initialize all participants and get their public keyshares to construct the
-        // final signature verification key
-        let mut vk_point = CurvePoint::IDENTITY;
-        for participant in quorum.iter_mut() {
-            participant.do_init(&mut rng)?;
-            let X = participant.get_public_share()?;
-            vk_point = CurvePoint(vk_point.0 + X.0);
+        let auxinfo_identifier = Identifier::random(&mut rng);
+        let keyshare_identifier = Identifier::random(&mut rng);
+        let presign_identifier = Identifier::random(&mut rng);
+
+        for participant in &mut quorum {
+            participant.initialize_auxinfo(&auxinfo_identifier)?;
         }
-        let verification_key =
-            k256::ecdsa::VerifyingKey::from_encoded_point(&vk_point.0.to_affine().into())
-                .map_err(|_| bail_context!("Could not construct verification key"))?;
+        while is_auxinfo_done(&quorum, &auxinfo_identifier).is_err() {
+            process_messages(&mut quorum, &mut rng)?;
+        }
 
-        while !is_presigning_done(&quorum)? {
-            // Pick a random participant to process
-            let index = rng.gen_range(0..quorum.len());
+        for participant in &mut quorum {
+            participant.initialize_keyshares(&keyshare_identifier)?;
+        }
+        while is_keygen_done(&quorum, &keyshare_identifier).is_err() {
+            process_messages(&mut quorum, &mut rng)?;
+        }
 
-            if !quorum[index].has_messages() {
-                // No messages to process for this participant, so pick another participant
-                continue;
-            }
-
-            let messages = quorum[index].process_single_message(&mut rng)?;
-            deliver_all(&messages, &mut quorum)?;
+        for participant in &mut quorum {
+            participant.initialize_presign(
+                &auxinfo_identifier,
+                &keyshare_identifier,
+                &presign_identifier,
+            )?;
+        }
+        while is_presigning_done(&quorum, &presign_identifier).is_err() {
+            process_messages(&mut quorum, &mut rng)?;
         }
 
         // Now, produce a valid signature
@@ -771,11 +1083,22 @@ mod tests {
         hasher.update(b"some test message");
 
         let mut aggregator = SignatureShare::default();
-        for participant in quorum.iter_mut() {
-            let signature_share = participant.sign(hasher.clone())?;
+        for participant in &mut quorum {
+            let signature_share = participant.sign(&presign_identifier, hasher.clone())?;
             aggregator = aggregator.chain(signature_share)?;
         }
         let signature = aggregator.finish()?;
+
+        // Initialize all participants and get their public keyshares to construct the
+        // final signature verification key
+        let mut vk_point = CurvePoint::IDENTITY;
+        for participant in &mut quorum {
+            let X = participant.get_public_keyshare(&keyshare_identifier)?;
+            vk_point = CurvePoint(vk_point.0 + X.0);
+        }
+        let verification_key =
+            k256::ecdsa::VerifyingKey::from_encoded_point(&vk_point.0.to_affine().into())
+                .map_err(|_| bail_context!("Could not construct verification key"))?;
 
         // Moment of truth, does the signature verify?
         assert!(verification_key.verify_digest(hasher, &signature).is_ok());

@@ -17,10 +17,7 @@ use rand::Rng;
 #[macro_use]
 pub mod errors;
 
-#[allow(unused)]
 mod auxinfo;
-pub mod key;
-#[allow(unused)]
 mod keygen;
 pub mod messages;
 mod parameters;
@@ -28,7 +25,7 @@ mod presign;
 pub mod protocol;
 mod storage;
 mod utils;
-pub mod zkp;
+mod zkp;
 
 //#[cfg(test)]
 //mod tests;

@@ -17,14 +17,14 @@ use serde::{Deserialize, Serialize};
 static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiModProof {
+pub(crate) struct PiModProof {
     w: BigNumber,
     // (x, a, b, z),
     elements: Vec<PiModProofElements>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiModProofElements {
+pub(crate) struct PiModProofElements {
     x: BigNumber,
     a: usize,
     b: usize,

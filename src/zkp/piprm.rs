@@ -20,7 +20,7 @@ use super::Proof;
 const LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiPrmProof {
+pub(crate) struct PiPrmProof {
     a_values: [BigNumber; LAMBDA],
     e_values: [bool; LAMBDA],
     z_values: [BigNumber; LAMBDA],

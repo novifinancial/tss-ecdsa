@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use utils::CurvePoint;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiAffgProof {
+pub(crate) struct PiAffgProof {
     alpha: BigNumber,
     beta: BigNumber,
     S: BigNumber,

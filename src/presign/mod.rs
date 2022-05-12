@@ -9,9 +9,11 @@ use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
+use crate::auxinfo::AuxInfoPrivate;
+use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
-use crate::key::KeyShareAndInfo;
-use crate::key::KeygenPublic;
+use crate::keygen::KeySharePrivate;
+use crate::keygen::KeySharePublic;
 use crate::parameters::*;
 use crate::protocol::ParticipantIdentifier;
 use crate::utils::*;
@@ -29,12 +31,12 @@ use std::collections::HashMap;
 // sake of convenience, we sample everything from
 // + 2^{L+1} and use mod N to represent {0, ..., N-1}.
 
-pub mod round_one {
+pub(crate) mod round_one {
     use super::*;
     use crate::zkp::{pienc::PiEncProof, setup::ZkSetupParameters};
 
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Private {
+    pub(crate) struct Private {
         pub(crate) k: BigNumber,
         pub(crate) rho: BigNumber,
         pub(crate) gamma: BigNumber,
@@ -43,7 +45,7 @@ pub mod round_one {
         pub(crate) K: Ciphertext, // Technically can be public but is only one per party
     }
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Public {
+    pub(crate) struct Public {
         pub(crate) K: Ciphertext,
         pub(crate) G: Ciphertext,
         pub(crate) proof: PiEncProof,
@@ -53,7 +55,7 @@ pub mod round_one {
         /// Verify M(vrfy, Π^enc_i, (ssid, j), (I_ε, K_j), ψ_{i,j}) = 1
         /// setup_params should be the receiving party's setup parameters
         /// the modulus N should be the sending party's modulus N
-        pub fn verify(
+        pub(crate) fn verify(
             &self,
             receiver_setup_params: &ZkSetupParameters,
             sender_modulus: &BigNumber,
@@ -66,22 +68,21 @@ pub mod round_one {
     }
 }
 
-pub mod round_two {
+pub(crate) mod round_two {
 
     use super::*;
 
-    use crate::key::KeygenPublic;
     use crate::zkp::piaffg::{PiAffgInput, PiAffgProof};
     use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
     #[derive(Clone, Serialize, Deserialize)]
-    pub struct Private {
+    pub(crate) struct Private {
         pub(crate) beta: BigNumber,
         pub(crate) beta_hat: BigNumber,
     }
 
     #[derive(Clone, Serialize, Deserialize)]
-    pub struct Public {
+    pub(crate) struct Public {
         pub(crate) D: Ciphertext,
         pub(crate) D_hat: Ciphertext,
         pub(crate) F: Ciphertext,
@@ -93,10 +94,11 @@ pub mod round_two {
     }
 
     impl Public {
-        pub fn verify(
+        pub(crate) fn verify(
             &self,
-            receiver_keygen_public: &KeygenPublic,
-            sender_keygen_public: &KeygenPublic,
+            receiver_auxinfo_public: &AuxInfoPublic,
+            sender_auxinfo_public: &AuxInfoPublic,
+            sender_keyshare_public: &KeySharePublic,
             receiver_r1_private: &round_one::Private,
             sender_r1_public: &round_one::Public,
         ) -> Result<()> {
@@ -104,10 +106,10 @@ pub mod round_two {
 
             // Verify the psi proof
             let psi_input = PiAffgInput::new(
-                &receiver_keygen_public.params,
+                &receiver_auxinfo_public.params,
                 &g,
-                receiver_keygen_public.pk.n(),
-                sender_keygen_public.pk.n(),
+                receiver_auxinfo_public.pk.n(),
+                sender_auxinfo_public.pk.n(),
                 &receiver_r1_private.K.0,
                 &self.D.0,
                 &self.F.0,
@@ -117,22 +119,22 @@ pub mod round_two {
 
             // Verify the psi_hat proof
             let psi_hat_input = PiAffgInput::new(
-                &receiver_keygen_public.params,
+                &receiver_auxinfo_public.params,
                 &g,
-                receiver_keygen_public.pk.n(),
-                sender_keygen_public.pk.n(),
+                receiver_auxinfo_public.pk.n(),
+                sender_auxinfo_public.pk.n(),
                 &receiver_r1_private.K.0,
                 &self.D_hat.0,
                 &self.F_hat.0,
-                &sender_keygen_public.X,
+                &sender_keyshare_public.X,
             );
             self.psi_hat.verify(&psi_hat_input)?;
 
             // Verify the psi_prime proof
             let psi_prime_input = PiLogInput::new(
-                &receiver_keygen_public.params,
+                &receiver_auxinfo_public.params,
                 &g,
-                sender_keygen_public.pk.n(),
+                sender_auxinfo_public.pk.n(),
                 &sender_r1_public.G.0,
                 &self.Gamma,
             );
@@ -143,16 +145,15 @@ pub mod round_two {
     }
 }
 
-pub mod round_three {
+pub(crate) mod round_three {
     use k256::Scalar;
 
     use super::*;
 
-    use crate::key::KeygenPublic;
     use crate::zkp::pilog::{PiLogInput, PiLogProof};
 
     #[derive(Clone, Serialize, Deserialize)]
-    pub struct Private {
+    pub(crate) struct Private {
         pub(crate) k: BigNumber,
         pub(crate) chi: Scalar,
         pub(crate) Gamma: CurvePoint,
@@ -161,7 +162,7 @@ pub mod round_three {
     }
 
     #[derive(Clone, Serialize, Deserialize)]
-    pub struct Public {
+    pub(crate) struct Public {
         pub(crate) delta: Scalar,
         pub(crate) Delta: CurvePoint,
         pub(crate) psi_double_prime: PiLogProof,
@@ -172,8 +173,8 @@ pub mod round_three {
     impl Public {
         pub(crate) fn verify(
             &self,
-            receiver_keygen_public: &KeygenPublic,
-            sender_keygen_public: &KeygenPublic,
+            receiver_keygen_public: &AuxInfoPublic,
+            sender_keygen_public: &AuxInfoPublic,
             sender_r1_public: &round_one::Public,
         ) -> Result<()> {
             let psi_double_prime_input = PiLogInput::new(
@@ -190,14 +191,27 @@ pub mod round_three {
     }
 
     /// Used to bundle the inputs passed to round_three() together
-    pub struct RoundThreeInput {
-        pub(crate) keygen_public: crate::key::KeygenPublic,
+    pub(crate) struct RoundThreeInput {
+        pub(crate) auxinfo_public: AuxInfoPublic,
         pub(crate) r2_private: round_two::Private,
         pub(crate) r2_public: round_two::Public,
     }
 }
 
-impl KeyShareAndInfo {
+/////////////////
+// Round Logic //
+/////////////////
+
+/// Convenience struct used to bundle together the parameters for
+/// the current participant
+pub(crate) struct PresignKeyShareAndInfo {
+    pub(crate) keyshare_private: KeySharePrivate,
+    pub(crate) keyshare_public: KeySharePublic,
+    pub(crate) aux_info_private: AuxInfoPrivate,
+    pub(crate) aux_info_public: AuxInfoPublic,
+}
+
+impl PresignKeyShareAndInfo {
     /// Corresponds to pre-signing round 1 for party i
     ///
     /// Produces local shares k and gamma, along with their encrypted
@@ -206,9 +220,9 @@ impl KeyShareAndInfo {
     /// The public_keys parameter corresponds to a KeygenPublic for
     /// each of the other parties.
     #[cfg_attr(feature = "flame_it", flame)]
-    pub fn round_one(
+    pub(crate) fn round_one(
         &self,
-        public_keys: &HashMap<ParticipantIdentifier, KeygenPublic>,
+        public_keys: &HashMap<ParticipantIdentifier, AuxInfoPublic>,
     ) -> Result<(
         round_one::Private,
         HashMap<ParticipantIdentifier, round_one::Public>,
@@ -217,16 +231,24 @@ impl KeyShareAndInfo {
         let k = random_bn_in_range(&mut rng, ELL);
         let gamma = random_bn_in_range(&mut rng, ELL);
 
-        let (K, rho) = self.public.pk.encrypt(&k.to_bytes(), None).unwrap();
-        let (G, nu) = self.public.pk.encrypt(&gamma.to_bytes(), None).unwrap();
+        let (K, rho) = self
+            .aux_info_public
+            .pk
+            .encrypt(&k.to_bytes(), None)
+            .unwrap();
+        let (G, nu) = self
+            .aux_info_public
+            .pk
+            .encrypt(&gamma.to_bytes(), None)
+            .unwrap();
 
         let mut ret_publics = HashMap::new();
-        for (id, keygen_public) in public_keys {
+        for (id, aux_info_public) in public_keys {
             let proof = PiEncProof::prove(
                 &mut rng,
                 &crate::zkp::pienc::PiEncInput::new(
-                    &keygen_public.params,
-                    self.public.pk.n(),
+                    &aux_info_public.params,
+                    self.aux_info_public.pk.n(),
                     &Ciphertext(K.clone()),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
@@ -256,9 +278,9 @@ impl KeyShareAndInfo {
     /// Constructs a D = gamma * K and D_hat = x * K, and Gamma = g * gamma.
     ///
     #[cfg_attr(feature = "flame_it", flame)]
-    pub fn round_two(
+    pub(crate) fn round_two(
         &self,
-        receiver_kg_pub: &KeygenPublic,
+        receiver_aux_info: &AuxInfoPublic,
         sender_r1_priv: &round_one::Private,
         receiver_r1_pub: &round_one::Public,
     ) -> (round_two::Private, round_two::Public) {
@@ -269,16 +291,16 @@ impl KeyShareAndInfo {
         let beta = random_bn_in_range(&mut rng, ELL);
         let beta_hat = random_bn_in_range(&mut rng, ELL);
 
-        let (beta_ciphertext, s) = receiver_kg_pub.pk.encrypt(beta.to_bytes(), None).unwrap();
-        let (beta_hat_ciphertext, s_hat) = receiver_kg_pub
+        let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(beta.to_bytes(), None).unwrap();
+        let (beta_hat_ciphertext, s_hat) = receiver_aux_info
             .pk
             .encrypt(beta_hat.to_bytes(), None)
             .unwrap();
 
-        let D = receiver_kg_pub
+        let D = receiver_aux_info
             .pk
             .add(
-                &receiver_kg_pub
+                &receiver_aux_info
                     .pk
                     .mul(&receiver_r1_pub.K.0, &sender_r1_priv.gamma)
                     .unwrap(),
@@ -286,19 +308,27 @@ impl KeyShareAndInfo {
             )
             .unwrap();
 
-        let D_hat = receiver_kg_pub
+        let D_hat = receiver_aux_info
             .pk
             .add(
-                &receiver_kg_pub
+                &receiver_aux_info
                     .pk
-                    .mul(&receiver_r1_pub.K.0, &self.private.x)
+                    .mul(&receiver_r1_pub.K.0, &self.keyshare_private.x)
                     .unwrap(),
                 &beta_hat_ciphertext,
             )
             .unwrap();
 
-        let (F, r) = self.public.pk.encrypt(beta.to_bytes(), None).unwrap();
-        let (F_hat, r_hat) = self.public.pk.encrypt(beta_hat.to_bytes(), None).unwrap();
+        let (F, r) = self
+            .aux_info_public
+            .pk
+            .encrypt(beta.to_bytes(), None)
+            .unwrap();
+        let (F_hat, r_hat) = self
+            .aux_info_public
+            .pk
+            .encrypt(beta_hat.to_bytes(), None)
+            .unwrap();
 
         let g = CurvePoint::GENERATOR;
         let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
@@ -308,10 +338,10 @@ impl KeyShareAndInfo {
         let psi = PiAffgProof::prove(
             &mut rng,
             &PiAffgInput::new(
-                &receiver_kg_pub.params,
+                &receiver_aux_info.params,
                 &g,
-                receiver_kg_pub.pk.n(),
-                self.public.pk.n(),
+                receiver_aux_info.pk.n(),
+                self.aux_info_public.pk.n(),
                 &receiver_r1_pub.K.0,
                 &D,
                 &F,
@@ -324,25 +354,25 @@ impl KeyShareAndInfo {
         let psi_hat = PiAffgProof::prove(
             &mut rng,
             &PiAffgInput::new(
-                &receiver_kg_pub.params,
+                &receiver_aux_info.params,
                 &g,
-                receiver_kg_pub.pk.n(),
-                self.public.pk.n(),
+                receiver_aux_info.pk.n(),
+                self.aux_info_public.pk.n(),
                 &receiver_r1_pub.K.0,
                 &D_hat,
                 &F_hat,
-                &self.public.X,
+                &self.keyshare_public.X,
             ),
-            &PiAffgSecret::new(&self.private.x, &beta_hat, &s_hat, &r_hat),
+            &PiAffgSecret::new(&self.keyshare_private.x, &beta_hat, &s_hat, &r_hat),
         )
         .unwrap();
 
         let psi_prime = PiLogProof::prove(
             &mut rng,
             &PiLogInput::new(
-                &receiver_kg_pub.params,
+                &receiver_aux_info.params,
                 &g,
-                self.public.pk.n(),
+                self.aux_info_public.pk.n(),
                 &sender_r1_priv.G.0,
                 &Gamma,
             ),
@@ -371,7 +401,7 @@ impl KeyShareAndInfo {
     /// First computes alpha = dec(D), alpha_hat = dec(D_hat).
     /// Computes a delta = gamma * k
     #[cfg_attr(feature = "flame_it", flame)]
-    pub fn round_three(
+    pub(crate) fn round_three(
         &self,
         sender_r1_priv: &round_one::Private,
         other_participant_inputs: &HashMap<ParticipantIdentifier, round_three::RoundThreeInput>,
@@ -381,7 +411,7 @@ impl KeyShareAndInfo {
     )> {
         let order = k256_order();
         let mut delta: BigNumber = sender_r1_priv.gamma.modmul(&sender_r1_priv.k, &order);
-        let mut chi: BigNumber = self.private.x.modmul(&sender_r1_priv.k, &order);
+        let mut chi: BigNumber = self.keyshare_private.x.modmul(&sender_r1_priv.k, &order);
 
         let g = CurvePoint::GENERATOR;
         let mut Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
@@ -390,9 +420,10 @@ impl KeyShareAndInfo {
             let r2_pub_j = round_three_input.r2_public.clone();
             let r2_priv_j = round_three_input.r2_private.clone();
 
-            let alpha = BigNumber::from_slice(self.private.sk.decrypt(&r2_pub_j.D.0).unwrap());
+            let alpha =
+                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D.0).unwrap());
             let alpha_hat =
-                BigNumber::from_slice(self.private.sk.decrypt(&r2_pub_j.D_hat.0).unwrap());
+                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat.0).unwrap());
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
@@ -409,13 +440,12 @@ impl KeyShareAndInfo {
 
         let mut ret_publics = HashMap::new();
         for (other_id, round_three_input) in other_participant_inputs {
-            let receiver_keygen_public = round_three_input.keygen_public.clone();
             let psi_double_prime = PiLogProof::prove(
                 &mut rng,
                 &PiLogInput::new(
-                    &receiver_keygen_public.params,
+                    &round_three_input.auxinfo_public.params,
                     &Gamma,
-                    self.public.pk.n(),
+                    self.aux_info_public.pk.n(),
                     &sender_r1_priv.K.0,
                     &Delta,
                 ),
@@ -450,7 +480,8 @@ pub(crate) struct RecordPair {
     pub(crate) publics: Vec<round_three::Public>,
 }
 
-pub struct PresignRecord {
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PresignRecord {
     R: CurvePoint,
     k: BigNumber,
     chi: k256::Scalar,

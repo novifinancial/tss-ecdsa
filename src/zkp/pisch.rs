@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use utils::CurvePoint;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PiSchProof {
+pub(crate) struct PiSchProof {
     alpha: BigNumber,
     A: CurvePoint,
     e: BigNumber,

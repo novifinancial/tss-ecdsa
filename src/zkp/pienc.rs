@@ -24,7 +24,7 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiEncProof {
+pub(crate) struct PiEncProof {
     alpha: BigNumber,
     S: BigNumber,
     A: BigNumber,

@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use utils::CurvePoint;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiLogProof {
+pub(crate) struct PiLogProof {
     alpha: BigNumber,
     S: BigNumber,
     A: BigNumber,
