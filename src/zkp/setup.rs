@@ -4,7 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 //! Generates setup parameters (N, s, t) used for other ZKPs. See
-//! the paragraph before Section 2.3.1 of https://eprint.iacr.org/2021/060.pdf
+//! the paragraph before Section 2.3.1 of <https://eprint.iacr.org/2021/060.pdf>
 //! for a description.
 
 use crate::errors::*;
@@ -17,7 +17,7 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZkSetupParameters {
+pub(crate) struct ZkSetupParameters {
     pub(crate) N: BigNumber,
     pub(crate) s: BigNumber,
     pub(crate) t: BigNumber,

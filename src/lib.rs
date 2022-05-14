@@ -17,27 +17,18 @@ use rand::Rng;
 #[macro_use]
 pub mod errors;
 
-#[allow(unused)]
 mod auxinfo;
-pub mod key;
-#[allow(unused)]
 mod keygen;
 pub mod messages;
+mod paillier;
 mod parameters;
 mod presign;
 pub mod protocol;
 mod storage;
 mod utils;
-pub mod zkp;
-
-//#[cfg(test)]
-//mod tests;
+mod zkp;
 
 use crate::presign::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Ciphertext(libpaillier::Ciphertext);
 
 // Generate safe primes from a file. Usually, generating safe primes takes
 // awhile (0-5 minutes per 512-bit safe prime on my laptop, average 50 seconds)

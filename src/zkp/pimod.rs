@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 16 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 16 of <https://eprint.iacr.org/2021/060.pdf>
 
 use super::Proof;
 use crate::errors::*;
@@ -17,14 +17,14 @@ use serde::{Deserialize, Serialize};
 static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiModProof {
+pub(crate) struct PiModProof {
     w: BigNumber,
     // (x, a, b, z),
     elements: Vec<PiModProofElements>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiModProofElements {
+pub(crate) struct PiModProofElements {
     x: BigNumber,
     a: usize,
     b: usize,
@@ -32,6 +32,7 @@ pub struct PiModProofElements {
     y: BigNumber,
 }
 
+#[derive(Serialize)]
 pub(crate) struct PiModInput {
     N: BigNumber,
 }
@@ -70,18 +71,19 @@ impl Proof for PiModProof {
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
         // Step 1: Pick a random w in [1, N) that has a Jacobi symbol of -1
-        let mut w = random_bn(rng, &input.N);
+        let mut w = random_positive_bn(rng, &input.N);
         while jacobi(&w, &input.N) != -1 {
-            w = random_bn(rng, &input.N);
+            w = random_positive_bn(rng, &input.N);
         }
 
         let mut transcript = Transcript::new(b"PaillierBlumModulusProof");
 
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(b"w", &w.to_bytes());
 
         let mut elements = vec![];
         for _ in 0..LAMBDA {
-            let y = bn_random(&mut transcript, &input.N);
+            let y = positive_bn_random_from_transcript(&mut transcript, &input.N);
 
             let (a, b, x) = y_prime_combinations(&w, &y, &secret.p, &secret.q)?;
 
@@ -120,11 +122,12 @@ impl Proof for PiModProof {
         }
 
         let mut transcript = Transcript::new(b"PaillierBlumModulusProof");
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(b"w", &self.w.to_bytes());
 
         for elements in &self.elements {
             // First, check that y came from Fiat-Shamir transcript
-            let y = bn_random(&mut transcript, &input.N);
+            let y = positive_bn_random_from_transcript(&mut transcript, &input.N);
             if y != elements.y {
                 return verify_err!("y does not match Fiat-Shamir challenge");
             }
@@ -331,21 +334,6 @@ fn y_prime_combinations(
     }
 
     Ok((success_a, success_b, ret))
-}
-
-/// Generate a random value less than `n`
-/// Taken from unknown_order crate (since they don't currently support an API)
-/// that passes an rng for this function
-fn bn_random(transcript: &mut Transcript, n: &BigNumber) -> BigNumber {
-    let len = n.to_bytes().len();
-    let mut t = vec![0u8; len as usize];
-    loop {
-        transcript.challenge_bytes(b"sampling randomness", t.as_mut_slice());
-        let b = BigNumber::from_slice(t.as_slice());
-        if &b < n {
-            return b;
-        }
-    }
 }
 
 #[cfg(test)]

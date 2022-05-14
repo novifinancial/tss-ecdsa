@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 17 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 17 of <https://eprint.iacr.org/2021/060.pdf>
 
 use crate::errors::*;
 use crate::utils::*;
@@ -20,12 +20,13 @@ use super::Proof;
 const LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PiPrmProof {
+pub(crate) struct PiPrmProof {
     a_values: [BigNumber; LAMBDA],
-    e_values: [bool; LAMBDA],
+    e_values: [u8; LAMBDA],
     z_values: [BigNumber; LAMBDA],
 }
 
+#[derive(Serialize)]
 pub(crate) struct PiPrmInput {
     N: BigNumber,
     s: BigNumber,
@@ -71,17 +72,26 @@ impl Proof for PiPrmProof {
         let mut public_a_values = vec![];
 
         for _ in 0..LAMBDA {
-            let a = random_bn(rng, &secret.phi_n);
+            let a = random_positive_bn(rng, &secret.phi_n);
             let a_commit = modpow(&input.t, &a, &input.N);
 
             secret_a_values.push(a);
             public_a_values.push(a_commit);
         }
+        let a_values: [BigNumber; LAMBDA] = public_a_values
+            .try_into()
+            .map_err(|_| InternalError::Serialization)?;
 
-        let e_values = generate_e_from_a(&public_a_values);
+        let mut transcript = Transcript::new(b"RingPedersenProof");
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"A_i values", &serialize!(&a_values)?);
+
+        let mut e_values = [0u8; LAMBDA];
+        transcript.challenge_bytes(b"e_i values", e_values.as_mut_slice());
+
         let mut z_values = vec![];
         for i in 0..LAMBDA {
-            let z = match e_values[i] {
+            let z = match e_values[i] % 2 == 1 {
                 true => secret_a_values[i].modadd(&secret.lambda, &secret.phi_n),
                 false => secret_a_values[i].clone(),
             };
@@ -89,9 +99,7 @@ impl Proof for PiPrmProof {
         }
 
         let proof = Self {
-            a_values: public_a_values
-                .try_into()
-                .map_err(|_| InternalError::Serialization)?,
+            a_values,
             e_values,
             z_values: z_values
                 .try_into()
@@ -111,9 +119,12 @@ impl Proof for PiPrmProof {
             return verify_err!("Check that everything should be the same length LAMBDA failed");
         }
 
-        // FIXME: Also need to check that s and t are mod N, as well as a and z values
+        let mut transcript = Transcript::new(b"RingPedersenProof");
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"A_i values", &serialize!(&self.a_values)?);
 
-        let e_values = generate_e_from_a(&self.a_values);
+        let mut e_values = [0u8; LAMBDA];
+        transcript.challenge_bytes(b"e_i values", e_values.as_mut_slice());
 
         // Check Fiat-Shamir consistency
         if e_values != self.e_values {
@@ -123,7 +134,7 @@ impl Proof for PiPrmProof {
         for (i, e) in e_values.iter().enumerate() {
             // Verify that t^z = A * s^e (mod N)
             let lhs = modpow(&input.t, &self.z_values[i], &input.N);
-            let rhs = match e {
+            let rhs = match e % 2 == 1 {
                 true => self.a_values[i].modmul(&input.s, &input.N),
                 false => self.a_values[i].modadd(&BigNumber::zero(), &input.N),
             };
@@ -134,21 +145,6 @@ impl Proof for PiPrmProof {
 
         Ok(())
     }
-}
-
-#[cfg_attr(feature = "flame_it", flame("RingPedersenProof"))]
-fn generate_e_from_a(a_values: &[BigNumber]) -> [bool; LAMBDA] {
-    let mut e_values = [false; LAMBDA];
-
-    let mut transcript = Transcript::new(b"RingPedersenProof");
-    for i in 0..LAMBDA {
-        transcript.append_message(b"A_i", &a_values[i].to_bytes());
-        let mut e = vec![0u8; 1];
-        transcript.challenge_bytes(b"sampling randomness", e.as_mut_slice());
-        e_values[i] = e[0] % 2 == 1; // Ensure that it's either a 0 or a 1
-    }
-
-    e_values
 }
 
 #[cfg(test)]
@@ -175,7 +171,7 @@ mod tests {
     #[test]
     fn test_ring_pedersen_proof() -> Result<()> {
         let (input, proof) = random_ring_pedersen_proof()?;
-        assert!(proof.verify(&input).is_ok());
+        proof.verify(&input)?;
 
         Ok(())
     }

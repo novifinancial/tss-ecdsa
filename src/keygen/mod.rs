@@ -5,20 +5,26 @@
 
 //! Creates a [KeySharePublic] and [KeySharePrivate]
 
-use crate::errors::Result;
-use crate::key::{KeyInit, KeygenPrivate, KeygenPublic};
-use crate::zkp::setup::ZkSetupParameters;
-use libpaillier::{unknown_order::BigNumber, *};
+use crate::{errors::Result, utils::CurvePoint};
+use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct KeySharePrivate {
-    pub(crate) x: BigNumber,
+    pub(crate) x: BigNumber, // in the range [1, q)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct KeySharePublic {
-    pub(crate) X: k256::ProjectivePoint,
+    pub(crate) X: CurvePoint,
+}
+
+impl KeySharePublic {
+    pub(crate) fn verify(&self) -> Result<()> {
+        // FIXME: add actual verification logic
+        Ok(())
+    }
 }
 
 /// Generates a new [KeySharePrivate] and [KeySharePublic]
@@ -27,9 +33,11 @@ pub(crate) fn new_keyshare<R: RngCore + CryptoRng>(
 ) -> Result<(KeySharePrivate, KeySharePublic)> {
     let order = crate::utils::k256_order();
     let x = BigNumber::random(&order);
-    let g = k256::ProjectivePoint::GENERATOR;
-    let X = g * crate::utils::bn_to_scalar(&x)
-        .ok_or_else(|| bail_context!("Could not generate public component"))?;
+    let g = CurvePoint::GENERATOR;
+    let X = CurvePoint(
+        g.0 * crate::utils::bn_to_scalar(&x)
+            .ok_or_else(|| bail_context!("Could not generate public component"))?,
+    );
 
     Ok((KeySharePrivate { x }, KeySharePublic { X }))
 }
