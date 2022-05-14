@@ -3,17 +3,16 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 15 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 15 of <https://eprint.iacr.org/2021/060.pdf>
 //!
 //! Proves that the prover knows an x and y where X = g^x and y is the
 //! plaintext of a Paillier ciphertext
 //!
-//! FIXME: need to make a distinction here between L and L'
 
 use super::Proof;
 use crate::utils::{
-    self, bn_random_from_transcript, k256_order, modpow, random_bn, random_bn_in_range,
-    random_bn_in_z_star,
+    self, k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_in_range,
+    random_bn_in_z_star, random_bn_plusminus,
 };
 use crate::zkp::setup::ZkSetupParameters;
 use crate::{
@@ -46,6 +45,7 @@ pub(crate) struct PiAffgProof {
     w_y: BigNumber,
 }
 
+#[derive(Serialize)]
 pub(crate) struct PiAffgInput {
     setup_params: ZkSetupParameters,
     g: CurvePoint,
@@ -124,13 +124,15 @@ impl Proof for PiAffgProof {
         let r = random_bn_in_z_star(rng, &input.N0);
         let r_y = random_bn_in_z_star(rng, &input.N1);
 
-        let gamma = random_bn_in_range(rng, ELL + EPSILON);
-        let delta = random_bn_in_range(rng, ELL + EPSILON);
+        // range_ell_eps = 2^{ELL + EPSILON} * N_hat
+        let range_ell_eps = (BigNumber::one() << (ELL + EPSILON)) * &input.setup_params.N;
+        let gamma = random_bn_plusminus(rng, &range_ell_eps);
+        let delta = random_bn_plusminus(rng, &range_ell_eps);
 
-        // range = 2^{ELL+1} * N_hat
-        let range = (BigNumber::one() << (ELL + 1)) * &input.setup_params.N;
-        let m = random_bn(rng, &range);
-        let mu = random_bn(rng, &range);
+        // range_ell = 2^ELL * N_hat
+        let range_ell = (BigNumber::one() << ELL) * &input.setup_params.N;
+        let m = random_bn_plusminus(rng, &range_ell);
+        let mu = random_bn_plusminus(rng, &range_ell);
 
         let N0_squared = &input.N0 * &input.N0;
         let N1_squared = &input.N1 * &input.N1;
@@ -172,15 +174,7 @@ impl Proof for PiAffgProof {
         };
 
         let mut transcript = Transcript::new(b"PiAffgProof");
-        transcript.append_message(
-            b"(N, s, t)",
-            &[
-                input.setup_params.N.to_bytes(),
-                input.setup_params.s.to_bytes(),
-                input.setup_params.t.to_bytes(),
-            ]
-            .concat(),
-        );
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, T, A, B_x, B_y, E, F)",
             &[
@@ -197,8 +191,10 @@ impl Proof for PiAffgProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e =
-            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
+        let e = plusminus_bn_random_from_transcript(
+            &mut transcript,
+            &(BigNumber::from(2u64) * &k256_order()),
+        );
 
         let z1 = &alpha + &e * &secret.x;
         let z2 = &beta + &e * &secret.y;
@@ -234,15 +230,7 @@ impl Proof for PiAffgProof {
         // First, do Fiat-Shamir consistency check
 
         let mut transcript = Transcript::new(b"PiAffgProof");
-        transcript.append_message(
-            b"(N, s, t)",
-            &[
-                input.setup_params.N.to_bytes(),
-                input.setup_params.s.to_bytes(),
-                input.setup_params.t.to_bytes(),
-            ]
-            .concat(),
-        );
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, T, A, B_x, B_y, E, F)",
             &[
@@ -259,8 +247,10 @@ impl Proof for PiAffgProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e =
-            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
+        let e = plusminus_bn_random_from_transcript(
+            &mut transcript,
+            &(BigNumber::from(2u64) * &k256_order()),
+        );
 
         if e != self.e {
             return verify_err!("Fiat-Shamir consistency check failed");
@@ -337,10 +327,13 @@ impl Proof for PiAffgProof {
 
         // Do range check
 
-        let ell_bound = BigNumber::one() << (ELL + EPSILON + 1);
-        let ell_prime_bound = BigNumber::one() << (ELL_PRIME + EPSILON + 1);
-        if self.z1 > ell_bound || self.z2 > ell_prime_bound {
-            return verify_err!("self.z1 > ell_bound || self.z2 > ell_prime_bound check failed");
+        let ell_bound = BigNumber::one() << (ELL + EPSILON);
+        let ell_prime_bound = BigNumber::one() << (ELL_PRIME + EPSILON);
+        if self.z1 < -ell_bound.clone() || self.z1 > ell_bound {
+            return verify_err!("self.z1 > ell_bound check failed");
+        }
+        if self.z2 < -ell_prime_bound.clone() || self.z2 > ell_prime_bound {
+            return verify_err!("self.z2 > ell_prime_bound check failed");
         }
 
         Ok(())
@@ -350,10 +343,12 @@ impl Proof for PiAffgProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paillier::PaillierEncryptionKey;
+    use crate::utils::random_bn_in_range_min;
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_affg_proof(k_range: usize) -> Result<()> {
+    fn random_paillier_affg_proof(x: &BigNumber, y: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
         let p0 = crate::get_random_safe_prime_512();
@@ -365,25 +360,22 @@ mod tests {
         let N1 = &p1 * &q1;
 
         let sk0 = DecryptionKey::with_safe_primes_unchecked(&p0, &q0).unwrap();
-        let pk0 = EncryptionKey::from(&sk0);
+        let pk0 = PaillierEncryptionKey(EncryptionKey::from(&sk0));
 
         let sk1 = DecryptionKey::with_safe_primes_unchecked(&p1, &q1).unwrap();
-        let pk1 = EncryptionKey::from(&sk1);
-
-        let x = random_bn_in_range(&mut rng, k_range);
-        let y = random_bn_in_range(&mut rng, k_range);
+        let pk1 = PaillierEncryptionKey(EncryptionKey::from(&sk1));
 
         let g = k256::ProjectivePoint::GENERATOR;
 
         let X = CurvePoint(g * utils::bn_to_scalar(&x).unwrap());
-        let (Y, rho_y) = pk1.encrypt(&y.to_bytes(), None).unwrap();
+        let (Y, rho_y) = pk1.encrypt(&y);
 
         let N0_squared = &N0 * &N0;
-        let C = random_bn(&mut rng, &N0_squared);
+        let C = crate::utils::random_positive_bn(&mut rng, &N0_squared);
 
         // Compute D = C^x * (1 + N0)^y rho^N0 (mod N0^2)
         let (D, rho) = {
-            let (D_intermediate, rho) = pk0.encrypt(&y.to_bytes(), None).unwrap();
+            let (D_intermediate, rho) = pk0.encrypt(&y);
             let D = modpow(&C, &x, &N0_squared).modmul(&D_intermediate, &N0_squared);
             (D, rho)
         };
@@ -398,14 +390,21 @@ mod tests {
 
     #[test]
     fn test_paillier_affg_proof() -> Result<()> {
-        // FIXME: extend to supporting ELL_PRIME different from ELL
+        let mut rng = OsRng;
 
-        // Sampling x,y in the range 2^ELL should always succeed
-        let result = random_paillier_affg_proof(ELL);
-        assert!(result.is_ok());
+        let x_small = random_bn_in_range(&mut rng, ELL);
+        let y_small = random_bn_in_range(&mut rng, ELL_PRIME);
+        let x_large = random_bn_in_range_min(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let y_large =
+            random_bn_in_range_min(&mut rng, ELL_PRIME + EPSILON + 1, ELL_PRIME + EPSILON)?;
 
-        // Sampling x,y in the range 2^{ELL + EPSILON + 100} should (usually) fail
-        assert!(random_paillier_affg_proof(ELL + EPSILON + 100).is_err());
+        // Sampling x in 2^ELL and y in 2^{ELL_PRIME} should always succeed
+        random_paillier_affg_proof(&x_small, &y_small)?;
+
+        // All other combinations should fail
+        assert!(random_paillier_affg_proof(&x_small, &y_large).is_err());
+        assert!(random_paillier_affg_proof(&x_large, &y_small).is_err());
+        assert!(random_paillier_affg_proof(&x_large, &y_large).is_err());
 
         Ok(())
     }

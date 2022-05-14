@@ -14,6 +14,7 @@ use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
 use crate::keygen::KeySharePrivate;
 use crate::keygen::KeySharePublic;
+use crate::paillier::PaillierCiphertext;
 use crate::parameters::*;
 use crate::protocol::ParticipantIdentifier;
 use crate::utils::*;
@@ -21,15 +22,7 @@ use crate::zkp::piaffg::*;
 use crate::zkp::pienc::*;
 use crate::zkp::pilog::*;
 use crate::zkp::Proof;
-use crate::Ciphertext;
 use std::collections::HashMap;
-
-// A note on sampling from +- 2^L, and mod N computations:
-// In the paper (https://eprint.iacr.org/2021/060.pdf), ranges
-// are sampled as from being positive/negative 2^L and (mod N)
-// is taken to mean {-N/2, ..., N/2}. However, for the
-// sake of convenience, we sample everything from
-// + 2^{L+1} and use mod N to represent {0, ..., N-1}.
 
 pub(crate) mod round_one {
     use super::*;
@@ -41,13 +34,13 @@ pub(crate) mod round_one {
         pub(crate) rho: BigNumber,
         pub(crate) gamma: BigNumber,
         pub(crate) nu: BigNumber,
-        pub(crate) G: Ciphertext, // Technically can be public but is only one per party
-        pub(crate) K: Ciphertext, // Technically can be public but is only one per party
+        pub(crate) G: PaillierCiphertext, // Technically can be public but is only one per party
+        pub(crate) K: PaillierCiphertext, // Technically can be public but is only one per party
     }
     #[derive(Debug, Serialize, Deserialize)]
     pub(crate) struct Public {
-        pub(crate) K: Ciphertext,
-        pub(crate) G: Ciphertext,
+        pub(crate) K: PaillierCiphertext,
+        pub(crate) G: PaillierCiphertext,
         pub(crate) proof: PiEncProof,
     }
 
@@ -83,10 +76,10 @@ pub(crate) mod round_two {
 
     #[derive(Clone, Serialize, Deserialize)]
     pub(crate) struct Public {
-        pub(crate) D: Ciphertext,
-        pub(crate) D_hat: Ciphertext,
-        pub(crate) F: Ciphertext,
-        pub(crate) F_hat: Ciphertext,
+        pub(crate) D: PaillierCiphertext,
+        pub(crate) D_hat: PaillierCiphertext,
+        pub(crate) F: PaillierCiphertext,
+        pub(crate) F_hat: PaillierCiphertext,
         pub(crate) Gamma: CurvePoint,
         pub(crate) psi: PiAffgProof,
         pub(crate) psi_hat: PiAffgProof,
@@ -133,10 +126,11 @@ pub(crate) mod round_two {
             // Verify the psi_prime proof
             let psi_prime_input = PiLogInput::new(
                 &receiver_auxinfo_public.params,
-                &g,
+                &k256_order(),
                 sender_auxinfo_public.pk.n(),
                 &sender_r1_public.G.0,
                 &self.Gamma,
+                &g,
             );
             self.psi_prime.verify(&psi_prime_input)?;
 
@@ -179,10 +173,11 @@ pub(crate) mod round_three {
         ) -> Result<()> {
             let psi_double_prime_input = PiLogInput::new(
                 &receiver_keygen_public.params,
-                &self.Gamma,
+                &k256_order(),
                 sender_keygen_public.pk.n(),
                 &sender_r1_public.K.0,
                 &self.Delta,
+                &self.Gamma,
             );
             self.psi_double_prime.verify(&psi_double_prime_input)?;
 
@@ -228,34 +223,45 @@ impl PresignKeyShareAndInfo {
         HashMap<ParticipantIdentifier, round_one::Public>,
     )> {
         let mut rng = rand::rngs::OsRng;
-        let k = random_bn_in_range(&mut rng, ELL);
-        let gamma = random_bn_in_range(&mut rng, ELL);
+        let order = k256_order();
 
-        let (K, rho) = self
-            .aux_info_public
-            .pk
-            .encrypt(&k.to_bytes(), None)
-            .unwrap();
-        let (G, nu) = self
-            .aux_info_public
-            .pk
-            .encrypt(&gamma.to_bytes(), None)
-            .unwrap();
+        // Sample k <- F_q
+        let k = random_positive_bn(&mut rng, &order);
+        // Sample gamma <- F_q
+        let gamma = random_positive_bn(&mut rng, &order);
+
+        // Sample rho <- Z_N^* and set K = enc(k; rho)
+        let (K, rho) = loop {
+            let (K, rho) = self.aux_info_public.pk.encrypt(&k);
+            if !BigNumber::is_zero(&rho) {
+                break (K, rho);
+            }
+        };
+
+        // Sample nu <- Z_N^* and set G = enc(gamma; nu)
+        let (G, nu) = loop {
+            let (G, nu) = self.aux_info_public.pk.encrypt(&gamma);
+
+            if !BigNumber::is_zero(&nu) {
+                break (G, nu);
+            }
+        };
 
         let mut ret_publics = HashMap::new();
         for (id, aux_info_public) in public_keys {
+            // Compute psi_{j,i} for every participant j != i
             let proof = PiEncProof::prove(
                 &mut rng,
                 &crate::zkp::pienc::PiEncInput::new(
                     &aux_info_public.params,
                     self.aux_info_public.pk.n(),
-                    &Ciphertext(K.clone()),
+                    &PaillierCiphertext(K.clone()),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
             )?;
             let r1_public = round_one::Public {
-                K: Ciphertext(K.clone()),
-                G: Ciphertext(G.clone()),
+                K: PaillierCiphertext(K.clone()),
+                G: PaillierCiphertext(G.clone()),
                 proof: proof.clone(),
             };
             ret_publics.insert(id.clone(), r1_public);
@@ -266,8 +272,8 @@ impl PresignKeyShareAndInfo {
             rho,
             gamma,
             nu,
-            G: Ciphertext(G),
-            K: Ciphertext(K),
+            G: PaillierCiphertext(G),
+            K: PaillierCiphertext(K),
         };
 
         Ok((r1_private, ret_publics))
@@ -291,17 +297,16 @@ impl PresignKeyShareAndInfo {
         let beta = random_bn_in_range(&mut rng, ELL);
         let beta_hat = random_bn_in_range(&mut rng, ELL);
 
-        let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(beta.to_bytes(), None).unwrap();
-        let (beta_hat_ciphertext, s_hat) = receiver_aux_info
-            .pk
-            .encrypt(beta_hat.to_bytes(), None)
-            .unwrap();
+        let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(&beta);
+        let (beta_hat_ciphertext, s_hat) = receiver_aux_info.pk.encrypt(&beta_hat);
 
         let D = receiver_aux_info
             .pk
+            .0
             .add(
                 &receiver_aux_info
                     .pk
+                    .0
                     .mul(&receiver_r1_pub.K.0, &sender_r1_priv.gamma)
                     .unwrap(),
                 &beta_ciphertext,
@@ -310,25 +315,19 @@ impl PresignKeyShareAndInfo {
 
         let D_hat = receiver_aux_info
             .pk
+            .0
             .add(
                 &receiver_aux_info
                     .pk
+                    .0
                     .mul(&receiver_r1_pub.K.0, &self.keyshare_private.x)
                     .unwrap(),
                 &beta_hat_ciphertext,
             )
             .unwrap();
 
-        let (F, r) = self
-            .aux_info_public
-            .pk
-            .encrypt(beta.to_bytes(), None)
-            .unwrap();
-        let (F_hat, r_hat) = self
-            .aux_info_public
-            .pk
-            .encrypt(beta_hat.to_bytes(), None)
-            .unwrap();
+        let (F, r) = self.aux_info_public.pk.encrypt(&beta);
+        let (F_hat, r_hat) = self.aux_info_public.pk.encrypt(&beta_hat);
 
         let g = CurvePoint::GENERATOR;
         let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
@@ -371,10 +370,11 @@ impl PresignKeyShareAndInfo {
             &mut rng,
             &PiLogInput::new(
                 &receiver_aux_info.params,
-                &g,
+                &k256_order(),
                 self.aux_info_public.pk.n(),
                 &sender_r1_priv.G.0,
                 &Gamma,
+                &g,
             ),
             &PiLogSecret::new(&sender_r1_priv.gamma, &sender_r1_priv.nu),
         )
@@ -383,10 +383,10 @@ impl PresignKeyShareAndInfo {
         (
             round_two::Private { beta, beta_hat },
             round_two::Public {
-                D: Ciphertext(D),
-                D_hat: Ciphertext(D_hat),
-                F: Ciphertext(F),
-                F_hat: Ciphertext(F_hat),
+                D: PaillierCiphertext(D),
+                D_hat: PaillierCiphertext(D_hat),
+                F: PaillierCiphertext(F),
+                F_hat: PaillierCiphertext(F_hat),
                 Gamma,
                 psi,
                 psi_hat,
@@ -444,10 +444,11 @@ impl PresignKeyShareAndInfo {
                 &mut rng,
                 &PiLogInput::new(
                     &round_three_input.auxinfo_public.params,
-                    &Gamma,
+                    &order,
                     self.aux_info_public.pk.n(),
                     &sender_r1_priv.K.0,
                     &Delta,
+                    &Gamma,
                 ),
                 &PiLogSecret::new(&sender_r1_priv.k, &sender_r1_priv.rho),
             )
@@ -512,7 +513,6 @@ impl From<RecordPair> for PresignRecord {
     }
 }
 
-//use ecdsa::hazmat::FromDigest;
 use k256::elliptic_curve::AffineXCoordinate;
 use k256::elliptic_curve::PrimeField;
 

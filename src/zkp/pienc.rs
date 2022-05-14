@@ -3,20 +3,21 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 14 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 14 of <https://eprint.iacr.org/2021/060.pdf>
 //!
 //! Proves that the plaintext of the Paillier ciphertext K_i lies within the range
-//! [1, 2^{ELL+EPSILON+1}]
+//! [1, 2^{ELL+EPSILON}]
 
 use super::Proof;
 use crate::utils::{
-    bn_random_from_transcript, k256_order, modpow, random_bn_in_range, random_bn_in_z_star,
+    k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_in_range,
+    random_bn_in_z_star,
 };
 use crate::zkp::setup::ZkSetupParameters;
 use crate::{
     errors::*,
+    paillier::PaillierCiphertext,
     parameters::{ELL, EPSILON},
-    Ciphertext,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -35,14 +36,19 @@ pub(crate) struct PiEncProof {
     z3: BigNumber,
 }
 
+#[derive(Serialize)]
 pub(crate) struct PiEncInput {
     setup_params: ZkSetupParameters,
     N0: BigNumber,
-    K: Ciphertext,
+    K: PaillierCiphertext,
 }
 
 impl PiEncInput {
-    pub(crate) fn new(setup_params: &ZkSetupParameters, N0: &BigNumber, K: &Ciphertext) -> Self {
+    pub(crate) fn new(
+        setup_params: &ZkSetupParameters,
+        N0: &BigNumber,
+        K: &PaillierCiphertext,
+    ) -> Self {
         Self {
             setup_params: setup_params.clone(),
             N0: N0.clone(),
@@ -79,7 +85,7 @@ impl Proof for PiEncProof {
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
-        // Sample alpha from 2^{ELL + EPSILON}
+        // Sample alpha from +- 2^{ELL + EPSILON}
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
 
         let mu = random_bn_in_range(rng, ELL) * &input.setup_params.N;
@@ -105,15 +111,7 @@ impl Proof for PiEncProof {
         };
 
         let mut transcript = Transcript::new(b"PiEncProof");
-        transcript.append_message(
-            b"(N, s, t)",
-            &[
-                input.setup_params.N.to_bytes(),
-                input.setup_params.s.to_bytes(),
-                input.setup_params.t.to_bytes(),
-            ]
-            .concat(),
-        );
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(b"alpha", &alpha.to_bytes());
         transcript.append_message(
             b"(S, A, C)",
@@ -122,7 +120,10 @@ impl Proof for PiEncProof {
 
         // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
         // [0, 2*q] instead
-        let e = bn_random_from_transcript(&mut transcript, &(BigNumber::from(2) * &k256_order()));
+        let e = plusminus_bn_random_from_transcript(
+            &mut transcript,
+            &(BigNumber::from(2) * &k256_order()),
+        );
 
         let z1 = &alpha + &e * &secret.k;
         let z2 = r.modmul(&modpow(&secret.rho, &e, &input.N0), &input.N0);
@@ -147,23 +148,17 @@ impl Proof for PiEncProof {
         // First check Fiat-Shamir challenge consistency
 
         let mut transcript = Transcript::new(b"PiEncProof");
-        transcript.append_message(
-            b"(N, s, t)",
-            &[
-                input.setup_params.N.to_bytes(),
-                input.setup_params.s.to_bytes(),
-                input.setup_params.t.to_bytes(),
-            ]
-            .concat(),
-        );
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(b"alpha", &self.alpha.to_bytes());
         transcript.append_message(
             b"(S, A, C)",
             &[self.S.to_bytes(), self.A.to_bytes(), self.C.to_bytes()].concat(),
         );
 
-        let e =
-            bn_random_from_transcript(&mut transcript, &(BigNumber::from(2u64) * &k256_order()));
+        let e = plusminus_bn_random_from_transcript(
+            &mut transcript,
+            &(BigNumber::from(2u64) * &k256_order()),
+        );
         if e != self.e {
             return verify_err!("Fiat-Shamir didn't verify");
         }
@@ -200,8 +195,8 @@ impl Proof for PiEncProof {
         }
 
         // Do range check
-        let bound = BigNumber::one() << (ELL + EPSILON + 1);
-        if self.z1 > bound {
+        let bound = BigNumber::one() << (ELL + EPSILON);
+        if self.z1 < -bound.clone() || self.z1 > bound {
             return verify_err!("self.z1 > bound check failed");
         }
 
@@ -212,10 +207,12 @@ impl Proof for PiEncProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paillier::PaillierEncryptionKey;
+    use crate::utils::random_bn_in_range_min;
     use libpaillier::*;
     use rand::rngs::OsRng;
 
-    fn random_paillier_encryption_in_range_proof(k_range: usize) -> Result<()> {
+    fn random_paillier_encryption_in_range_proof(k: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
         let p = crate::get_random_safe_prime_512();
@@ -223,19 +220,18 @@ mod tests {
         let N = &p * &q;
 
         let sk = DecryptionKey::with_safe_primes_unchecked(&p, &q).unwrap();
-        let pk = EncryptionKey::from(&sk);
+        let pk = PaillierEncryptionKey(EncryptionKey::from(&sk));
 
-        let k = random_bn_in_range(&mut rng, k_range);
-        let (K, rho) = pk.encrypt(&k.to_bytes(), None).unwrap();
+        let (K, rho) = pk.encrypt(k);
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
         let input = PiEncInput {
             setup_params,
             N0: N,
-            K: Ciphertext(K),
+            K: PaillierCiphertext(K),
         };
 
-        let proof = PiEncProof::prove(&mut rng, &input, &PiEncSecret { k, rho })?;
+        let proof = PiEncProof::prove(&mut rng, &input, &PiEncSecret { k: k.clone(), rho })?;
 
         let proof_bytes = bincode::serialize(&proof).unwrap();
         let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
@@ -247,12 +243,16 @@ mod tests {
 
     #[test]
     fn test_paillier_encryption_in_range_proof() -> Result<()> {
-        // Sampling k in the range 2^ELL should always succeed
-        let result = random_paillier_encryption_in_range_proof(ELL);
-        assert!(result.is_ok());
+        let mut rng = OsRng;
 
-        // Sampling k in the range 2^{ELL + EPSILON + 100} should (usually) fail
-        assert!(random_paillier_encryption_in_range_proof(ELL + EPSILON + 100).is_err());
+        let k_small = random_bn_in_range(&mut rng, ELL);
+        let k_large = random_bn_in_range_min(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+
+        // Sampling k in the range 2^ELL should always succeed
+        random_paillier_encryption_in_range_proof(&k_small)?;
+
+        // Sampling k in the range (2^{ELL + EPSILON, 2^{ELL + EPSILON + 1}] should fail
+        assert!(random_paillier_encryption_in_range_proof(&k_large).is_err());
 
         Ok(())
     }

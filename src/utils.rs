@@ -11,6 +11,7 @@ use k256::elliptic_curve::Curve;
 use k256::Secp256k1;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
+use rand::Rng;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -19,7 +20,7 @@ const MAX_ITER: usize = 50_000usize;
 /// Wrapper around k256::ProjectivePoint so that we can define our own
 /// serialization/deserialization for it
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
-pub struct CurvePoint(pub k256::ProjectivePoint);
+pub struct CurvePoint(pub(crate) k256::ProjectivePoint);
 
 impl CurvePoint {
     pub const GENERATOR: Self = CurvePoint(k256::ProjectivePoint::GENERATOR);
@@ -58,26 +59,77 @@ pub(crate) fn modpow(a: &BigNumber, e: &BigNumber, n: &BigNumber) -> BigNumber {
     a.modpow(e, n)
 }
 
-/// Generate a random positive BigNumber in the range 0..n
-pub(crate) fn random_bn<R: RngCore + CryptoRng>(_rng: &mut R, n: &BigNumber) -> BigNumber {
+/// Generate a random BigNumber in the range -n, ..., n
+pub(crate) fn random_positive_bn<R: RngCore + CryptoRng>(_rng: &mut R, n: &BigNumber) -> BigNumber {
     BigNumber::random(n)
 }
 
-/// Generate a random positive BigNumber in the range 0..2^{n+1}
-pub(crate) fn random_bn_in_range<R: RngCore + CryptoRng>(_rng: &mut R, n: usize) -> BigNumber {
-    BigNumber::random(&(BigNumber::one() << (n + 1)))
+/// Generate a random BigNumber in the range -n, ..., n
+pub(crate) fn random_bn_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
+    let val = BigNumber::random(n);
+    let is_positive: bool = rng.gen();
+    match is_positive {
+        true => val,
+        false => -val,
+    }
 }
 
-/// Generate a random value less than `2^{n+1}`
-/// Taken from unknown_order crate (since they don't currently support an API)
-/// that passes an rng for this function
-pub(crate) fn bn_random_from_transcript(transcript: &mut Transcript, n: &BigNumber) -> BigNumber {
+/// Generate a random BigNumber in the range -2^n, ..., 0, ..., 2^n
+pub(crate) fn random_bn_in_range<R: RngCore + CryptoRng>(rng: &mut R, n: usize) -> BigNumber {
+    let val = BigNumber::random(&(BigNumber::one() << n));
+    let is_positive: bool = rng.gen();
+    match is_positive {
+        true => val,
+        false => -val,
+    }
+}
+
+/// Generate a random BigNumber x in the range -2^n, ..., 0, ..., 2^n, where |x| > 2^min_bound
+#[cfg(test)]
+pub(crate) fn random_bn_in_range_min<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    n: usize,
+    min_bound: usize,
+) -> crate::errors::Result<BigNumber> {
+    if min_bound >= n {
+        return bail!("min_bound needs to be less than n");
+    }
+    let min_bound_bn = (BigNumber::one() << n) - (BigNumber::one() << min_bound);
+    let val = BigNumber::random(&(min_bound_bn + (BigNumber::one() << min_bound)));
+    let is_positive: bool = rng.gen();
+    Ok(match is_positive {
+        true => val,
+        false => -val,
+    })
+}
+
+/// Produces a random value in [-n, ..., 0, ..., n]
+pub(crate) fn plusminus_bn_random_from_transcript(
+    transcript: &mut Transcript,
+    n: &BigNumber,
+) -> BigNumber {
+    let mut is_neg_byte = vec![0u8; 1];
+    transcript.challenge_bytes(b"sampling negation bit", is_neg_byte.as_mut_slice());
+    let is_neg: bool = is_neg_byte[0] & 1 == 1;
+
+    let b = positive_bn_random_from_transcript(transcript, n);
+    match is_neg {
+        true => -b,
+        false => b,
+    }
+}
+
+/// Produces a random value in [0, ..., n]
+pub(crate) fn positive_bn_random_from_transcript(
+    transcript: &mut Transcript,
+    n: &BigNumber,
+) -> BigNumber {
     let len = n.to_bytes().len();
     let mut t = vec![0u8; len as usize];
     loop {
         transcript.challenge_bytes(b"sampling randomness", t.as_mut_slice());
         let b = BigNumber::from_slice(t.as_slice());
-        if &b < n {
+        if &b <= n {
             return b;
         }
     }
@@ -102,14 +154,21 @@ pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     let order = k256_order();
 
     let x_modded = x % order;
-
     let bytes = x_modded.to_bytes();
 
     let mut slice = vec![0u8; 32 - bytes.len()];
     slice.extend_from_slice(&bytes);
-    Option::from(k256::Scalar::from_repr(GenericArray::clone_from_slice(
-        &slice,
-    )))
+    let mut ret: k256::Scalar = Option::from(k256::Scalar::from_repr(
+        GenericArray::clone_from_slice(&slice),
+    ))
+    .unwrap();
+
+    // Make sure to negate the scalar if the original input was negative
+    if x < &BigNumber::zero() {
+        ret = ret.negate();
+    }
+
+    Some(ret)
 }
 
 pub(crate) fn k256_order() -> BigNumber {
@@ -140,5 +199,13 @@ mod tests {
         }
 
         assert!(max_len > num_bytes - 2);
+    }
+
+    #[test]
+    fn test_bn_to_scalar_neg() {
+        let neg1 = BigNumber::zero() - BigNumber::one();
+
+        let scalar = bn_to_scalar(&neg1).unwrap();
+        assert_eq!(k256::Scalar::ZERO, scalar.add(&k256::Scalar::ONE));
     }
 }

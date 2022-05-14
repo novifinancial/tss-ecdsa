@@ -20,6 +20,7 @@ pub mod errors;
 mod auxinfo;
 mod keygen;
 pub mod messages;
+mod paillier;
 mod parameters;
 mod presign;
 pub mod protocol;
@@ -27,14 +28,7 @@ mod storage;
 mod utils;
 mod zkp;
 
-//#[cfg(test)]
-//mod tests;
-
 use crate::presign::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Ciphertext(libpaillier::Ciphertext);
 
 // Generate safe primes from a file. Usually, generating safe primes takes
 // awhile (0-5 minutes per 512-bit safe prime on my laptop, average 50 seconds)

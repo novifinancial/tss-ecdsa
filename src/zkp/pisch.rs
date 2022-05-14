@@ -3,11 +3,11 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
-//! Implements the ZKP from Figure 22 of https://eprint.iacr.org/2021/060.pdf
+//! Implements the ZKP from Figure 22 of <https://eprint.iacr.org/2021/060.pdf>
 
 use super::Proof;
 use crate::errors::*;
-use crate::utils::{self, bn_random_from_transcript};
+use crate::utils::{self, positive_bn_random_from_transcript};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -16,12 +16,12 @@ use utils::CurvePoint;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchProof {
-    alpha: BigNumber,
     A: CurvePoint,
     e: BigNumber,
     z: BigNumber,
 }
 
+#[derive(Serialize)]
 pub(crate) struct PiSchInput {
     g: CurvePoint,
     q: BigNumber,
@@ -61,28 +61,19 @@ impl Proof for PiSchProof {
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
         // Sample alpha from F_q
-        let alpha = crate::utils::random_bn(rng, &input.q);
+        let alpha = crate::utils::random_positive_bn(rng, &input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
 
         let mut transcript = Transcript::new(b"PiSchProof");
-        transcript.append_message(
-            b"(g, q, X)",
-            &[
-                bincode::serialize(&input.g).unwrap(),
-                input.q.to_bytes(),
-                bincode::serialize(&input.X).unwrap(),
-            ]
-            .concat(),
-        );
-        transcript.append_message(b"alpha", &alpha.to_bytes());
-        transcript.append_message(b"A", &bincode::serialize(&A).unwrap());
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"A", &serialize!(&A)?);
 
         // Verifier samples e in F_q
-        let e = bn_random_from_transcript(&mut transcript, &input.q);
+        let e = positive_bn_random_from_transcript(&mut transcript, &input.q);
 
         let z = &alpha + &e * &secret.x;
 
-        let proof = Self { alpha, A, e, z };
+        let proof = Self { A, e, z };
         Ok(proof)
     }
 
@@ -91,20 +82,11 @@ impl Proof for PiSchProof {
         // First check Fiat-Shamir challenge consistency
 
         let mut transcript = Transcript::new(b"PiSchProof");
-        transcript.append_message(
-            b"(g, q, X)",
-            &[
-                bincode::serialize(&input.g).unwrap(),
-                input.q.to_bytes(),
-                bincode::serialize(&input.X).unwrap(),
-            ]
-            .concat(),
-        );
-        transcript.append_message(b"alpha", &self.alpha.to_bytes());
-        transcript.append_message(b"A", &bincode::serialize(&self.A).unwrap());
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"A", &serialize!(&self.A)?);
 
         // Verifier samples e in F_q
-        let e = bn_random_from_transcript(&mut transcript, &input.q);
+        let e = positive_bn_random_from_transcript(&mut transcript, &input.q);
         if e != self.e {
             return verify_err!("Fiat-Shamir consistency check failed");
         }
@@ -135,10 +117,10 @@ mod tests {
         let q = crate::utils::k256_order();
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
-        let mut x = crate::utils::random_bn(&mut rng, &q);
+        let mut x = crate::utils::random_positive_bn(&mut rng, &q);
         let X = CurvePoint(g.0 * utils::bn_to_scalar(&x).unwrap());
         if additive {
-            x += crate::utils::random_bn(&mut rng, &q);
+            x += crate::utils::random_positive_bn(&mut rng, &q);
         }
 
         let input = PiSchInput::new(&g, &q, &X);
@@ -150,10 +132,10 @@ mod tests {
     #[test]
     fn test_schnorr_proof() -> Result<()> {
         let (input, proof) = random_schnorr_proof(false)?;
-        assert!(proof.verify(&input).is_ok());
+        proof.verify(&input)?;
 
         let (input, proof) = random_schnorr_proof(true)?;
-        assert!(!proof.verify(&input).is_ok());
+        assert!(proof.verify(&input).is_err());
 
         Ok(())
     }
