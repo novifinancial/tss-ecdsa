@@ -60,8 +60,8 @@ impl Storage {
     ) -> Result<()> {
         let storable_index = StorableIndex {
             storable_type,
-            identifier: identifier.clone(),
-            participant: associated_participant_id.clone(),
+            identifier: *identifier,
+            participant: *associated_participant_id,
         };
         self.store_index(storable_index, val)
     }
@@ -69,13 +69,13 @@ impl Storage {
     pub(crate) fn retrieve(
         &self,
         storable_type: StorableType,
-        identifier: &Identifier,
-        id: &ParticipantIdentifier,
+        identifier: Identifier,
+        participant: ParticipantIdentifier,
     ) -> Result<Vec<u8>> {
         self.retrieve_index(StorableIndex {
             storable_type,
-            identifier: identifier.clone(),
-            participant: id.clone(),
+            identifier,
+            participant,
         })
     }
 
@@ -87,8 +87,8 @@ impl Storage {
             .iter()
             .map(|(t, identifier, participant)| StorableIndex {
                 storable_type: t.clone(),
-                identifier: identifier.clone(),
-                participant: participant.clone(),
+                identifier: *identifier,
+                participant: *participant,
             })
             .collect();
         self.contains_index_batch(&storable_indices)

@@ -252,14 +252,14 @@ mod tests {
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
-        let X = CurvePoint(g.0 * utils::bn_to_scalar(&x).unwrap());
-        let (C, rho) = pk.encrypt(&x);
+        let X = CurvePoint(g.0 * utils::bn_to_scalar(x).unwrap());
+        let (C, rho) = pk.encrypt(x);
 
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
         let input = PiLogInput::new(&setup_params, &crate::utils::k256_order(), &N0, &C, &X, &g);
 
-        let proof = PiLogProof::prove(&mut rng, &input, &PiLogSecret::new(&x, &rho))?;
+        let proof = PiLogProof::prove(&mut rng, &input, &PiLogSecret::new(x, &rho))?;
 
         proof.verify(&input)
     }
