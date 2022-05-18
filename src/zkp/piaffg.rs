@@ -367,23 +367,23 @@ mod tests {
 
         let g = k256::ProjectivePoint::GENERATOR;
 
-        let X = CurvePoint(g * utils::bn_to_scalar(&x).unwrap());
-        let (Y, rho_y) = pk1.encrypt(&y);
+        let X = CurvePoint(g * utils::bn_to_scalar(x).unwrap());
+        let (Y, rho_y) = pk1.encrypt(y);
 
         let N0_squared = &N0 * &N0;
         let C = crate::utils::random_positive_bn(&mut rng, &N0_squared);
 
         // Compute D = C^x * (1 + N0)^y rho^N0 (mod N0^2)
         let (D, rho) = {
-            let (D_intermediate, rho) = pk0.encrypt(&y);
-            let D = modpow(&C, &x, &N0_squared).modmul(&D_intermediate, &N0_squared);
+            let (D_intermediate, rho) = pk0.encrypt(y);
+            let D = modpow(&C, x, &N0_squared).modmul(&D_intermediate, &N0_squared);
             (D, rho)
         };
 
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
         let input = PiAffgInput::new(&setup_params, &CurvePoint(g), &N0, &N1, &C, &D, &Y, &X);
-        let proof = PiAffgProof::prove(&mut rng, &input, &PiAffgSecret::new(&x, &y, &rho, &rho_y))?;
+        let proof = PiAffgProof::prove(&mut rng, &input, &PiAffgSecret::new(x, y, &rho, &rho_y))?;
 
         proof.verify(&input)
     }

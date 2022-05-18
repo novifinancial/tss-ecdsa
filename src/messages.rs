@@ -48,16 +48,16 @@ pub struct Message {
 impl Message {
     pub(crate) fn new(
         message_type: MessageType,
-        identifier: &Identifier,
-        from: &ParticipantIdentifier,
-        to: &ParticipantIdentifier,
+        identifier: Identifier,
+        from: ParticipantIdentifier,
+        to: ParticipantIdentifier,
         unverified_bytes: &[u8],
     ) -> Self {
         Self {
             message_type,
-            identifier: identifier.clone(),
-            from: from.clone(),
-            to: to.clone(),
+            identifier,
+            from,
+            to,
             unverified_bytes: unverified_bytes.to_vec(),
         }
     }

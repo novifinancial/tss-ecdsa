@@ -264,7 +264,7 @@ impl PresignKeyShareAndInfo {
                 G: PaillierCiphertext(G.clone()),
                 proof: proof.clone(),
             };
-            ret_publics.insert(id.clone(), r1_public);
+            ret_publics.insert(*id, r1_public);
         }
 
         let r1_private = round_one::Private {
@@ -459,7 +459,7 @@ impl PresignKeyShareAndInfo {
                 psi_double_prime,
                 Gamma,
             };
-            ret_publics.insert(other_id.clone(), val);
+            ret_publics.insert(*other_id, val);
         }
 
         let private = round_three::Private {

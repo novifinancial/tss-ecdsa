@@ -4,6 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #![allow(non_snake_case)] // FIXME: To be removed in the future
+// #![warn(clippy::cargo, missing_docs)]
 #![cfg_attr(feature = "flame_it", feature(proc_macro_hygiene))]
 #[cfg(feature = "flame_it")]
 extern crate flame;
