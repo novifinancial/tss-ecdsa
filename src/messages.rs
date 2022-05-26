@@ -5,6 +5,9 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+//! Contains the functions and definitions for dealing with messages that are
+//! passed between participants
+
 use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
 use crate::keygen::KeySharePublic;
@@ -21,25 +24,38 @@ use serde::{Deserialize, Serialize};
 // Message API //
 /////////////////
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) enum MessageType {
+/// An enum consisting of all message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MessageType {
+    /// Signals that auxinfo generation is ready
+    AuxInfoReady,
+    /// The public auxinfo parameters for a participant
     AuxInfoPublic,
-    BeginKeyGeneration,
-    BeginAuxInfoGeneration,
-    BeginPresign,
-    PublicKeyshare,
+    /// Signals that keyshare generation is ready
+    KeygenReady,
+    /// Signals that presigning is ready
+    PresignReady,
+    /// First round of presigning
     PresignRoundOne,
+    /// Second round of presigning
     PresignRoundTwo,
+    /// Third round of presigning
     PresignRoundThree,
+    /// Public keyshare produced by keygen for a participant
+    PublicKeyshare,
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
-#[derive(Debug, Display, Serialize, Deserialize)]
+#[derive(Debug, Clone, Display, Serialize, Deserialize)]
 pub struct Message {
-    pub(crate) message_type: MessageType,
-    pub(crate) identifier: Identifier,
-    pub(crate) from: ParticipantIdentifier,
-    pub(crate) to: ParticipantIdentifier,
+    /// The type of the message
+    pub message_type: MessageType,
+    /// The unique identifier corresponding to the object carried by the message
+    pub identifier: Identifier,
+    /// Which participant this message is coming from
+    pub from: ParticipantIdentifier,
+    /// Which participant this message is addressed to
+    pub to: ParticipantIdentifier,
     /// The raw bytes for the message, which need to be verified.
     /// This should be a private member of the struct, so that
     /// we require consumers to call the verify() function in
@@ -48,7 +64,8 @@ pub struct Message {
 }
 
 impl Message {
-    pub(crate) fn new(
+    /// Creates a new instance of [Message]
+    pub fn new(
         message_type: MessageType,
         identifier: Identifier,
         from: ParticipantIdentifier,

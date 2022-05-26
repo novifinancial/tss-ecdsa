@@ -16,8 +16,11 @@ use std::hash::Hash;
 // Private Storage API //
 /////////////////////////
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub(crate) enum StorableType {
+    AuxInfoReady,
+    KeygenReady,
+    PresignReady,
     AuxInfoPrivate,
     AuxInfoPublic,
     PrivateKeyshare,
@@ -45,7 +48,7 @@ impl Storable for StorableIndex {}
 
 pub(crate) trait Storable: Serialize + Debug {}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct Storage(HashMap<Vec<u8>, Vec<u8>>);
 
 impl Storage {
@@ -88,7 +91,7 @@ impl Storage {
         let storable_indices: Vec<StorableIndex> = type_and_id
             .iter()
             .map(|(t, identifier, participant)| StorableIndex {
-                storable_type: t.clone(),
+                storable_type: *t,
                 identifier: *identifier,
                 participant: *participant,
             })

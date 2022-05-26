@@ -28,10 +28,10 @@ pub(crate) struct ZkSetupParameters {
 }
 
 impl ZkSetupParameters {
-    #[allow(unused)]
+    #[cfg(test)]
     pub(crate) fn gen<R: RngCore + CryptoRng>(rng: &mut R) -> Result<Self> {
-        let p = crate::get_random_safe_prime_512();
-        let q = crate::get_random_safe_prime_512();
+        let p = crate::utils::get_random_safe_prime_512();
+        let q = crate::utils::get_random_safe_prime_512();
         let N = &p * &q;
         Self::gen_from_primes(rng, &N, &p, &q)
     }

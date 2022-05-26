@@ -32,7 +32,7 @@ pub(crate) fn new_auxinfo<R: RngCore + CryptoRng>(
     // Pull in pre-generated safe primes from text file (not a safe operation!).
     // This is meant to save on the time needed to generate these primes, but
     // should not be done in a production environment!
-    let safe_primes = crate::get_safe_primes();
+    let safe_primes = crate::utils::get_safe_primes();
     let two_safe_primes = safe_primes.iter().choose_multiple(rng, 2);
 
     // FIXME: do proper safe prime generation

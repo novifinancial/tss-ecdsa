@@ -22,10 +22,11 @@ const MAX_ITER: usize = 50_000usize;
 /// Wrapper around k256::ProjectivePoint so that we can define our own
 /// serialization/deserialization for it
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
-pub struct CurvePoint(pub(crate) k256::ProjectivePoint);
+pub struct CurvePoint(pub k256::ProjectivePoint);
 
 impl CurvePoint {
-    pub const GENERATOR: Self = CurvePoint(k256::ProjectivePoint::GENERATOR);
+    pub(crate) const GENERATOR: Self = CurvePoint(k256::ProjectivePoint::GENERATOR);
+    /// The identity point, used to initialize the aggregation of a verification key
     pub const IDENTITY: Self = CurvePoint(k256::ProjectivePoint::IDENTITY);
 }
 
@@ -210,4 +211,31 @@ mod tests {
         let scalar = bn_to_scalar(&neg1).unwrap();
         assert_eq!(k256::Scalar::ZERO, scalar.add(&k256::Scalar::ONE));
     }
+}
+
+// Prime generation functions
+
+// Generate safe primes from a file. Usually, generating safe primes takes
+// awhile (0-5 minutes per 512-bit safe prime on my laptop, average 50 seconds)
+lazy_static::lazy_static! {
+    static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes();
+}
+
+pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
+    let file_contents = std::fs::read_to_string("src/safe_primes_512.txt").unwrap();
+    let mut safe_primes_str: Vec<&str> = file_contents.split('\n').collect();
+    safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
+    let safe_primes: Vec<BigNumber> = safe_primes_str
+        .into_iter()
+        .map(|s| BigNumber::from_slice(&hex::decode(&s).unwrap()))
+        .collect();
+    safe_primes
+}
+
+/// We sample safe primes that are 512 bits long. This comes from the security parameter
+/// setting of κ = 128, and safe primes being of length 4κ (Figure 6, Round 1 of the CGGMP'21 paper)
+#[cfg(test)]
+pub(crate) fn get_random_safe_prime_512() -> BigNumber {
+    // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
+    POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()
 }

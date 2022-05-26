@@ -245,8 +245,8 @@ mod tests {
     fn random_paillier_log_proof(x: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
-        let p0 = crate::get_random_safe_prime_512();
-        let q0 = crate::get_random_safe_prime_512();
+        let p0 = crate::utils::get_random_safe_prime_512();
+        let q0 = crate::utils::get_random_safe_prime_512();
         let N0 = &p0 * &q0;
 
         let sk = DecryptionKey::with_safe_primes_unchecked(&p0, &q0).unwrap();
