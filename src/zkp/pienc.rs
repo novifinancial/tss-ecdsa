@@ -217,8 +217,8 @@ mod tests {
     fn random_paillier_encryption_in_range_proof(k: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
-        let p = crate::get_random_safe_prime_512();
-        let q = crate::get_random_safe_prime_512();
+        let p = crate::utils::get_random_safe_prime_512();
+        let q = crate::utils::get_random_safe_prime_512();
         let N = &p * &q;
 
         let sk = DecryptionKey::with_safe_primes_unchecked(&p, &q).unwrap();

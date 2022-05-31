@@ -5,8 +5,37 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+//! Implementation of the CMP threshold ECDSA signature protocol
+//!
+//! In a threshold signature scheme, a subset t of n signers, each
+//! of whom hold a share of a private signing key, can
+//! communicate to produce a valid signature for a message, while
+//! any subset of t-1 signers will be unable to forge signatures.
+//!
+//! A threshold ECDSA signature scheme is specific to the ECDSA
+//! signature scheme, where the signatures can be validated by a
+//! regular (non-threshold) ECDSA verification function. In fact,
+//! signatures generated in this threshold manner are indistinguishable
+//! from signatures generated using a normal ECDSA signing method.
+//!
+//! In this implementation, we instantiate the threshold ECDSA
+//! signature scheme described in [CGGMP'21](https://eprint.iacr.org/2021/060),
+//! using [secp256k1](https://en.bitcoin.it/wiki/Secp256k1) as the elliptic curve.
+//!
+//! Note that this library only provides the low-level interfaces for executing
+//! each of the rounds of the protocol, notably without handling communication and
+//! parallel execution. The main interfaces allow for a [Participant] to
+//! process a message from another participant, producing a set of outgoing messages
+//! that in turn must be delivered to other participants.
+//!
+//! For an example of how to actually integrate this library into a higher-level
+//! application that handles the communication between participants in parallel,
+//! take a look at the provided [network example](./examples/network/README.md).
+//!
+//!
+
 #![allow(non_snake_case)] // FIXME: To be removed in the future
-// #![warn(clippy::cargo, missing_docs)]
+#![warn(missing_docs)]
 #![cfg_attr(feature = "flame_it", feature(proc_macro_hygiene))]
 #[cfg(feature = "flame_it")]
 extern crate flame;
@@ -14,46 +43,25 @@ extern crate flame;
 #[macro_use]
 extern crate flamer;
 
-use libpaillier::unknown_order::BigNumber;
-use rand::Rng;
-
 #[macro_use]
 pub mod errors;
 
 mod auxinfo;
 mod keygen;
-pub mod messages;
+mod messages;
 mod paillier;
 mod parameters;
 mod presign;
-pub mod protocol;
+mod protocol;
+mod safe_primes_512;
 mod storage;
 mod utils;
 mod zkp;
 
+pub use messages::Message;
+pub use protocol::{
+    Identifier, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
+};
+pub use utils::CurvePoint;
+
 use crate::presign::*;
-
-// Generate safe primes from a file. Usually, generating safe primes takes
-// awhile (0-5 minutes per 512-bit safe prime on my laptop, average 50 seconds)
-lazy_static::lazy_static! {
-    static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes();
-}
-
-/// FIXME: Should only expose this for testing purposes
-pub fn get_safe_primes() -> Vec<BigNumber> {
-    let file_contents = std::fs::read_to_string("src/safe_primes_512.txt").unwrap();
-    let mut safe_primes_str: Vec<&str> = file_contents.split('\n').collect();
-    safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
-    let safe_primes: Vec<BigNumber> = safe_primes_str
-        .into_iter()
-        .map(|s| BigNumber::from_slice(&hex::decode(&s).unwrap()))
-        .collect();
-    safe_primes
-}
-
-/// We sample safe primes that are 512 bits long. This comes from the security parameter
-/// setting of κ = 128, and safe primes being of length 4κ (Figure 6, Round 1 of the CGGMP'21 paper)
-pub(crate) fn get_random_safe_prime_512() -> BigNumber {
-    // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
-    POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()
-}

@@ -155,8 +155,8 @@ mod tests {
     use rand::rngs::OsRng;
 
     fn random_ring_pedersen_proof() -> Result<(PiPrmInput, PiPrmProof)> {
-        let p = crate::get_random_safe_prime_512();
-        let q = crate::get_random_safe_prime_512();
+        let p = crate::utils::get_random_safe_prime_512();
+        let q = crate::utils::get_random_safe_prime_512();
         let N = &p * &q;
         let phi_n = (p - 1) * (q - 1);
         let tau = BigNumber::random(&N);
