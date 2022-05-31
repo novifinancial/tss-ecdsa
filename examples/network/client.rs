@@ -41,7 +41,7 @@ pub(crate) async fn client_main(args: Args) -> Result {
             .clone()
             .values()
             .filter(|&id2| id != *id2)
-            .map(|v| *v)
+            .copied()
             .collect();
 
         let config = ParticipantConfig { id, other_ids };

@@ -53,6 +53,7 @@ mod paillier;
 mod parameters;
 mod presign;
 mod protocol;
+mod safe_primes_512;
 mod storage;
 mod utils;
 mod zkp;

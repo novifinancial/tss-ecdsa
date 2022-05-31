@@ -18,7 +18,7 @@ fn main() {
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
-        .open("src/safe_primes_512.txt")
+        .open("safe_primes_512.txt")
         .unwrap();
 
     let mut prev = Instant::now();
@@ -39,7 +39,7 @@ fn main() {
             "Total average prime generation time: {} seconds",
             total_seconds.as_secs() as f64 / (i as f64 + 1.0)
         );
-        writeln!(file, "{}", hex::encode(prime.to_bytes())).unwrap();
+        writeln!(file, "\"{}\",", hex::encode(prime.to_bytes())).unwrap();
         file.flush().unwrap();
     }
 }

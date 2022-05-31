@@ -107,7 +107,7 @@ impl Participant {
             }
         }
 
-        // Make sure that all parties are ready before actually generating auxinfo
+        // Make sure that all parties are ready before proceeding
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
             fetch.push((storable_type, message.identifier, participant));

@@ -40,11 +40,10 @@ pub(crate) async fn render_cli(ports_to_ids: &HashMap<u16, ParticipantIdentifier
     let mut rng = OsRng;
 
     loop {
-        let mut items: Vec<CliOption> = vec![];
-        items.push(CliOption {
+        let mut items: Vec<CliOption> = vec![CliOption {
             cli_type: CliType::AuxInfo,
             text: "Generate auxiliary info".to_string(),
-        });
+        }];
 
         if !auxinfos.is_empty() {
             items.push(CliOption {
@@ -86,7 +85,7 @@ pub(crate) async fn render_cli(ports_to_ids: &HashMap<u16, ParticipantIdentifier
             Some(index) => match items[index].cli_type {
                 CliType::AuxInfo => {
                     let auxinfo_identifier = Identifier::random(&mut rng);
-                    invoke_auxinfo(&ports_to_ids, auxinfo_identifier).await?;
+                    invoke_auxinfo(ports_to_ids, auxinfo_identifier).await?;
                     auxinfos.push(auxinfo_identifier);
                 }
                 CliType::Keypair => {
@@ -99,7 +98,7 @@ pub(crate) async fn render_cli(ports_to_ids: &HashMap<u16, ParticipantIdentifier
 
                     let keygen_identifier = Identifier::random(&mut rng);
                     invoke_keygen(
-                        &ports_to_ids,
+                        ports_to_ids,
                         &mut keygen_to_vk_map,
                         auxinfo_identifier,
                         keygen_identifier,
@@ -126,7 +125,7 @@ pub(crate) async fn render_cli(ports_to_ids: &HashMap<u16, ParticipantIdentifier
 
                     let presign_identifier = Identifier::random(&mut rng);
                     invoke_presign(
-                        &ports_to_ids,
+                        ports_to_ids,
                         auxinfo_identifier,
                         keygen_identifier,
                         presign_identifier,
@@ -149,12 +148,15 @@ pub(crate) async fn render_cli(ports_to_ids: &HashMap<u16, ParticipantIdentifier
                         .interact_text()?;
 
                     invoke_sign_from_presign(
-                        &ports_to_ids,
+                        ports_to_ids,
                         presign_identifier,
                         input.as_bytes().to_vec(),
-                        keygen_to_vk_map.get(&keygen_identifier).unwrap(),
+                        keygen_to_vk_map.get(keygen_identifier).unwrap(),
                     )
                     .await?;
+
+                    // Delete the presignature, since it should not be used to sign again
+                    presignatures.retain(|&x| x != presign_identifier);
                 }
                 CliType::Quit => {
                     break;
@@ -184,7 +186,7 @@ pub(crate) fn start_progress_bar() -> ProgressBar {
     pb
 }
 
-pub(crate) fn finish_progress_bar(pb: ProgressBar, message: String) -> () {
+pub(crate) fn finish_progress_bar(pb: ProgressBar, message: String) {
     let done_style =
         ProgressStyle::default_spinner().template("[{elapsed_precise}] {msg:.bold.green}");
     pb.set_style(done_style);

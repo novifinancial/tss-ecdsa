@@ -83,7 +83,7 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
     let mut state_participant = state.participant.write().await;
     let mut participant = (*state_participant)
         .clone()
-        .ok_or(anyhow!("Config not set"))?;
+        .ok_or_else(|| anyhow!("Config not set"))?;
 
     participant.accept_message(&message)?;
     let mut rng = OsRng;
@@ -181,7 +181,7 @@ async fn auxinfo(state: &State<ParticipantState>, parameters: Json<AuxInfoParame
         let state_participant = state.participant.read().await;
         (*state_participant)
             .clone()
-            .ok_or(anyhow!("Config not set"))?
+            .ok_or_else(|| anyhow!("Config not set"))?
     };
     let message = participant.initialize_auxinfo_message(auxinfo_identifier);
 
@@ -219,7 +219,7 @@ async fn keygen(
         let state_participant = state.participant.read().await;
         (*state_participant)
             .clone()
-            .ok_or(anyhow!("Config not set"))?
+            .ok_or_else(|| anyhow!("Config not set"))?
     };
     let message = participant.initialize_keygen_message(keygen_identifier);
     drop(participant);
@@ -248,7 +248,7 @@ async fn keygen(
         let state_participant = state.participant.read().await;
         (*state_participant)
             .clone()
-            .ok_or(anyhow!("Config not set"))?
+            .ok_or_else(|| anyhow!("Config not set"))?
     };
     let curve_point = participant.get_public_keyshare(keygen_identifier)?;
     drop(participant);
@@ -265,7 +265,7 @@ async fn presign(state: &State<ParticipantState>, parameters: Json<PresignParame
     let mut state_participant = state.participant.write().await;
     let mut participant = (*state_participant)
         .clone()
-        .ok_or(anyhow!("Config not set"))?;
+        .ok_or_else(|| anyhow!("Config not set"))?;
     let message = participant.initialize_presign_message(
         auxinfo_identifier,
         keygen_identifier,
@@ -316,7 +316,7 @@ async fn sign_from_presign(
         let state_participant = state.participant.read().await;
         (*state_participant)
             .clone()
-            .ok_or(anyhow!("Config not set"))?
+            .ok_or_else(|| anyhow!("Config not set"))?
     };
     let signature_share = participant.sign(presign_identifier, hasher.clone())?;
     drop(participant);

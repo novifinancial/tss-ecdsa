@@ -1,5 +1,4 @@
-
-To run this, spin up at least two servers (three in this example)
+To run this example, spin up at least two servers (three in this example)
 on different ports and in separate terminals:
 `cargo run --example network -- -r server -p 8000`
 `cargo run --example network -- -r server -p 8001`

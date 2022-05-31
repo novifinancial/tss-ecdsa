@@ -222,11 +222,8 @@ lazy_static::lazy_static! {
 }
 
 pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
-    let file_contents = std::fs::read_to_string("src/safe_primes_512.txt").unwrap();
-    let mut safe_primes_str: Vec<&str> = file_contents.split('\n').collect();
-    safe_primes_str = safe_primes_str[0..safe_primes_str.len() - 1].to_vec(); // Remove the last element which is empty
-    let safe_primes: Vec<BigNumber> = safe_primes_str
-        .into_iter()
+    let safe_primes: Vec<BigNumber> = crate::safe_primes_512::SAFE_PRIMES
+        .iter()
         .map(|s| BigNumber::from_slice(&hex::decode(&s).unwrap()))
         .collect();
     safe_primes
