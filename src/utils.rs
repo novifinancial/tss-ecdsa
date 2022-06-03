@@ -5,6 +5,11 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use std::collections::HashMap;
+
+use crate::auxinfo::AuxInfoPublic;
+use crate::errors::Result;
+use crate::Message;
 use generic_array::GenericArray;
 use k256::elliptic_curve::bigint::Encoding;
 use k256::elliptic_curve::group::ff::PrimeField;
@@ -16,6 +21,11 @@ use merlin::Transcript;
 use rand::Rng;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::storage::StorableType;
+use crate::storage::Storage;
+use crate::Identifier;
+use crate::ParticipantIdentifier;
 
 const MAX_ITER: usize = 50_000usize;
 
@@ -235,4 +245,83 @@ pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
 pub(crate) fn get_random_safe_prime_512() -> BigNumber {
     // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
     POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()
+}
+
+////////////////////////////////
+// Protocol Utility Functions //
+////////////////////////////////
+
+/// Returns true if in storage, there is one storable_type for each other
+/// participant in the quorum.
+pub(crate) fn has_collected_all_of_others(
+    other_ids: &[ParticipantIdentifier],
+    storage: &Storage,
+    storable_type: StorableType,
+    identifier: Identifier,
+) -> Result<bool> {
+    let indices: Vec<(StorableType, Identifier, ParticipantIdentifier)> = other_ids
+        .iter()
+        .map(|participant_id| (storable_type, identifier, *participant_id))
+        .collect();
+    Ok(storage.contains_batch(&indices).is_ok())
+}
+
+/// Aggregate the other participants' public keyshares from storage. But don't remove them
+/// from storage.
+///
+/// This returns a HashMap with the key as the participant id and the value as the KeygenPublic
+pub(crate) fn get_other_participants_public_auxinfo(
+    other_ids: &[ParticipantIdentifier],
+    storage: &Storage,
+    identifier: Identifier,
+) -> Result<HashMap<ParticipantIdentifier, AuxInfoPublic>> {
+    if !has_collected_all_of_others(other_ids, storage, StorableType::AuxInfoPublic, identifier)? {
+        return bail!("Not ready to get other participants public auxinfo just yet!");
+    }
+
+    let mut hm = HashMap::new();
+    for &other_participant_id in other_ids {
+        let val = storage.retrieve(
+            StorableType::AuxInfoPublic,
+            identifier,
+            other_participant_id,
+        )?;
+        hm.insert(other_participant_id, deserialize!(&val)?);
+    }
+    Ok(hm)
+}
+
+pub(crate) fn process_ready_message(
+    self_id: ParticipantIdentifier,
+    other_ids: &[ParticipantIdentifier],
+    storage: &mut Storage,
+    message: &Message,
+    storable_type: StorableType,
+) -> Result<(Vec<Message>, bool)> {
+    storage.store(storable_type, message.id(), message.from(), &[])?;
+
+    let mut messages = vec![];
+
+    // If message is coming from self, then tell the other participants that we are ready
+    if message.from() == self_id {
+        for &other_id in other_ids {
+            messages.push(Message::new(
+                message.message_type(),
+                message.id(),
+                self_id,
+                other_id,
+                &[],
+            ));
+        }
+    }
+
+    // Make sure that all parties are ready before proceeding
+    let mut fetch = vec![];
+    for &participant in other_ids {
+        fetch.push((storable_type, message.id(), participant));
+    }
+    fetch.push((storable_type, message.id(), self_id));
+    let is_ready = storage.contains_batch(&fetch).is_ok();
+
+    Ok((messages, is_ready))
 }
