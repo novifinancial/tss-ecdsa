@@ -10,7 +10,6 @@
 
 use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
-use crate::keygen::KeySharePublic;
 use crate::protocol::Identifier;
 use crate::protocol::ParticipantIdentifier;
 use displaydoc::Display;
@@ -27,10 +26,17 @@ pub enum MessageType {
     AuxInfoReady,
     /// The public auxinfo parameters for a participant
     AuxInfoPublic,
-    /// Signals that keyshare generation is ready
-    KeygenReady,
+    /// Keygen messages
+    Keygen(KeygenMessageType),
     /// Presign messages
     Presign(PresignMessageType),
+}
+
+/// An enum consisting of all keygen message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KeygenMessageType {
+    /// Signals that keyshare generation is ready
+    Ready,
     /// Public keyshare produced by keygen for a participant
     PublicKeyshare,
 }
@@ -117,18 +123,6 @@ impl Message {
         match aux_info_public.verify() {
             Ok(()) => Ok(aux_info_public),
             Err(e) => bail!("Failed to verify auxinfo public: {}", e),
-        }
-    }
-
-    pub(crate) fn validate_to_keyshare_public(&self) -> Result<KeySharePublic> {
-        if self.message_type != MessageType::PublicKeyshare {
-            return bail!("Wrong message type, expected MessageType::PublicKeyshare");
-        }
-        let keyshare_public: KeySharePublic = deserialize!(&self.unverified_bytes)?;
-
-        match keyshare_public.verify() {
-            Ok(()) => Ok(keyshare_public),
-            Err(e) => bail!("Failed to verify keyshare public: {}", e),
         }
     }
 }

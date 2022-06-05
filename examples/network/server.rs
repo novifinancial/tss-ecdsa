@@ -85,9 +85,8 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
         .clone()
         .ok_or_else(|| anyhow!("Config not set"))?;
 
-    participant.accept_message(&message)?;
     let mut rng = OsRng;
-    let messages = participant.process_single_message(&mut rng)?;
+    let messages = participant.process_single_message(&message, &mut rng)?;
 
     *state_participant = Some(participant.clone());
     drop(state_participant); // Release the lock

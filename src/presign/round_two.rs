@@ -7,7 +7,7 @@
 
 use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
-use crate::keygen::KeySharePublic;
+use crate::keygen::keyshare::KeySharePublic;
 use crate::messages::PresignMessageType;
 use crate::messages::{Message, MessageType};
 use crate::paillier::PaillierCiphertext;

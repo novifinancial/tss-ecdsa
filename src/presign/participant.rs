@@ -5,16 +5,16 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use super::record::{PresignRecord, RecordPair};
 use crate::auxinfo::AuxInfoPrivate;
 use crate::auxinfo::AuxInfoPublic;
 use crate::errors::Result;
-use crate::keygen::KeySharePrivate;
-use crate::keygen::KeySharePublic;
+use crate::keygen::keyshare::KeySharePrivate;
+use crate::keygen::keyshare::KeySharePublic;
 use crate::messages::PresignMessageType;
 use crate::messages::{Message, MessageType};
 use crate::paillier::PaillierCiphertext;
-use crate::parameters::*;
+use crate::parameters::ELL;
+use crate::presign::record::{PresignRecord, RecordPair};
 use crate::presign::round_one::{Private as RoundOnePrivate, Public as RoundOnePublic};
 use crate::presign::round_three::RoundThreeInput;
 use crate::presign::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic};
@@ -22,13 +22,15 @@ use crate::presign::round_two::{Private as RoundTwoPrivate, Public as RoundTwoPu
 use crate::protocol::ParticipantIdentifier;
 use crate::storage::StorableType;
 use crate::storage::Storage;
-use crate::utils::has_collected_all_of_others;
-use crate::utils::*;
-use crate::zkp::piaffg::*;
-use crate::zkp::pienc::*;
-use crate::zkp::pilog::*;
+use crate::utils::{
+    bn_to_scalar, get_other_participants_public_auxinfo, has_collected_all_of_others, k256_order,
+    process_ready_message, random_bn_in_range, random_positive_bn,
+};
+use crate::zkp::piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret};
+use crate::zkp::pienc::PiEncProof;
+use crate::zkp::pilog::{PiLogInput, PiLogProof, PiLogSecret};
 use crate::zkp::Proof;
-use crate::Identifier;
+use crate::{CurvePoint, Identifier};
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -58,6 +60,9 @@ impl PresignParticipant {
         }
     }
 
+    /// Processes the incoming message given the storage from the protocol participant
+    /// (containing auxinfo and keygen artifacts). Optionally produces a [PresignRecord]
+    /// once presigning is complete.
     pub(crate) fn process_message(
         &mut self,
         message: &Message,

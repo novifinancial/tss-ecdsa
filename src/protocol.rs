@@ -8,13 +8,17 @@
 //! Contains the main protocol that is executed through a [Participant]
 
 use crate::errors::Result;
-use crate::keygen::KeySharePublic;
-use crate::messages::*;
+use crate::keygen::keyshare::KeySharePublic;
+use crate::keygen::participant::KeygenParticipant;
+use crate::messages::KeygenMessageType;
+use crate::messages::MessageType;
 use crate::presign::participant::PresignParticipant;
 use crate::presign::record::PresignRecord;
-use crate::storage::*;
+use crate::storage::StorableType;
+use crate::storage::Storage;
 use crate::utils::process_ready_message;
 use crate::utils::CurvePoint;
+use crate::Message;
 use k256::elliptic_curve::Field;
 use k256::elliptic_curve::IsHigh;
 use rand::{CryptoRng, Rng, RngCore};
@@ -32,11 +36,11 @@ pub struct Participant {
     pub id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the protocol
     pub other_participant_ids: Vec<ParticipantIdentifier>,
-    /// An inbox for this participant containing messages sent from other participants
-    inbox: Vec<Vec<u8>>,
     /// Local storage for this participant to store finalized auxinfo, keygen, and presign
     /// values. This storage is not responsible for storing round-specific material.
     main_storage: Storage,
+    /// Participant subprotocol for handling keygen messages
+    keygen_participant: KeygenParticipant,
     /// Participant subprotocol for handling presign messages
     presign_participant: PresignParticipant,
 }
@@ -47,8 +51,8 @@ impl Participant {
         Ok(Participant {
             id: config.id,
             other_participant_ids: config.other_ids.clone(),
-            inbox: vec![],
             main_storage: Storage::new(),
+            keygen_participant: KeygenParticipant::from_ids(config.id, config.other_ids.clone()),
             presign_participant: PresignParticipant::from_ids(config.id, config.other_ids),
         })
     }
@@ -89,10 +93,9 @@ impl Participant {
     #[cfg_attr(feature = "flame_it", flame)]
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
+        message: &Message,
         rng: &mut R,
     ) -> Result<Vec<Message>> {
-        let message: Message = deserialize!(&self.inbox.remove(0))?;
-
         println!(
             "processing participant: {}, with message type: {:?}",
             &self.id,
@@ -105,11 +108,11 @@ impl Participant {
                     self.id,
                     &self.other_participant_ids,
                     &mut self.main_storage,
-                    &message,
+                    message,
                     StorableType::AuxInfoReady,
                 )?;
                 if is_ready {
-                    let more_messages = self.do_auxinfo_gen(rng, &message)?;
+                    let more_messages = self.do_auxinfo_gen(rng, message)?;
                     messages.extend_from_slice(&more_messages);
                 }
                 Ok(messages)
@@ -127,40 +130,15 @@ impl Participant {
 
                 Ok(vec![])
             }
-            MessageType::KeygenReady => {
-                let (mut messages, is_ready) = process_ready_message(
-                    self.id,
-                    &self.other_participant_ids,
-                    &mut self.main_storage,
-                    &message,
-                    StorableType::KeygenReady,
-                )?;
-                if is_ready {
-                    let more_messages = self.do_keygen(rng, &message)?;
-                    messages.extend_from_slice(&more_messages);
-                }
-                Ok(messages)
-            }
-            MessageType::PublicKeyshare => {
-                // First, verify the bytes of the public keyshare, and then
-                // store it locally
-                let message_bytes = serialize!(&message.validate_to_keyshare_public()?)?;
-
-                self.main_storage.store(
-                    StorableType::PublicKeyshare,
-                    message.id(),
-                    message.from(),
-                    &message_bytes,
-                )?;
-
-                Ok(vec![])
-            }
+            MessageType::Keygen(_) => self
+                .keygen_participant
+                .process_message(message, &mut self.main_storage),
             MessageType::Presign(_) => {
                 // Send presign message and existing storage containing auxinfo and
                 // keyshare values that presign needs to operate
                 let (optional_presign_record, messages) = self
                     .presign_participant
-                    .process_message(&message, &self.main_storage)?;
+                    .process_message(message, &self.main_storage)?;
 
                 if let Some(presign_record) = optional_presign_record {
                     self.main_storage.store(
@@ -192,7 +170,7 @@ impl Participant {
     /// ready for the specified identifier
     pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Message {
         Message::new(
-            MessageType::KeygenReady,
+            MessageType::Keygen(KeygenMessageType::Ready),
             keygen_identifier,
             self.id,
             self.id,
@@ -256,64 +234,6 @@ impl Participant {
                 )
             })
             .collect())
-    }
-
-    /// Key Generation
-    ///
-    /// During keygen, each participant produces and stores their own secret values, and then
-    /// publishes the same public component to every other participant.
-    #[cfg_attr(feature = "flame_it", flame)]
-    fn do_keygen<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-    ) -> Result<Vec<Message>> {
-        let (keyshare_private, keyshare_public) = crate::keygen::new_keyshare(rng)?;
-        let keyshare_public_bytes = serialize!(&keyshare_public)?;
-
-        // Store private and public keyshares locally
-        self.main_storage.store(
-            StorableType::PrivateKeyshare,
-            message.id(),
-            self.id,
-            &serialize!(&keyshare_private)?,
-        )?;
-        self.main_storage.store(
-            StorableType::PublicKeyshare,
-            message.id(),
-            self.id,
-            &keyshare_public_bytes,
-        )?;
-
-        // Publish public keyshare to all other participants on the channel
-        Ok(self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                Message::new(
-                    MessageType::PublicKeyshare,
-                    message.id(),
-                    self.id,
-                    other_participant_id,
-                    &keyshare_public_bytes,
-                )
-            })
-            .collect())
-    }
-
-    /// Consumer can use this function to "give" a message to this participant
-    pub fn accept_message(&mut self, message: &Message) -> Result<()> {
-        if message.to() != self.id {
-            return bail!(
-                "Attempting to deliver to recipient {:?} the message:\n {}",
-                self.id,
-                message,
-            );
-        }
-
-        self.inbox.push(serialize!(&message)?);
-
-        Ok(())
     }
 
     /// Returns whether or not auxinfo generation has completed for this identifier
@@ -387,15 +307,6 @@ impl Participant {
             .delete(StorableType::PresignRecord, presign_identifier, self.id)?;
 
         Ok(ret)
-    }
-
-    //////////////////////
-    // Helper functions //
-    //////////////////////
-
-    #[cfg(test)]
-    pub(crate) fn has_messages(&self) -> bool {
-        !self.inbox.is_empty()
     }
 }
 
@@ -513,20 +424,20 @@ impl std::fmt::Display for Identifier {
 mod tests {
     use super::*;
     use k256::ecdsa::signature::DigestVerifier;
+    use rand::prelude::IteratorRandom;
     use rand::rngs::OsRng;
     use sha2::{Digest, Sha256};
-
-    /// Delivers a message into a participant's inbox
-    fn deliver_one(message: &Message, recipient: &mut Participant) -> Result<()> {
-        recipient.accept_message(message)
-    }
+    use std::collections::HashMap;
 
     /// Delivers all messages into their respective participant's inboxes
-    fn deliver_all(messages: &[Message], quorum: &mut Vec<Participant>) -> Result<()> {
+    fn deliver_all(
+        messages: &[Message],
+        inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
+    ) -> Result<()> {
         for message in messages {
-            for participant in &mut *quorum {
-                if participant.id == message.to() {
-                    deliver_one(message, &mut *participant)?;
+            for (&id, inbox) in &mut *inboxes {
+                if id == message.to() {
+                    inbox.push(message.clone());
                     break;
                 }
             }
@@ -563,18 +474,23 @@ mod tests {
 
     fn process_messages<R: RngCore + CryptoRng>(
         quorum: &mut Vec<Participant>,
+        inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
         rng: &mut R,
     ) -> Result<()> {
         // Pick a random participant to process
-        let index = rng.gen_range(0..quorum.len());
+        let participant = quorum.iter_mut().choose(rng).unwrap();
 
-        if !quorum[index].has_messages() {
+        let inbox = inboxes.get_mut(&participant.id).unwrap();
+        if inbox.is_empty() {
             // No messages to process for this participant, so pick another participant
             return Ok(());
         }
 
-        let messages = quorum[index].process_single_message(rng)?;
-        deliver_all(&messages, quorum)?;
+        // FIXME: Should be able to handle randomly selected messages, see:
+        // https://github.com/novifinancial/tss-ecdsa/issues/33
+        let message = inbox.remove(0);
+        let messages = participant.process_single_message(&message, rng)?;
+        deliver_all(&messages, inboxes)?;
 
         Ok(())
     }
@@ -584,25 +500,30 @@ mod tests {
     fn test_run_protocol() -> Result<()> {
         let mut rng = OsRng;
         let mut quorum = Participant::new_quorum(3, &mut rng)?;
+        let mut inboxes = HashMap::new();
+        for participant in &quorum {
+            inboxes.insert(participant.id, vec![]);
+        }
 
         let auxinfo_identifier = Identifier::random(&mut rng);
         let keyshare_identifier = Identifier::random(&mut rng);
         let presign_identifier = Identifier::random(&mut rng);
 
-        for participant in &mut quorum {
-            participant
-                .accept_message(&participant.initialize_auxinfo_message(auxinfo_identifier))?;
-        }
-        while is_auxinfo_done(&quorum, &auxinfo_identifier).is_err() {
-            process_messages(&mut quorum, &mut rng)?;
+        for participant in &quorum {
+            let inbox = inboxes.get_mut(&participant.id).unwrap();
+            inbox.push(participant.initialize_auxinfo_message(auxinfo_identifier));
         }
 
-        for participant in &mut quorum {
-            participant
-                .accept_message(&participant.initialize_keygen_message(keyshare_identifier))?;
+        while is_auxinfo_done(&quorum, &auxinfo_identifier).is_err() {
+            process_messages(&mut quorum, &mut inboxes, &mut rng)?;
+        }
+
+        for participant in &quorum {
+            let inbox = inboxes.get_mut(&participant.id).unwrap();
+            inbox.push(participant.initialize_keygen_message(keyshare_identifier));
         }
         while is_keygen_done(&quorum, &keyshare_identifier).is_err() {
-            process_messages(&mut quorum, &mut rng)?;
+            process_messages(&mut quorum, &mut inboxes, &mut rng)?;
         }
 
         for participant in &mut quorum {
@@ -611,10 +532,11 @@ mod tests {
                 keyshare_identifier,
                 presign_identifier,
             );
-            participant.accept_message(&message)?;
+            let inbox = inboxes.get_mut(&participant.id).unwrap();
+            inbox.push(message);
         }
         while is_presigning_done(&quorum, presign_identifier).is_err() {
-            process_messages(&mut quorum, &mut rng)?;
+            process_messages(&mut quorum, &mut inboxes, &mut rng)?;
         }
 
         // Now, produce a valid signature
