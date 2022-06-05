@@ -8,8 +8,6 @@
 //! Contains the functions and definitions for dealing with messages that are
 //! passed between participants
 
-use crate::auxinfo::AuxInfoPublic;
-use crate::errors::Result;
 use crate::protocol::Identifier;
 use crate::protocol::ParticipantIdentifier;
 use displaydoc::Display;
@@ -22,14 +20,21 @@ use serde::{Deserialize, Serialize};
 /// An enum consisting of all message types
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MessageType {
-    /// Signals that auxinfo generation is ready
-    AuxInfoReady,
-    /// The public auxinfo parameters for a participant
-    AuxInfoPublic,
+    /// Auxinfo messages
+    Auxinfo(AuxinfoMessageType),
     /// Keygen messages
     Keygen(KeygenMessageType),
     /// Presign messages
     Presign(PresignMessageType),
+}
+
+/// An enum consisting of all auxinfo message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AuxinfoMessageType {
+    /// Signals that auxinfo generation is ready
+    Ready,
+    /// Public auxinfo produced by auxinfo generation for a participant
+    Public,
 }
 
 /// An enum consisting of all keygen message types
@@ -108,21 +113,5 @@ impl Message {
     /// That participant that should receive this message
     pub fn to(&self) -> ParticipantIdentifier {
         self.to
-    }
-}
-
-/// This is where the verification logic happens when pulling messages off of
-/// the wire
-impl Message {
-    pub(crate) fn validate_to_auxinfo_public(&self) -> Result<AuxInfoPublic> {
-        if self.message_type != MessageType::AuxInfoPublic {
-            return bail!("Wrong message type, expected MessageType::AuxInfoPublic");
-        }
-        let aux_info_public: AuxInfoPublic = deserialize!(&self.unverified_bytes)?;
-
-        match aux_info_public.verify() {
-            Ok(()) => Ok(aux_info_public),
-            Err(e) => bail!("Failed to verify auxinfo public: {}", e),
-        }
     }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::auxinfo::AuxInfoPublic;
+use crate::auxinfo::info::AuxInfoPublic;
 use crate::errors::Result;
 use crate::Message;
 use generic_array::GenericArray;

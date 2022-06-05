@@ -7,16 +7,17 @@
 
 //! Contains the main protocol that is executed through a [Participant]
 
+use crate::auxinfo::participant::AuxinfoParticipant;
 use crate::errors::Result;
 use crate::keygen::keyshare::KeySharePublic;
 use crate::keygen::participant::KeygenParticipant;
+use crate::messages::AuxinfoMessageType;
 use crate::messages::KeygenMessageType;
 use crate::messages::MessageType;
 use crate::presign::participant::PresignParticipant;
 use crate::presign::record::PresignRecord;
 use crate::storage::StorableType;
 use crate::storage::Storage;
-use crate::utils::process_ready_message;
 use crate::utils::CurvePoint;
 use crate::Message;
 use k256::elliptic_curve::Field;
@@ -39,6 +40,8 @@ pub struct Participant {
     /// Local storage for this participant to store finalized auxinfo, keygen, and presign
     /// values. This storage is not responsible for storing round-specific material.
     main_storage: Storage,
+    /// Participant subprotocol for handling auxinfo messages
+    auxinfo_participant: AuxinfoParticipant,
     /// Participant subprotocol for handling keygen messages
     keygen_participant: KeygenParticipant,
     /// Participant subprotocol for handling presign messages
@@ -52,6 +55,7 @@ impl Participant {
             id: config.id,
             other_participant_ids: config.other_ids.clone(),
             main_storage: Storage::new(),
+            auxinfo_participant: AuxinfoParticipant::from_ids(config.id, config.other_ids.clone()),
             keygen_participant: KeygenParticipant::from_ids(config.id, config.other_ids.clone()),
             presign_participant: PresignParticipant::from_ids(config.id, config.other_ids),
         })
@@ -94,7 +98,7 @@ impl Participant {
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
         message: &Message,
-        rng: &mut R,
+        _rng: &mut R,
     ) -> Result<Vec<Message>> {
         println!(
             "processing participant: {}, with message type: {:?}",
@@ -103,33 +107,9 @@ impl Participant {
         );
 
         match message.message_type() {
-            MessageType::AuxInfoReady => {
-                let (mut messages, is_ready) = process_ready_message(
-                    self.id,
-                    &self.other_participant_ids,
-                    &mut self.main_storage,
-                    message,
-                    StorableType::AuxInfoReady,
-                )?;
-                if is_ready {
-                    let more_messages = self.do_auxinfo_gen(rng, message)?;
-                    messages.extend_from_slice(&more_messages);
-                }
-                Ok(messages)
-            }
-            MessageType::AuxInfoPublic => {
-                // First, verify the bytes of the public auxinfo, and then
-                // store it locally
-                let message_bytes = serialize!(&message.validate_to_auxinfo_public()?)?;
-                self.main_storage.store(
-                    StorableType::AuxInfoPublic,
-                    message.id(),
-                    message.from(),
-                    &message_bytes,
-                )?;
-
-                Ok(vec![])
-            }
+            MessageType::Auxinfo(_) => self
+                .auxinfo_participant
+                .process_message(message, &mut self.main_storage),
             MessageType::Keygen(_) => self
                 .keygen_participant
                 .process_message(message, &mut self.main_storage),
@@ -158,7 +138,7 @@ impl Participant {
     /// ready for the specified identifier
     pub fn initialize_auxinfo_message(&self, auxinfo_identifier: Identifier) -> Message {
         Message::new(
-            MessageType::AuxInfoReady,
+            MessageType::Auxinfo(AuxinfoMessageType::Ready),
             auxinfo_identifier,
             self.id,
             self.id,
@@ -194,76 +174,26 @@ impl Participant {
         )
     }
 
-    /// Aux Info Generation
-    ///
-    ///
-    #[cfg_attr(feature = "flame_it", flame)]
-    fn do_auxinfo_gen<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-    ) -> Result<Vec<Message>> {
-        let (auxinfo_private, auxinfo_public) = crate::auxinfo::new_auxinfo(rng, 512)?;
-        let auxinfo_public_bytes = serialize!(&auxinfo_public)?;
-
-        // Store private and public keyshares locally
-        self.main_storage.store(
-            StorableType::AuxInfoPrivate,
-            message.id(),
-            self.id,
-            &serialize!(&auxinfo_private)?,
-        )?;
-        self.main_storage.store(
-            StorableType::AuxInfoPublic,
-            message.id(),
-            self.id,
-            &auxinfo_public_bytes,
-        )?;
-
-        // Publish public keyshare to all other participants on the channel
-        Ok(self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                Message::new(
-                    MessageType::AuxInfoPublic,
-                    message.id(),
-                    self.id,
-                    other_participant_id,
-                    &auxinfo_public_bytes,
-                )
-            })
-            .collect())
-    }
-
     /// Returns whether or not auxinfo generation has completed for this identifier
-    pub fn is_auxinfo_done(&self, auxinfo_identifier: &Identifier) -> Result<()> {
+    pub fn is_auxinfo_done(&self, auxinfo_identifier: Identifier) -> Result<()> {
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
-            fetch.push((
-                StorableType::AuxInfoPublic,
-                *auxinfo_identifier,
-                participant,
-            ));
+            fetch.push((StorableType::AuxInfoPublic, auxinfo_identifier, participant));
         }
-        fetch.push((StorableType::AuxInfoPublic, *auxinfo_identifier, self.id));
-        fetch.push((StorableType::AuxInfoPrivate, *auxinfo_identifier, self.id));
+        fetch.push((StorableType::AuxInfoPublic, auxinfo_identifier, self.id));
+        fetch.push((StorableType::AuxInfoPrivate, auxinfo_identifier, self.id));
 
         self.main_storage.contains_batch(&fetch)
     }
 
     /// Returns whether or not keyshare generation has completed for this identifier
-    pub fn is_keygen_done(&self, keygen_identifier: &Identifier) -> Result<()> {
+    pub fn is_keygen_done(&self, keygen_identifier: Identifier) -> Result<()> {
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
-            fetch.push((
-                StorableType::PublicKeyshare,
-                *keygen_identifier,
-                participant,
-            ));
+            fetch.push((StorableType::PublicKeyshare, keygen_identifier, participant));
         }
-        fetch.push((StorableType::PublicKeyshare, *keygen_identifier, self.id));
-        fetch.push((StorableType::PrivateKeyshare, *keygen_identifier, self.id));
+        fetch.push((StorableType::PublicKeyshare, keygen_identifier, self.id));
+        fetch.push((StorableType::PrivateKeyshare, keygen_identifier, self.id));
 
         self.main_storage.contains_batch(&fetch)
     }
@@ -454,7 +384,7 @@ mod tests {
         Ok(())
     }
 
-    fn is_auxinfo_done(quorum: &[Participant], auxinfo_identifier: &Identifier) -> Result<()> {
+    fn is_auxinfo_done(quorum: &[Participant], auxinfo_identifier: Identifier) -> Result<()> {
         for participant in quorum {
             if participant.is_auxinfo_done(auxinfo_identifier).is_err() {
                 return bail!("Auxinfo not done");
@@ -463,7 +393,7 @@ mod tests {
         Ok(())
     }
 
-    fn is_keygen_done(quorum: &[Participant], keygen_identifier: &Identifier) -> Result<()> {
+    fn is_keygen_done(quorum: &[Participant], keygen_identifier: Identifier) -> Result<()> {
         for participant in quorum {
             if participant.is_keygen_done(keygen_identifier).is_err() {
                 return bail!("Keygen not done");
@@ -514,7 +444,7 @@ mod tests {
             inbox.push(participant.initialize_auxinfo_message(auxinfo_identifier));
         }
 
-        while is_auxinfo_done(&quorum, &auxinfo_identifier).is_err() {
+        while is_auxinfo_done(&quorum, auxinfo_identifier).is_err() {
             process_messages(&mut quorum, &mut inboxes, &mut rng)?;
         }
 
@@ -522,7 +452,7 @@ mod tests {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
             inbox.push(participant.initialize_keygen_message(keyshare_identifier));
         }
-        while is_keygen_done(&quorum, &keyshare_identifier).is_err() {
+        while is_keygen_done(&quorum, keyshare_identifier).is_err() {
             process_messages(&mut quorum, &mut inboxes, &mut rng)?;
         }
 

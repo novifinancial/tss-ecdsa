@@ -32,7 +32,7 @@ impl KeySharePublic {
 
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Keygen(KeygenMessageType::PublicKeyshare) {
-            return bail!("Wrong message type, expected MessageType::PublicKeyshare");
+            return bail!("Wrong message type, expected MessageType::Keygen(KeygenMessageType::PublicKeyshare)");
         }
         let keyshare_public: KeySharePublic = deserialize!(&message.unverified_bytes)?;
 

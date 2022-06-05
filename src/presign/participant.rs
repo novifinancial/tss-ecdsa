@@ -5,8 +5,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::auxinfo::AuxInfoPrivate;
-use crate::auxinfo::AuxInfoPublic;
+use crate::auxinfo::info::AuxInfoPrivate;
+use crate::auxinfo::info::AuxInfoPublic;
 use crate::errors::Result;
 use crate::keygen::keyshare::KeySharePrivate;
 use crate::keygen::keyshare::KeySharePublic;
@@ -153,7 +153,7 @@ impl PresignParticipant {
             }
             _ => {
                 return bail!(
-                    "Attempting to process a non-presign message wih a presign participant"
+                    "Attempting to process a non-presign message with a presign participant"
                 );
             }
         }
