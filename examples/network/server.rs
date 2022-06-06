@@ -85,9 +85,8 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
         .clone()
         .ok_or_else(|| anyhow!("Config not set"))?;
 
-    participant.accept_message(&message)?;
     let mut rng = OsRng;
-    let messages = participant.process_single_message(&mut rng)?;
+    let messages = participant.process_single_message(&message, &mut rng)?;
 
     *state_participant = Some(participant.clone());
     drop(state_participant); // Release the lock
@@ -99,7 +98,7 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
         (*init_config).clone().unwrap().ids_to_ports
     };
     for message in messages {
-        let port = ids_to_ports.get(&message.to).unwrap();
+        let port = ids_to_ports.get(&message.to()).unwrap();
         let request = client
             .post(format!("http://127.0.0.1:{}/process/", port))
             .body(bincode::serialize(&message).unwrap())
@@ -111,37 +110,28 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
     // Ping notifications if protocol was completed
 
     let auxinfo_notifications = state.auxinfo_notifications.read().await;
-    if auxinfo_notifications.contains_key(&message.identifier)
-        && participant.is_auxinfo_done(&message.identifier).is_ok()
+    if auxinfo_notifications.contains_key(&message.id())
+        && participant.is_auxinfo_done(message.id()).is_ok()
     {
-        let notify = auxinfo_notifications
-            .get(&message.identifier)
-            .unwrap()
-            .clone();
+        let notify = auxinfo_notifications.get(&message.id()).unwrap().clone();
         notify.notify_one();
     }
     drop(auxinfo_notifications);
 
     let keygen_notifications = state.keygen_notifications.read().await;
-    if keygen_notifications.contains_key(&message.identifier)
-        && participant.is_keygen_done(&message.identifier).is_ok()
+    if keygen_notifications.contains_key(&message.id())
+        && participant.is_keygen_done(message.id()).is_ok()
     {
-        let notify = keygen_notifications
-            .get(&message.identifier)
-            .unwrap()
-            .clone();
+        let notify = keygen_notifications.get(&message.id()).unwrap().clone();
         notify.notify_one();
     }
     drop(keygen_notifications);
 
     let presign_notifications = state.presign_notifications.read().await;
-    if presign_notifications.contains_key(&message.identifier)
-        && participant.is_presigning_done(&message.identifier).is_ok()
+    if presign_notifications.contains_key(&message.id())
+        && participant.is_presigning_done(message.id()).is_ok()
     {
-        let notify = presign_notifications
-            .get(&message.identifier)
-            .unwrap()
-            .clone();
+        let notify = presign_notifications.get(&message.id()).unwrap().clone();
         notify.notify_one();
     }
     drop(presign_notifications);
@@ -312,14 +302,15 @@ async fn sign_from_presign(
     let mut hasher = Sha256::new();
     hasher.update(parameters.input.clone());
 
-    let participant = {
-        let state_participant = state.participant.read().await;
-        (*state_participant)
-            .clone()
-            .ok_or_else(|| anyhow!("Config not set"))?
-    };
+    let mut state_participant = state.participant.write().await;
+    let mut participant = (*state_participant)
+        .clone()
+        .ok_or_else(|| anyhow!("Config not set"))?;
+
     let signature_share = participant.sign(presign_identifier, hasher.clone())?;
-    drop(participant);
+
+    *state_participant = Some(participant.clone());
+    drop(state_participant); // Release the lock
 
     Ok(Json((
         signature_share.r.unwrap().to_bytes().to_vec(),

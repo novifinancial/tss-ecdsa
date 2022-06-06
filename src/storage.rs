@@ -59,14 +59,14 @@ impl Storage {
     pub(crate) fn store(
         &mut self,
         storable_type: StorableType,
-        identifier: &Identifier,
-        associated_participant_id: &ParticipantIdentifier,
+        identifier: Identifier,
+        associated_participant_id: ParticipantIdentifier,
         val: &[u8],
     ) -> Result<()> {
         let storable_index = StorableIndex {
             storable_type,
-            identifier: *identifier,
-            participant: *associated_participant_id,
+            identifier,
+            participant: associated_participant_id,
         };
         self.store_index(storable_index, val)
     }
@@ -78,6 +78,19 @@ impl Storage {
         participant: ParticipantIdentifier,
     ) -> Result<Vec<u8>> {
         self.retrieve_index(StorableIndex {
+            storable_type,
+            identifier,
+            participant,
+        })
+    }
+
+    pub(crate) fn delete(
+        &mut self,
+        storable_type: StorableType,
+        identifier: Identifier,
+        participant: ParticipantIdentifier,
+    ) -> Result<()> {
+        self.delete_index(StorableIndex {
             storable_type,
             identifier,
             participant,
@@ -121,6 +134,17 @@ impl Storage {
             .clone();
 
         Ok(ret)
+    }
+
+    fn delete_index<I: Storable>(&mut self, storable_index: I) -> Result<()> {
+        let key = serialize!(&storable_index)?;
+        self.0.remove(&key).ok_or_else(|| {
+            bail_context!(
+                "Could not find {:?} when getting from storage",
+                storable_index
+            )
+        })?;
+        Ok(())
     }
 
     fn contains_index_batch<I: Storable>(&self, storable_indices: &[I]) -> Result<()> {

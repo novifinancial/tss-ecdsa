@@ -8,15 +8,8 @@
 //! Contains the functions and definitions for dealing with messages that are
 //! passed between participants
 
-use crate::auxinfo::AuxInfoPublic;
-use crate::errors::Result;
-use crate::keygen::KeySharePublic;
 use crate::protocol::Identifier;
 use crate::protocol::ParticipantIdentifier;
-use crate::round_one::Private as RoundOnePrivate;
-use crate::round_one::Public as RoundOnePublic;
-use crate::round_three::Public as RoundThreePublic;
-use crate::round_two::Public as RoundTwoPublic;
 use displaydoc::Display;
 use serde::{Deserialize, Serialize};
 
@@ -27,40 +20,61 @@ use serde::{Deserialize, Serialize};
 /// An enum consisting of all message types
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MessageType {
+    /// Auxinfo messages
+    Auxinfo(AuxinfoMessageType),
+    /// Keygen messages
+    Keygen(KeygenMessageType),
+    /// Presign messages
+    Presign(PresignMessageType),
+}
+
+/// An enum consisting of all auxinfo message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AuxinfoMessageType {
     /// Signals that auxinfo generation is ready
-    AuxInfoReady,
-    /// The public auxinfo parameters for a participant
-    AuxInfoPublic,
+    Ready,
+    /// Public auxinfo produced by auxinfo generation for a participant
+    Public,
+}
+
+/// An enum consisting of all keygen message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KeygenMessageType {
     /// Signals that keyshare generation is ready
-    KeygenReady,
-    /// Signals that presigning is ready
-    PresignReady,
-    /// First round of presigning
-    PresignRoundOne,
-    /// Second round of presigning
-    PresignRoundTwo,
-    /// Third round of presigning
-    PresignRoundThree,
+    Ready,
     /// Public keyshare produced by keygen for a participant
     PublicKeyshare,
+}
+
+/// An enum consisting of all presign message types
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PresignMessageType {
+    /// Signals that presigning is ready
+    Ready,
+    /// First round of presigning
+    RoundOne,
+    /// Second round of presigning
+    RoundTwo,
+    /// Third round of presigning
+    RoundThree,
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
 #[derive(Debug, Clone, Display, Serialize, Deserialize)]
 pub struct Message {
     /// The type of the message
-    pub message_type: MessageType,
+    message_type: MessageType,
     /// The unique identifier corresponding to the object carried by the message
-    pub identifier: Identifier,
+    identifier: Identifier,
     /// Which participant this message is coming from
-    pub from: ParticipantIdentifier,
+    from: ParticipantIdentifier,
     /// Which participant this message is addressed to
-    pub to: ParticipantIdentifier,
+    to: ParticipantIdentifier,
     /// The raw bytes for the message, which need to be verified.
     /// This should be a private member of the struct, so that
     /// we require consumers to call the verify() function in
     /// order to extract bytes
-    unverified_bytes: Vec<u8>,
+    pub(crate) unverified_bytes: Vec<u8>,
 }
 
 impl Message {
@@ -80,95 +94,24 @@ impl Message {
             unverified_bytes: unverified_bytes.to_vec(),
         }
     }
-}
 
-/// This is where the verification logic happens when pulling messages off of
-/// the wire
-impl Message {
-    pub(crate) fn validate_to_auxinfo_public(&self) -> Result<AuxInfoPublic> {
-        if self.message_type != MessageType::AuxInfoPublic {
-            return bail!("Wrong message type, expected MessageType::AuxInfoPublic");
-        }
-        let aux_info_public: AuxInfoPublic = deserialize!(&self.unverified_bytes)?;
-
-        match aux_info_public.verify() {
-            Ok(()) => Ok(aux_info_public),
-            Err(e) => bail!("Failed to verify auxinfo public: {}", e),
-        }
+    /// The message type associated with the message
+    pub fn message_type(&self) -> MessageType {
+        self.message_type
     }
 
-    pub(crate) fn validate_to_keyshare_public(&self) -> Result<KeySharePublic> {
-        if self.message_type != MessageType::PublicKeyshare {
-            return bail!("Wrong message type, expected MessageType::PublicKeyshare");
-        }
-        let keyshare_public: KeySharePublic = deserialize!(&self.unverified_bytes)?;
-
-        match keyshare_public.verify() {
-            Ok(()) => Ok(keyshare_public),
-            Err(e) => bail!("Failed to verify keyshare public: {}", e),
-        }
+    /// The identifier associated with the message
+    pub fn id(&self) -> Identifier {
+        self.identifier
     }
 
-    pub(crate) fn validate_to_round_one_public(
-        &self,
-        receiver_keygen_public: &AuxInfoPublic,
-        sender_keygen_public: &AuxInfoPublic,
-    ) -> Result<RoundOnePublic> {
-        if self.message_type != MessageType::PresignRoundOne {
-            return bail!("Wrong message type, expected MessageType::RoundOne");
-        }
-        let round_one_public: RoundOnePublic = deserialize!(&self.unverified_bytes)?;
-
-        match round_one_public.verify(&receiver_keygen_public.params, sender_keygen_public.pk.n()) {
-            Ok(()) => Ok(round_one_public),
-            Err(e) => bail!("Failed to verify round one public: {}", e),
-        }
+    /// The participant that sent this message
+    pub fn from(&self) -> ParticipantIdentifier {
+        self.from
     }
 
-    pub(crate) fn validate_to_round_two_public(
-        &self,
-        receiver_auxinfo_public: &AuxInfoPublic,
-        sender_auxinfo_public: &AuxInfoPublic,
-        sender_keyshare_public: &KeySharePublic,
-        receiver_r1_private: &RoundOnePrivate,
-        sender_r1_public: &RoundOnePublic,
-    ) -> Result<RoundTwoPublic> {
-        if self.message_type != MessageType::PresignRoundTwo {
-            return bail!("Wrong message type, expected MessageType::RoundTwo");
-        }
-        let round_two_public: RoundTwoPublic = deserialize!(&self.unverified_bytes)?;
-
-        match round_two_public.verify(
-            receiver_auxinfo_public,
-            sender_auxinfo_public,
-            sender_keyshare_public,
-            receiver_r1_private,
-            sender_r1_public,
-        ) {
-            Ok(()) => Ok(round_two_public),
-            Err(e) => bail!("Failed to verify round two public: {}", e),
-        }
-    }
-
-    pub(crate) fn validate_to_round_three_public(
-        &self,
-        receiver_auxinfo_public: &AuxInfoPublic,
-        sender_auxinfo_public: &AuxInfoPublic,
-        sender_r1_public: &RoundOnePublic,
-    ) -> Result<RoundThreePublic> {
-        if self.message_type != MessageType::PresignRoundThree {
-            return bail!("Wrong message type, expected MessageType::RoundThree");
-        }
-
-        let round_three_public: RoundThreePublic = deserialize!(&self.unverified_bytes)?;
-
-        match round_three_public.verify(
-            receiver_auxinfo_public,
-            sender_auxinfo_public,
-            sender_r1_public,
-        ) {
-            Ok(()) => Ok(round_three_public),
-            Err(e) => bail!("Failed to verify round three public: {}", e),
-        }
+    /// That participant that should receive this message
+    pub fn to(&self) -> ParticipantIdentifier {
+        self.to
     }
 }
