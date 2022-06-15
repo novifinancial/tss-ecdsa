@@ -1,4 +1,20 @@
-use crate::{errors::Result, keygen::keyshare::KeySharePublic, messages::KeygenMessageType, messages::{Message, MessageType}, protocol::Identifier, protocol::ParticipantIdentifier, utils::CurvePoint, zkp::pisch::{PiSchPrecommit}};
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under both the MIT license found in the
+// LICENSE-MIT file in the root directory of this source tree and the Apache
+// License, Version 2.0 found in the LICENSE-APACHE file in the root directory
+// of this source tree.
+
+use crate::{
+    errors::Result,
+    keygen::keyshare::KeySharePublic,
+    messages::KeygenMessageType,
+    messages::{Message, MessageType},
+    protocol::Identifier,
+    protocol::ParticipantIdentifier,
+    utils::CurvePoint,
+    zkp::pisch::PiSchPrecommit,
+};
 use merlin::Transcript;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -40,17 +56,19 @@ impl KeygenDecommit {
         rng.fill_bytes(rid.as_mut_slice());
         rng.fill_bytes(u_i.as_mut_slice());
         Self {
-            sid: sid.clone(),
-            sender: sender.clone(),
+            sid: *sid,
+            sender: *sender,
             rid,
             u_i,
             pk: pk.clone(),
-            A: sch_precom.A.clone(),
+            A: sch_precom.A,
         }
     }
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Keygen(KeygenMessageType::R2Decommit) {
-            return bail!("Wrong message type, expected MessageType::Keygen(KeygenMessageType::R2Decommit)");
+            return bail!(
+                "Wrong message type, expected MessageType::Keygen(KeygenMessageType::R2Decommit)"
+            );
         }
         let keygen_decommit: KeygenDecommit = deserialize!(&message.unverified_bytes)?;
         Ok(keygen_decommit)

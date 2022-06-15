@@ -125,8 +125,8 @@ impl Storage {
     ) -> Result<()> {
         let mut fetch = vec![];
         for participant in participants {
-            fetch.push((s_type.clone(), sid.clone(), participant.clone()));
-        };
+            fetch.push((s_type, sid, *participant));
+        }
         self.contains_batch(&fetch)
     }
 

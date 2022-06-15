@@ -9,8 +9,8 @@
 
 use super::Proof;
 use crate::errors::*;
+use crate::messages::{KeygenMessageType, Message, MessageType};
 use crate::utils::{self, positive_bn_random_from_transcript};
-use crate::messages::{Message, MessageType, KeygenMessageType};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -118,7 +118,7 @@ impl Proof for PiSchProof {
     }
 }
 
-impl PiSchProof{
+impl PiSchProof {
     pub fn precommit<R: RngCore + CryptoRng>(
         rng: &mut R,
         input: &PiSchInput,
@@ -126,7 +126,7 @@ impl PiSchProof{
         // Sample alpha from F_q
         let alpha = crate::utils::random_positive_bn(rng, &input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
-        Ok(PiSchPrecommit{A, alpha})
+        Ok(PiSchPrecommit { A, alpha })
     }
 
     pub fn resume_proof(
@@ -149,7 +149,11 @@ impl PiSchProof{
         let proof = Self { A, e, z };
         Ok(proof)
     }
-    pub fn verify_with_transcript(&self, input: &PiSchInput, transcript: &Transcript) -> Result<()> {
+    pub fn verify_with_transcript(
+        &self,
+        input: &PiSchInput,
+        transcript: &Transcript,
+    ) -> Result<()> {
         let mut local_transcript = transcript.clone();
         local_transcript.append_message(b"CommonInput", &serialize!(&input)?);
         local_transcript.append_message(b"A", &serialize!(&self.A)?);
@@ -175,7 +179,9 @@ impl PiSchProof{
     }
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Keygen(KeygenMessageType::R3Proof) {
-            return bail!("Wrong message type, expected MessageType::Keygen(KeygenMessageType::R3Proof)");
+            return bail!(
+                "Wrong message type, expected MessageType::Keygen(KeygenMessageType::R3Proof)"
+            );
         }
         let keygen_decommit: PiSchProof = deserialize!(&message.unverified_bytes)?;
         Ok(keygen_decommit)
