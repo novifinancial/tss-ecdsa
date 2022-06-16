@@ -98,7 +98,7 @@ impl Participant {
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
         message: &Message,
-        _rng: &mut R,
+        rng: &mut R,
     ) -> Result<Vec<Message>> {
         println!(
             "processing participant: {}, with message type: {:?}",
@@ -110,9 +110,10 @@ impl Participant {
             MessageType::Auxinfo(_) => self
                 .auxinfo_participant
                 .process_message(message, &mut self.main_storage),
-            MessageType::Keygen(_) => self
-                .keygen_participant
-                .process_message(message, &mut self.main_storage),
+            MessageType::Keygen(_) => {
+                self.keygen_participant
+                    .process_message(rng, message, &mut self.main_storage)
+            }
             MessageType::Presign(_) => {
                 // Send presign message and existing storage containing auxinfo and
                 // keyshare values that presign needs to operate

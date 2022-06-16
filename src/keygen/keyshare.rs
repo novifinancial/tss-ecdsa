@@ -5,12 +5,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::{
-    errors::Result,
-    messages::{KeygenMessageType, MessageType},
-    utils::CurvePoint,
-    Message,
-};
+use crate::utils::CurvePoint;
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 
@@ -22,23 +17,4 @@ pub(crate) struct KeySharePrivate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct KeySharePublic {
     pub(crate) X: CurvePoint,
-}
-
-impl KeySharePublic {
-    pub(crate) fn verify(&self) -> Result<()> {
-        // FIXME: add actual verification logic
-        Ok(())
-    }
-
-    pub(crate) fn from_message(message: &Message) -> Result<Self> {
-        if message.message_type() != MessageType::Keygen(KeygenMessageType::PublicKeyshare) {
-            return bail!("Wrong message type, expected MessageType::Keygen(KeygenMessageType::PublicKeyshare)");
-        }
-        let keyshare_public: KeySharePublic = deserialize!(&message.unverified_bytes)?;
-
-        match keyshare_public.verify() {
-            Ok(()) => Ok(keyshare_public),
-            Err(e) => bail!("Failed to verify keyshare public: {}", e),
-        }
-    }
 }

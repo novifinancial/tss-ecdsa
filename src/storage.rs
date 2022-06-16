@@ -20,6 +20,10 @@ use std::hash::Hash;
 pub(crate) enum StorableType {
     AuxInfoReady,
     KeygenReady,
+    KeygenCommit,
+    KeygenDecommit,
+    KeygenSchnorrPrecom,
+    KeygenGlobalRid,
     PresignReady,
     AuxInfoPrivate,
     AuxInfoPublic,
@@ -110,6 +114,20 @@ impl Storage {
             })
             .collect();
         self.contains_index_batch(&storable_indices)
+    }
+
+    /// Check if storage contains entries for a given StorableType for each listed ParticipantIdentifier (in the same sid)
+    pub(crate) fn contains_for_all_ids(
+        &self,
+        s_type: StorableType,
+        sid: Identifier,
+        participants: &[ParticipantIdentifier],
+    ) -> Result<()> {
+        let mut fetch = vec![];
+        for participant in participants {
+            fetch.push((s_type, sid, *participant));
+        }
+        self.contains_batch(&fetch)
     }
 
     // Inner functions
