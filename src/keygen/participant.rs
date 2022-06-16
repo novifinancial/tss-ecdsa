@@ -19,6 +19,7 @@ use crate::zkp::pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret};
 use crate::CurvePoint;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
+use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -46,18 +47,19 @@ impl KeygenParticipant {
     /// Processes the incoming message given the storage from the protocol participant
     /// (containing auxinfo and keygen artifacts). Optionally produces a [KeysharePrivate]
     /// and [KeysharePublic] once keygen is complete.
-    pub(crate) fn process_message(
+    pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
+        rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
         match message.message_type() {
             MessageType::Keygen(KeygenMessageType::Ready) => {
-                let messages = self.handle_ready_msg(message)?;
+                let messages = self.handle_ready_msg(rng, message)?;
                 Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                let messages = self.handle_round_one_msg(message)?;
+                let messages = self.handle_round_one_msg(rng, message)?;
                 Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::R2Decommit) => {
@@ -76,7 +78,11 @@ impl KeygenParticipant {
         }
     }
     //fn do_round_one<R: RngCore + CryptoRng>(&mut self, rng: &mut R, message: &Message, main_storage: &mut Storage) -> Result<Vec<Message>> {
-    fn handle_ready_msg(&mut self, message: &Message) -> Result<Vec<Message>> {
+    fn handle_ready_msg<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
         let (mut messages, is_ready) = process_ready_message(
             self.id,
             &self.other_participant_ids,
@@ -85,17 +91,19 @@ impl KeygenParticipant {
             StorableType::KeygenReady,
         )?;
 
-        //todo: only send once
+        // todo: only send once
         if is_ready {
-            let more_messages = self.gen_round_one_msgs(message)?;
+            let more_messages = self.gen_round_one_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
         }
         Ok(messages)
     }
-    //fn gen_round_one_msgs<R: RngCore + CryptoRng>(&mut self, rng: &mut R, message: &Message, main_storage: &mut Storage) -> Result<Vec<Message>> {
-    fn gen_round_one_msgs(&mut self, message: &Message) -> Result<Vec<Message>> {
-        //todo: add check here that this hasn't happened yet
-        let mut rng = rand::rngs::OsRng;
+    fn gen_round_one_msgs<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
+        // todo: add check here that this hasn't happened yet
         let (keyshare_private, keyshare_public) = new_keyshare()?;
         self.storage.store(
             StorableType::PrivateKeyshare,
@@ -114,9 +122,9 @@ impl KeygenParticipant {
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
         let X = keyshare_public.X;
 
-        //todo: maybe there should be a function for generating a PiSchInput
+        // todo: maybe there should be a function for generating a PiSchInput
         let input = PiSchInput::new(&g, &q, &X);
-        let sch_precom = PiSchProof::precommit(&mut rng, &input)?;
+        let sch_precom = PiSchProof::precommit(rng, &input)?;
         let decom = KeygenDecommit::new(&message.id(), &self.id, &keyshare_public, &sch_precom);
         let com = decom.commit()?;
         let com_bytes = &serialize!(&com)?;
@@ -151,7 +159,11 @@ impl KeygenParticipant {
             .collect();
         Ok(messages)
     }
-    fn handle_round_one_msg(&mut self, message: &Message) -> Result<Vec<Message>> {
+    fn handle_round_one_msg<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
         let message_bytes = serialize!(&KeygenCommit::from_message(message)?)?;
         self.storage.store(
             StorableType::KeygenCommit,
@@ -160,7 +172,7 @@ impl KeygenParticipant {
             &message_bytes,
         )?;
 
-        //check if we've received all the commits
+        // check if we've received all the commits
         let r1_done = self
             .storage
             .contains_for_all_ids(
@@ -171,24 +183,28 @@ impl KeygenParticipant {
             .is_ok();
         let mut messages = vec![];
 
-        //todo: only send once
+        // todo: only send once
         if r1_done {
-            let more_messages = self.gen_round_two_msgs(message)?;
+            let more_messages = self.gen_round_two_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
         }
         Ok(messages)
     }
-    fn gen_round_two_msgs(&mut self, message: &Message) -> Result<Vec<Message>> {
-        //check that we've generated our keyshare before trying to retrieve it
+    fn gen_round_two_msgs<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<Vec<Message>> {
+        // check that we've generated our keyshare before trying to retrieve it
         let fetch = vec![(StorableType::PublicKeyshare, message.id(), self.id)];
         let public_keyshare_generated = self.storage.contains_batch(&fetch).is_ok();
         let mut messages = vec![];
         if !public_keyshare_generated {
-            let more_messages = self.gen_round_one_msgs(message)?;
+            let more_messages = self.gen_round_one_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
         }
 
-        //retreive your decom from storage
+        // retreive your decom from storage
         let decom_bytes =
             self.storage
                 .retrieve(StorableType::KeygenDecommit, message.id(), self.id)?;
@@ -224,7 +240,7 @@ impl KeygenParticipant {
             &serialize!(&decom)?,
         )?;
 
-        //check if we've received all the decommits
+        // check if we've received all the decommits
         let r2_done = self
             .storage
             .contains_for_all_ids(
@@ -235,7 +251,7 @@ impl KeygenParticipant {
             .is_ok();
         let mut messages = vec![];
 
-        //todo: only send once
+        // todo: only send once
         if r2_done {
             let more_messages = self.gen_round_three_msgs(message)?;
             messages.extend_from_slice(&more_messages);
@@ -301,8 +317,12 @@ impl KeygenParticipant {
             self.id
         )?)?;
 
-        let proof =
-            PiSchProof::resume_proof(precom, &input, &PiSchSecret::new(&my_sk.x), &transcript)?;
+        let proof = PiSchProof::prove_from_precommit(
+            &precom,
+            &input,
+            &PiSchSecret::new(&my_sk.x),
+            &transcript,
+        )?;
         let proof_bytes = serialize!(&proof)?;
 
         let more_messages: Vec<Message> = self
@@ -510,7 +530,7 @@ mod tests {
         // FIXME: Should be able to handle randomly selected messages, see:
         // https://github.com/novifinancial/tss-ecdsa/issues/33
         let message = inbox.remove(0);
-        let messages = participant.process_message(&message, main_storage)?;
+        let messages = participant.process_message(rng, &message, main_storage)?;
         deliver_all(&messages, inboxes)?;
 
         Ok(())

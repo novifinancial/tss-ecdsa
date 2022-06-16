@@ -64,6 +64,7 @@ impl KeygenDecommit {
             A: sch_precom.A,
         }
     }
+
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Keygen(KeygenMessageType::R2Decommit) {
             return bail!(
@@ -73,9 +74,11 @@ impl KeygenDecommit {
         let keygen_decommit: KeygenDecommit = deserialize!(&message.unverified_bytes)?;
         Ok(keygen_decommit)
     }
+
     pub(crate) fn get_keyshare(&self) -> &KeySharePublic {
         &self.pk
     }
+
     pub(crate) fn commit(&self) -> Result<KeygenCommit> {
         let mut transcript = Transcript::new(b"KeyGenR1");
         transcript.append_message(b"decom", &serialize!(&self)?);
@@ -83,6 +86,7 @@ impl KeygenDecommit {
         transcript.challenge_bytes(b"hashing r1", &mut hash);
         Ok(KeygenCommit { hash })
     }
+
     pub(crate) fn verify(
         &self,
         sid: &Identifier,

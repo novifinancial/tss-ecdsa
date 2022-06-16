@@ -19,13 +19,13 @@ use utils::CurvePoint;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchProof {
-    pub A: CurvePoint,
+    pub(crate) A: CurvePoint,
     e: BigNumber,
     z: BigNumber,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchPrecommit {
-    pub A: CurvePoint,
+    pub(crate) A: CurvePoint,
     alpha: BigNumber,
 }
 
@@ -129,13 +129,12 @@ impl PiSchProof {
         Ok(PiSchPrecommit { A, alpha })
     }
 
-    pub fn resume_proof(
-        com: PiSchPrecommit,
+    pub fn prove_from_precommit(
+        com: &PiSchPrecommit,
         input: &PiSchInput,
         secret: &PiSchSecret,
         transcript: &Transcript,
     ) -> Result<Self> {
-        let alpha = com.alpha;
         let A = com.A;
         let mut local_transcript = transcript.clone();
         local_transcript.append_message(b"CommonInput", &serialize!(&input)?);
@@ -144,7 +143,7 @@ impl PiSchProof {
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
 
-        let z = &alpha + &e * &secret.x;
+        let z = &com.alpha + &e * &secret.x;
 
         let proof = Self { A, e, z };
         Ok(proof)
@@ -235,8 +234,24 @@ mod tests {
         let input = PiSchInput::new(&g, &q, &X);
         let com = PiSchProof::precommit(&mut rng, &input)?;
         let transcript = Transcript::new(b"some external proof stuff");
-        let proof = PiSchProof::resume_proof(com, &input, &PiSchSecret::new(&x), &transcript)?;
+        let proof =
+            PiSchProof::prove_from_precommit(&com, &input, &PiSchSecret::new(&x), &transcript)?;
         proof.verify_with_transcript(&input, &transcript)?;
+
+        //test public param mismatch
+        let lambda = crate::utils::random_positive_bn(&mut rng, &q);
+        let h = CurvePoint(g.0 * utils::bn_to_scalar(&lambda).unwrap());
+        let input2 = PiSchInput::new(&h, &q, &X);
+        let proof2 =
+            PiSchProof::prove_from_precommit(&com, &input2, &PiSchSecret::new(&x), &transcript)?;
+        assert!(proof2.verify_with_transcript(&input, &transcript).is_err());
+
+        //test transcript mismatch
+        let transcript2 = Transcript::new(b"some other external proof stuff");
+        let proof3 =
+            PiSchProof::prove_from_precommit(&com, &input, &PiSchSecret::new(&x), &transcript2)?;
+        assert!(proof3.verify_with_transcript(&input, &transcript).is_err());
+
         Ok(())
     }
 }
