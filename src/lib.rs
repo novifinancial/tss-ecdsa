@@ -48,6 +48,7 @@ pub mod errors;
 
 mod auxinfo;
 mod keygen;
+mod message_queue;
 mod messages;
 mod paillier;
 mod parameters;
