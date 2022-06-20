@@ -80,12 +80,6 @@ impl KeygenParticipant {
     }
 
     fn stash_message(&mut self, message: &Message) -> Result<()> {
-        println!(
-            "Participant {} : stashing message from {} with message type: {:?}",
-            &self.id,
-            &message.from(),
-            &message.message_type(),
-        );
         let mut message_storage =
             match self
                 .storage
@@ -253,12 +247,6 @@ impl KeygenParticipant {
                 )?
                 .iter()
             {
-                println!(
-                    "Participant {} : unstashing message from {} with message type: {:?}",
-                    &self.id,
-                    &msg.from(),
-                    &msg.message_type(),
-                );
                 messages.extend_from_slice(&self.handle_round_two_msg(msg, main_storage)?);
             }
         }
@@ -363,12 +351,6 @@ impl KeygenParticipant {
                 )?
                 .iter()
             {
-                println!(
-                    "Participant {} : unstashing message from {} with message type: {:?}",
-                    &self.id,
-                    &msg.from(),
-                    &msg.message_type(),
-                );
                 messages.extend_from_slice(&self.handle_round_three_msg(msg, main_storage)?);
             }
         }
