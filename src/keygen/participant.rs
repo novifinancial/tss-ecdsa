@@ -9,6 +9,7 @@ use crate::errors::Result;
 use crate::keygen::keygen_commit::{KeygenCommit, KeygenDecommit};
 use crate::keygen::keyshare::KeySharePrivate;
 use crate::keygen::keyshare::KeySharePublic;
+use crate::message_queue::MessageQueue;
 use crate::messages::KeygenMessageType;
 use crate::messages::{Message, MessageType};
 use crate::protocol::ParticipantIdentifier;
@@ -16,7 +17,7 @@ use crate::storage::StorableType;
 use crate::storage::Storage;
 use crate::utils::{k256_order, process_ready_message};
 use crate::zkp::pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret};
-use crate::CurvePoint;
+use crate::{CurvePoint, Identifier};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -59,11 +60,11 @@ impl KeygenParticipant {
                 Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                let messages = self.handle_round_one_msg(rng, message)?;
+                let messages = self.handle_round_one_msg(rng, message, main_storage)?;
                 Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::R2Decommit) => {
-                let messages = self.handle_round_two_msg(message)?;
+                let messages = self.handle_round_two_msg(message, main_storage)?;
                 Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::R3Proof) => {
@@ -77,7 +78,49 @@ impl KeygenParticipant {
             }
         }
     }
-    //fn do_round_one<R: RngCore + CryptoRng>(&mut self, rng: &mut R, message: &Message, main_storage: &mut Storage) -> Result<Vec<Message>> {
+
+    fn stash_message(&mut self, message: &Message) -> Result<()> {
+        let mut message_storage =
+            match self
+                .storage
+                .retrieve(StorableType::MessageQueue, message.id(), self.id)
+            {
+                Err(_) => MessageQueue::new(),
+                Ok(message_storage_bytes) => deserialize!(&message_storage_bytes)?,
+            };
+        message_storage.store(message.message_type(), message.id(), message.clone())?;
+        self.storage.store(
+            StorableType::MessageQueue,
+            message.id(),
+            self.id,
+            &serialize!(&message_storage)?,
+        )?;
+        Ok(())
+    }
+
+    fn fetch_messages(
+        &mut self,
+        message_type: MessageType,
+        sid: Identifier,
+    ) -> Result<Vec<Message>> {
+        let mut message_storage =
+            match self
+                .storage
+                .retrieve(StorableType::MessageQueue, sid, self.id)
+            {
+                Err(_) => MessageQueue::new(),
+                Ok(message_storage_bytes) => deserialize!(&message_storage_bytes)?,
+            };
+        let messages = message_storage.retrieve_all(message_type, sid)?;
+        self.storage.store(
+            StorableType::MessageQueue,
+            sid,
+            self.id,
+            &serialize!(&message_storage)?,
+        )?;
+        Ok(messages)
+    }
+
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -91,19 +134,25 @@ impl KeygenParticipant {
             StorableType::KeygenReady,
         )?;
 
-        // todo: only send once
         if is_ready {
             let more_messages = self.gen_round_one_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
         }
         Ok(messages)
     }
+
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
-        // todo: add check here that this hasn't happened yet
+        if self
+            .storage
+            .retrieve(StorableType::KeygenR1Sent, message.id(), self.id)
+            .is_ok()
+        {
+            return Ok(vec![]);
+        }
         let (keyshare_private, keyshare_public) = new_keyshare()?;
         self.storage.store(
             StorableType::PrivateKeyshare,
@@ -157,12 +206,16 @@ impl KeygenParticipant {
                 )
             })
             .collect();
+        self.storage
+            .store(StorableType::KeygenR1Sent, message.id(), self.id, &[])?;
         Ok(messages)
     }
+
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
+        main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
         let message_bytes = serialize!(&KeygenCommit::from_message(message)?)?;
         self.storage.store(
@@ -172,21 +225,30 @@ impl KeygenParticipant {
             &message_bytes,
         )?;
 
-        // check if we've received all the commits
+        // check if we've received all the commits.
         let r1_done = self
             .storage
             .contains_for_all_ids(
                 StorableType::KeygenCommit,
                 message.id(),
-                &[self.other_participant_ids.clone(), vec![self.id]].concat(),
+                &self.other_participant_ids.clone(),
             )
             .is_ok();
         let mut messages = vec![];
 
-        // todo: only send once
         if r1_done {
             let more_messages = self.gen_round_two_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
+            // process any round 2 messages we may have received early
+            for msg in self
+                .fetch_messages(
+                    MessageType::Keygen(KeygenMessageType::R2Decommit),
+                    message.id(),
+                )?
+                .iter()
+            {
+                messages.extend_from_slice(&self.handle_round_two_msg(msg, main_storage)?);
+            }
         }
         Ok(messages)
     }
@@ -195,6 +257,13 @@ impl KeygenParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        if self
+            .storage
+            .retrieve(StorableType::KeygenR2Sent, message.id(), self.id)
+            .is_ok()
+        {
+            return Ok(vec![]);
+        }
         // check that we've generated our keyshare before trying to retrieve it
         let fetch = vec![(StorableType::PublicKeyshare, message.id(), self.id)];
         let public_keyshare_generated = self.storage.contains_batch(&fetch).is_ok();
@@ -222,9 +291,30 @@ impl KeygenParticipant {
             })
             .collect();
         messages.extend_from_slice(&more_messages);
+        self.storage
+            .store(StorableType::KeygenR2Sent, message.id(), self.id, &[])?;
         Ok(messages)
     }
-    fn handle_round_two_msg(&mut self, message: &Message) -> Result<Vec<Message>> {
+
+    fn handle_round_two_msg(
+        &mut self,
+        message: &Message,
+        main_storage: &mut Storage,
+    ) -> Result<Vec<Message>> {
+        // We must receive all commitments in round 1 before we start processing decommits in round 2.
+        let r1_done = self
+            .storage
+            .contains_for_all_ids(
+                StorableType::KeygenCommit,
+                message.id(),
+                &[self.other_participant_ids.clone(), vec![self.id]].concat(),
+            )
+            .is_ok();
+        if !r1_done {
+            // store any early round2 messages
+            self.stash_message(message)?;
+            return Ok(vec![]);
+        }
         let decom = KeygenDecommit::from_message(message)?;
         let com_bytes =
             self.storage
@@ -246,19 +336,35 @@ impl KeygenParticipant {
             .contains_for_all_ids(
                 StorableType::KeygenDecommit,
                 message.id(),
-                &[self.other_participant_ids.clone(), vec![self.id]].concat(),
+                &self.other_participant_ids.clone(),
             )
             .is_ok();
         let mut messages = vec![];
 
-        // todo: only send once
         if r2_done {
             let more_messages = self.gen_round_three_msgs(message)?;
             messages.extend_from_slice(&more_messages);
+            for msg in self
+                .fetch_messages(
+                    MessageType::Keygen(KeygenMessageType::R3Proof),
+                    message.id(),
+                )?
+                .iter()
+            {
+                messages.extend_from_slice(&self.handle_round_three_msg(msg, main_storage)?);
+            }
         }
         Ok(messages)
     }
+
     fn gen_round_three_msgs(&mut self, message: &Message) -> Result<Vec<Message>> {
+        if self
+            .storage
+            .retrieve(StorableType::KeygenR3Sent, message.id(), self.id)
+            .is_ok()
+        {
+            return Ok(vec![]);
+        }
         let rids: Vec<[u8; 32]> = self
             .other_participant_ids
             .iter()
@@ -338,14 +444,25 @@ impl KeygenParticipant {
                 )
             })
             .collect();
-
+        self.storage
+            .store(StorableType::KeygenR1Sent, message.id(), self.id, &[])?;
         Ok(more_messages)
     }
+
     fn handle_round_three_msg(
         &mut self,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        // We can't handle this message unless we already calculated the global_rid
+        if self
+            .storage
+            .retrieve(StorableType::KeygenGlobalRid, message.id(), self.id)
+            .is_err()
+        {
+            self.stash_message(message)?;
+            return Ok(vec![]);
+        }
         let proof = PiSchProof::from_message(message)?;
         let global_rid: [u8; 32] = deserialize!(&self.storage.retrieve(
             StorableType::KeygenGlobalRid,
@@ -384,7 +501,6 @@ impl KeygenParticipant {
             )
             .is_ok();
 
-        //todo: only do once
         if keyshare_done {
             for oid in self.other_participant_ids.iter() {
                 let keyshare_bytes =
@@ -437,8 +553,8 @@ fn new_keyshare() -> Result<(KeySharePrivate, KeySharePublic)> {
 mod tests {
     use super::*;
     use crate::Identifier;
-    use rand::rngs::OsRng;
-    use rand::{CryptoRng, Rng, RngCore};
+    use rand::rngs::{OsRng, StdRng};
+    use rand::{CryptoRng, Rng, RngCore, SeedableRng};
     use std::collections::HashMap;
 
     impl KeygenParticipant {
@@ -529,7 +645,14 @@ mod tests {
 
         // FIXME: Should be able to handle randomly selected messages, see:
         // https://github.com/novifinancial/tss-ecdsa/issues/33
-        let message = inbox.remove(0);
+        let index = rng.gen_range(0..inbox.len());
+        let message = inbox.remove(index);
+        println!(
+            "processing participant: {}, with message type: {:?} from {}",
+            &participant.id,
+            &message.message_type(),
+            &message.from(),
+        );
         let messages = participant.process_message(rng, &message, main_storage)?;
         deliver_all(&messages, inboxes)?;
 
@@ -538,8 +661,21 @@ mod tests {
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
+    // This test is cheap. Try a bunch of message permutations to decrease error likelihood
+    fn test_run_keygen_protocol_many_times() -> Result<()> {
+        for _ in 0..20 {
+            test_run_keygen_protocol()?;
+        }
+        Ok(())
+    }
+    #[test]
     fn test_run_keygen_protocol() -> Result<()> {
-        let mut rng = OsRng;
+        let mut osrng = OsRng;
+        let seed = osrng.next_u64();
+        // uncomment this line to test a specific seed
+        // let seed: u64 = 11129769151581080362;
+        let mut rng = StdRng::seed_from_u64(seed);
+        println!("Initializing run with seed {}", seed);
         let mut quorum = KeygenParticipant::new_quorum(3, &mut rng)?;
         let mut inboxes = HashMap::new();
         let mut main_storages: Vec<Storage> = vec![];
