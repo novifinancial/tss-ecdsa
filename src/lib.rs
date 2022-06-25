@@ -58,6 +58,7 @@ mod safe_primes_512;
 mod storage;
 mod utils;
 mod zkp;
+mod participant;
 
 pub use messages::Message;
 pub use protocol::{

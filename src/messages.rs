@@ -50,6 +50,8 @@ pub enum KeygenMessageType {
     R2Decommit,
     /// A proof of knowledge of the discrete log of the value decommitted in Round 2
     R3Proof,
+    /// A message belonging to a broadcast subprotocol
+    Broadcast(BroadcastMessageType),
 }
 
 /// An enum consisting of all presign message types
@@ -63,6 +65,14 @@ pub enum PresignMessageType {
     RoundTwo,
     /// Third round of presigning
     RoundThree,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BroadcastMessageType {
+    /// First round: sender sends their message to everyone
+    Disperse,
+    /// Second round: everyone reflects the message to everyone else
+    Redisperse,
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
