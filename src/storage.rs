@@ -38,6 +38,7 @@ pub(crate) enum StorableType {
     PresignRecord,
     MessageQueue,
     ProgressStore,
+    BroadcastSet,
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
