@@ -124,7 +124,6 @@ pub(crate) trait Broadcast {
         let mut messages =
             self.broadcast_participant()
                 .gen_round_one_msgs(rng, message_type, data, sid, tag)?;
-        // this doesn't wrap, it just changes type
         for msg in messages.iter_mut() {
             msg.unverified_bytes = serialize!(msg)?;
             msg.message_type = *message_type;
@@ -173,7 +172,6 @@ macro_rules! run_only_once_per_tag {
             println!("Attempted to rerun a run_only_once_per_tag function");
             Ok(vec![])
         } else {
-            println!("[{}] Writing {}, {}", $self.id, $sid, $tag);
             $self.write_progress(stringify!($func_name).to_string(), $sid)?;
             $self.$func_name$args
         }

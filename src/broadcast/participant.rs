@@ -193,9 +193,10 @@ impl BroadcastParticipant {
             count += 1;
             tally.insert(vote.clone(), count);
         }
+
+        // output if every node voted for the same message
         for (k, v) in tally.iter() {
             if *v == self.other_participant_ids.len() {
-                // output the message
                 let msg = Message::new(data.message_type, sid, data.leader, self.id(), k);
                 let out = BroadcastOutput { tag: data.tag, msg };
                 return Ok(Some(out));
