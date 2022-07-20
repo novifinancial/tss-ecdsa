@@ -5,7 +5,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::broadcast::participant::BroadcastParticipant;
+use crate::broadcast::participant::{BroadcastOutput, BroadcastParticipant};
 use crate::errors::Result;
 use crate::message_queue::MessageQueue;
 use crate::messages::{Message, MessageType};
@@ -16,16 +16,6 @@ use crate::Identifier;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-#[derive(Serialize, Deserialize, Clone)]
-pub(crate) struct ArbParticipant {
-    /// A unique identifier for this participant
-    id: ParticipantIdentifier,
-    /// A list of all other participant identifiers participating in the protocol
-    other_participant_ids: Vec<ParticipantIdentifier>,
-    /// Local storage for this participant to store secrets
-    storage: Storage,
-}
 
 #[derive(Serialize, Deserialize)]
 struct ProgressIndex {
@@ -131,8 +121,32 @@ pub(crate) trait Broadcast {
         sid: Identifier,
         tag: &str,
     ) -> Result<Vec<Message>> {
-        self.broadcast_participant()
-            .gen_round_one_msgs(rng, message_type, data, sid, tag)
+        let mut messages =
+            self.broadcast_participant()
+                .gen_round_one_msgs(rng, message_type, data, sid, tag)?;
+        // this doesn't wrap, it just changes type
+        for msg in messages.iter_mut() {
+            msg.unverified_bytes = serialize!(msg)?;
+            msg.message_type = *message_type;
+        }
+        Ok(messages)
+    }
+
+    fn handle_broadcast<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+    ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+        let message_type = message.message_type;
+        let broadcast_input: Message = deserialize!(&message.unverified_bytes)?;
+        let (broadcast_option, mut messages) = self
+            .broadcast_participant()
+            .process_message(rng, &broadcast_input)?;
+        for msg in messages.iter_mut() {
+            msg.unverified_bytes = serialize!(msg)?;
+            msg.message_type = message_type;
+        }
+        Ok((broadcast_option, messages))
     }
 }
 
@@ -159,6 +173,7 @@ macro_rules! run_only_once_per_tag {
             println!("Attempted to rerun a run_only_once_per_tag function");
             Ok(vec![])
         } else {
+            println!("[{}] Writing {}, {}", $self.id, $sid, $tag);
             $self.write_progress(stringify!($func_name).to_string(), $sid)?;
             $self.$func_name$args
         }

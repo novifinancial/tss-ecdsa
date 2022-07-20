@@ -26,6 +26,8 @@ pub enum MessageType {
     Keygen(KeygenMessageType),
     /// Presign messages
     Presign(PresignMessageType),
+    /// Broadcast messages
+    Broadcast(BroadcastMessageType),
 }
 
 /// An enum consisting of all auxinfo message types
@@ -50,8 +52,6 @@ pub enum KeygenMessageType {
     R2Decommit,
     /// A proof of knowledge of the discrete log of the value decommitted in Round 2
     R3Proof,
-    /// A message belonging to a broadcast subprotocol
-    Broadcast(BroadcastMessageType),
 }
 
 /// An enum consisting of all presign message types
@@ -79,7 +79,7 @@ pub enum BroadcastMessageType {
 #[derive(Debug, Clone, Display, Serialize, Deserialize)]
 pub struct Message {
     /// The type of the message
-    message_type: MessageType,
+    pub(crate) message_type: MessageType,
     /// The unique identifier corresponding to the object carried by the message
     identifier: Identifier,
     /// Which participant this message is coming from

@@ -6,7 +6,7 @@
 // of this source tree.
 
 use crate::errors::Result;
-use crate::messages::{BroadcastMessageType, KeygenMessageType, Message, MessageType};
+use crate::messages::{BroadcastMessageType, Message, MessageType};
 use crate::ParticipantIdentifier;
 use serde::{Deserialize, Serialize};
 
@@ -20,14 +20,10 @@ pub(crate) struct BroadcastData {
 
 impl BroadcastData {
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
-        if message.message_type()
-            != MessageType::Keygen(KeygenMessageType::Broadcast(BroadcastMessageType::Disperse))
-            && message.message_type()
-                != MessageType::Keygen(KeygenMessageType::Broadcast(
-                    BroadcastMessageType::Redisperse,
-                ))
+        if message.message_type() != MessageType::Broadcast(BroadcastMessageType::Disperse)
+            && message.message_type() != MessageType::Broadcast(BroadcastMessageType::Redisperse)
         {
-            return bail!("Wrong message type, expected MessageType::Keygen(KeygenMessageType::Broadcast(BroadcastMessageType::Disperse) or ...Redisperse");
+            return bail!("Wrong message type, expected MessageType::Broadcast(BroadcastMessageType::Disperse) or ...Redisperse");
         }
         let broadcast_data: BroadcastData = deserialize!(&message.unverified_bytes)?;
         Ok(broadcast_data)

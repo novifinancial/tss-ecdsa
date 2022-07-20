@@ -8,7 +8,6 @@
 use crate::broadcast::data::BroadcastData;
 use crate::errors::Result;
 use crate::messages::BroadcastMessageType;
-use crate::messages::KeygenMessageType::Broadcast;
 use crate::messages::{Message, MessageType};
 use crate::participant::ProtocolParticipant;
 use crate::protocol::ParticipantIdentifier;
@@ -75,11 +74,11 @@ impl BroadcastParticipant {
         message: &Message,
     ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
         match message.message_type() {
-            MessageType::Keygen(Broadcast(BroadcastMessageType::Disperse)) => {
+            MessageType::Broadcast(BroadcastMessageType::Disperse) => {
                 let (output_option, messages) = self.handle_round_one_msg(rng, message)?;
                 Ok((output_option, messages))
             }
-            MessageType::Keygen(Broadcast(BroadcastMessageType::Redisperse)) => {
+            MessageType::Broadcast(BroadcastMessageType::Redisperse) => {
                 let (output_option, messages) = self.handle_round_two_msg(rng, message)?;
                 Ok((output_option, messages))
             }
@@ -99,7 +98,6 @@ impl BroadcastParticipant {
         sid: Identifier,
         tag: &str,
     ) -> Result<Vec<Message>> {
-        // assume message type is Disperse
         let b_data = BroadcastData {
             leader: self.id,
             tag: tag.to_owned(),
@@ -112,7 +110,7 @@ impl BroadcastParticipant {
             .iter()
             .map(|&other_participant_id| {
                 Message::new(
-                    MessageType::Keygen(Broadcast(BroadcastMessageType::Disperse)),
+                    MessageType::Broadcast(BroadcastMessageType::Disperse),
                     sid,
                     self.id,
                     other_participant_id,
@@ -134,8 +132,11 @@ impl BroadcastParticipant {
         let tag = data.tag.clone();
         // it's possible that all Redisperse messages are received before the original Disperse, causing an output
         let output_option = self.process_vote(data, message.id(), message.from())?;
-        let messages =
-            run_only_once_per_tag!(self.gen_round_two_msgs(rng, message), message.id(), &tag)?;
+        let messages = run_only_once_per_tag!(
+            self.gen_round_two_msgs(rng, message, message.from()),
+            message.id(),
+            &tag
+        )?;
         Ok((output_option, messages))
     }
 
@@ -196,16 +197,7 @@ impl BroadcastParticipant {
             if *v == self.other_participant_ids.len() {
                 // output the message
                 let msg = Message::new(data.message_type, sid, data.leader, self.id(), k);
-                let out = BroadcastOutput {
-                    tag: data.tag,
-                    msg: msg.clone(),
-                };
-                println!(
-                    "participant {}'s broadcast output: {:?} from {}",
-                    &self.id,
-                    &msg.message_type(),
-                    &msg.from(),
-                );
+                let out = BroadcastOutput { tag: data.tag, msg };
                 return Ok(Some(out));
             }
         }
@@ -216,15 +208,18 @@ impl BroadcastParticipant {
         &mut self,
         _rng: &mut R,
         message: &Message,
+        leader: ParticipantIdentifier,
     ) -> Result<Vec<Message>> {
         let data = BroadcastData::from_message(message)?;
         let data_bytes = serialize!(&data)?;
-        let messages: Vec<Message> = self
-            .other_participant_ids
+        // todo: handle this more memory-efficiently
+        let mut others_minus_leader = self.other_participant_ids.clone();
+        others_minus_leader.retain(|&id| id != leader);
+        let messages: Vec<Message> = others_minus_leader
             .iter()
             .map(|&other_participant_id| {
                 Message::new(
-                    MessageType::Keygen(Broadcast(BroadcastMessageType::Redisperse)),
+                    MessageType::Broadcast(BroadcastMessageType::Redisperse),
                     message.id(),
                     self.id,
                     other_participant_id,

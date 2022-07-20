@@ -80,32 +80,16 @@ impl KeygenParticipant {
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
         match message.message_type() {
-            MessageType::Keygen(KeygenMessageType::Broadcast(_)) => {
-                let (broadcast_output_option, mut messages) =
-                    self.broadcast_participant.process_message(rng, message)?;
-                match broadcast_output_option {
-                    Some(broadcast_output) => {
-                        match broadcast_output.msg.message_type() {
-                            // Specify messages which must be broadcasted here
-                            MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                                let more_messages = self.handle_round_one_msg(
-                                    rng,
-                                    &broadcast_output,
-                                    main_storage,
-                                )?;
-                                messages.extend_from_slice(&more_messages);
-                                Ok(messages)
-                            }
-                            MessageType::Keygen(_) => {
-                                return bail!("Unnecessary broadcast");
-                            }
-                            _ => {
-                                return bail!("Misrouted broadcast!");
-                            }
-                        }
+            MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
+                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
+                match broadcast_option {
+                    Some(bmsg) => {
+                        let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
+                        messages.extend_from_slice(&more_messages);
                     }
-                    None => Ok(messages),
-                }
+                    None => {}
+                };
+                Ok(messages)
             }
             MessageType::Keygen(KeygenMessageType::Ready) => {
                 let messages = self.handle_ready_msg(rng, message)?;
@@ -144,7 +128,6 @@ impl KeygenParticipant {
         if is_ready {
             let more_messages =
                 run_only_once!(self.gen_round_one_msgs(rng, message), message.id())?;
-            //let more_messages = self.gen_round_one_msgs(rng, message)?;
             messages.extend_from_slice(&more_messages);
         }
         Ok(messages)
@@ -632,8 +615,6 @@ mod tests {
         }
         let main_storage = main_storages.get_mut(index).unwrap();
 
-        // FIXME: Should be able to handle randomly selected messages, see:
-        // https://github.com/novifinancial/tss-ecdsa/issues/33
         let index = rng.gen_range(0..inbox.len());
         let message = inbox.remove(index);
         println!(
