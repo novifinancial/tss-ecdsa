@@ -132,6 +132,9 @@ impl Participant {
 
                 Ok(messages)
             }
+            _ => {
+                bail!("Invalid message type!")
+            }
         }
     }
 

@@ -47,11 +47,13 @@ extern crate flamer;
 pub mod errors;
 
 mod auxinfo;
+mod broadcast;
 mod keygen;
 mod message_queue;
 mod messages;
 mod paillier;
 mod parameters;
+mod participant;
 mod presign;
 mod protocol;
 mod safe_primes_512;

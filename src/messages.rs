@@ -26,6 +26,8 @@ pub enum MessageType {
     Keygen(KeygenMessageType),
     /// Presign messages
     Presign(PresignMessageType),
+    /// Broadcast messages
+    Broadcast(BroadcastMessageType),
 }
 
 /// An enum consisting of all auxinfo message types
@@ -65,11 +67,19 @@ pub enum PresignMessageType {
     RoundThree,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BroadcastMessageType {
+    /// First round: sender sends their message to everyone
+    Disperse,
+    /// Second round: everyone reflects the message to everyone else
+    Redisperse,
+}
+
 /// A message that can be posted to (and read from) the broadcast channel
 #[derive(Debug, Clone, Display, Serialize, Deserialize)]
 pub struct Message {
     /// The type of the message
-    message_type: MessageType,
+    pub(crate) message_type: MessageType,
     /// The unique identifier corresponding to the object carried by the message
     identifier: Identifier,
     /// Which participant this message is coming from

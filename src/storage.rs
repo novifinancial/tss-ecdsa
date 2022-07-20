@@ -24,9 +24,6 @@ pub(crate) enum StorableType {
     KeygenDecommit,
     KeygenSchnorrPrecom,
     KeygenGlobalRid,
-    KeygenR1Sent,
-    KeygenR2Sent,
-    KeygenR3Sent,
     PresignReady,
     AuxInfoPrivate,
     AuxInfoPublic,
@@ -40,6 +37,8 @@ pub(crate) enum StorableType {
     RoundThreePublic,
     PresignRecord,
     MessageQueue,
+    ProgressStore,
+    BroadcastSet,
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
