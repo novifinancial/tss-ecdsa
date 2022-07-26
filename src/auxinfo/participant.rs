@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use super::info::{AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses};
 
 #[derive(Serialize, Deserialize, Clone)]
-pub(crate) struct AuxinfoParticipant {
+pub(crate) struct AuxInfoParticipant {
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the protocol
@@ -41,7 +41,7 @@ pub(crate) struct AuxinfoParticipant {
     broadcast_participant: BroadcastParticipant,
 }
 
-impl ProtocolParticipant for AuxinfoParticipant {
+impl ProtocolParticipant for AuxInfoParticipant {
     fn storage(&self) -> &Storage {
         &self.storage
     }
@@ -55,13 +55,13 @@ impl ProtocolParticipant for AuxinfoParticipant {
     }
 }
 
-impl Broadcast for AuxinfoParticipant {
+impl Broadcast for AuxInfoParticipant {
     fn broadcast_participant(&mut self) -> &mut BroadcastParticipant {
         &mut self.broadcast_participant
     }
 }
 
-impl AuxinfoParticipant {
+impl AuxInfoParticipant {
     pub(crate) fn from_ids(
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
@@ -368,7 +368,7 @@ impl AuxinfoParticipant {
             }
         }
         self.storage.store(
-            StorableType::KeygenGlobalRid,
+            StorableType::AuxInfoGlobalRid,
             message.id(),
             self.id,
             &serialize!(&global_rid)?,
@@ -380,7 +380,14 @@ impl AuxinfoParticipant {
             self.id
         )?)?;
 
-        let proof = AuxInfoProof::prove(rng, &(&witness.p * &witness.q), &witness.p, &witness.q)?;
+        let proof = AuxInfoProof::prove(
+            rng,
+            message.id(),
+            global_rid,
+            &(&witness.p * &witness.q),
+            &witness.p,
+            &witness.q,
+        )?;
         let proof_bytes = serialize!(&proof)?;
 
         let more_messages: Vec<Message> = self
@@ -408,15 +415,15 @@ impl AuxinfoParticipant {
         // We can't handle this message unless we already calculated the global_rid
         if self
             .storage
-            .retrieve(StorableType::KeygenGlobalRid, message.id(), self.id)
+            .retrieve(StorableType::AuxInfoGlobalRid, message.id(), self.id)
             .is_err()
         {
             self.stash_message(message)?;
             return Ok(vec![]);
         }
 
-        let _global_rid: [u8; 32] = deserialize!(&self.storage.retrieve(
-            StorableType::KeygenGlobalRid,
+        let global_rid: [u8; 32] = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoGlobalRid,
             message.id(),
             self.id
         )?)?;
@@ -429,8 +436,7 @@ impl AuxinfoParticipant {
         let auxinfo_pub = decom.get_pk();
 
         let proof = AuxInfoProof::from_message(message)?;
-        //todo: incorporate rid/rho?
-        proof.verify(auxinfo_pub.pk.n())?;
+        proof.verify(message.id(), global_rid, auxinfo_pub.pk.n())?;
 
         self.storage.store(
             StorableType::AuxInfoPublic,
@@ -524,7 +530,7 @@ mod tests {
     use rand::{CryptoRng, Rng, RngCore, SeedableRng};
     use std::collections::HashMap;
 
-    impl AuxinfoParticipant {
+    impl AuxInfoParticipant {
         pub fn new_quorum<R: RngCore + CryptoRng>(
             quorum_size: usize,
             rng: &mut R,
@@ -535,7 +541,7 @@ mod tests {
             }
             let participants = participant_ids
                 .iter()
-                .map(|&participant_id| -> AuxinfoParticipant {
+                .map(|&participant_id| -> AuxInfoParticipant {
                     // Filter out current participant id from list of other ids
                     let mut other_ids = vec![];
                     for &id in participant_ids.iter() {
@@ -545,7 +551,7 @@ mod tests {
                     }
                     Self::from_ids(participant_id, other_ids)
                 })
-                .collect::<Vec<AuxinfoParticipant>>();
+                .collect::<Vec<AuxInfoParticipant>>();
             Ok(participants)
         }
 
@@ -587,7 +593,7 @@ mod tests {
     }
 
     fn is_auxinfo_done(
-        quorum: &[AuxinfoParticipant],
+        quorum: &[AuxInfoParticipant],
         auxinfo_identifier: Identifier,
     ) -> Result<()> {
         for participant in quorum {
@@ -599,7 +605,7 @@ mod tests {
     }
 
     fn process_messages<R: RngCore + CryptoRng>(
-        quorum: &mut Vec<AuxinfoParticipant>,
+        quorum: &mut Vec<AuxInfoParticipant>,
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
         rng: &mut R,
         main_storages: &mut Vec<Storage>,
@@ -646,7 +652,7 @@ mod tests {
         // let seed: u64 = 11129769151581080362;
         let mut rng = StdRng::seed_from_u64(seed);
         println!("Initializing run with seed {}", seed);
-        let mut quorum = AuxinfoParticipant::new_quorum(3, &mut rng)?;
+        let mut quorum = AuxInfoParticipant::new_quorum(3, &mut rng)?;
         let mut inboxes = HashMap::new();
         let mut main_storages: Vec<Storage> = vec![];
         for participant in &quorum {

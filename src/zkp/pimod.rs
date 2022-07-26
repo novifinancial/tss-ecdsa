@@ -157,6 +157,99 @@ impl Proof for PiModProof {
     }
 }
 
+impl PiModProof {
+    #[allow(clippy::many_single_char_names)]
+    pub fn prove_with_transcript<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        input: &PiModInput,
+        secret: &PiModSecret,
+        transcript: &mut Transcript,
+    ) -> Result<Self> {
+        // Step 1: Pick a random w in [1, N) that has a Jacobi symbol of -1
+        let mut w = random_positive_bn(rng, &input.N);
+        while jacobi(&w, &input.N) != -1 {
+            w = random_positive_bn(rng, &input.N);
+        }
+
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"w", &w.to_bytes());
+
+        let mut elements = vec![];
+        for _ in 0..LAMBDA {
+            let y = positive_bn_random_from_transcript(transcript, &input.N);
+
+            let (a, b, x) = y_prime_combinations(&w, &y, &secret.p, &secret.q)?;
+
+            // Compute phi(N) = (p-1) * (q-1)
+            let phi_n = (&secret.p - 1) * (&secret.q - 1);
+            let exp = &input
+                .N
+                .invert(&phi_n)
+                .ok_or(InternalError::CouldNotInvertBigNumber)?;
+            let z = modpow(&y, exp, &input.N);
+
+            elements.push(PiModProofElements {
+                x: x[0].clone(),
+                a,
+                b,
+                z,
+                y,
+            });
+        }
+
+        let proof = Self { w, elements };
+
+        Ok(proof)
+    }
+
+    pub fn verify_with_transcript(
+        &self,
+        input: &PiModInput,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
+        // Verify that N is an odd composite number
+
+        if &input.N % BigNumber::from(2u64) == BigNumber::zero() {
+            return verify_err!("N is even");
+        }
+
+        if input.N.is_prime() {
+            return verify_err!("N is not composite");
+        }
+
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"w", &self.w.to_bytes());
+
+        for elements in &self.elements {
+            // First, check that y came from Fiat-Shamir transcript
+            let y = positive_bn_random_from_transcript(transcript, &input.N);
+            if y != elements.y {
+                return verify_err!("y does not match Fiat-Shamir challenge");
+            }
+
+            let y_candidate = modpow(&elements.z, &input.N, &input.N);
+            if elements.y != y_candidate {
+                return verify_err!("z^N != y (mod N)");
+            }
+
+            if elements.a != 0 && elements.a != 1 {
+                return verify_err!("a not in {0,1}");
+            }
+
+            if elements.b != 0 && elements.b != 1 {
+                return verify_err!("b not in {0,1}");
+            }
+
+            let y_prime = y_prime_from_y(&elements.y, &self.w, elements.a, elements.b, &input.N);
+            if modpow(&elements.x, &BigNumber::from(4u64), &input.N) != y_prime {
+                return verify_err!("x^4 != y' (mod N)");
+            }
+        }
+
+        Ok(())
+    }
+}
+
 // Compute regular mod
 #[cfg_attr(feature = "flame_it", flame("PaillierBlumModulusProof"))]
 fn bn_mod(n: &BigNumber, p: &BigNumber) -> BigNumber {

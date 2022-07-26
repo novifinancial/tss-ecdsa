@@ -7,7 +7,7 @@
 
 //! Contains the main protocol that is executed through a [Participant]
 
-use crate::auxinfo::participant::AuxinfoParticipant;
+use crate::auxinfo::participant::AuxInfoParticipant;
 use crate::errors::Result;
 use crate::keygen::keyshare::KeySharePublic;
 use crate::keygen::participant::KeygenParticipant;
@@ -41,7 +41,7 @@ pub struct Participant {
     /// values. This storage is not responsible for storing round-specific material.
     main_storage: Storage,
     /// Participant subprotocol for handling auxinfo messages
-    auxinfo_participant: AuxinfoParticipant,
+    auxinfo_participant: AuxInfoParticipant,
     /// Participant subprotocol for handling keygen messages
     keygen_participant: KeygenParticipant,
     /// Participant subprotocol for handling presign messages
@@ -55,7 +55,7 @@ impl Participant {
             id: config.id,
             other_participant_ids: config.other_ids.clone(),
             main_storage: Storage::new(),
-            auxinfo_participant: AuxinfoParticipant::from_ids(config.id, config.other_ids.clone()),
+            auxinfo_participant: AuxInfoParticipant::from_ids(config.id, config.other_ids.clone()),
             keygen_participant: KeygenParticipant::from_ids(config.id, config.other_ids.clone()),
             presign_participant: PresignParticipant::from_ids(config.id, config.other_ids),
         })

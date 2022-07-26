@@ -29,6 +29,7 @@ pub(crate) enum StorableType {
     AuxInfoPublic,
     AuxInfoCommit,
     AuxInfoDecommit,
+    AuxInfoGlobalRid,
     AuxInfoWitnesses,
     PrivateKeyshare,
     PublicKeyshare,

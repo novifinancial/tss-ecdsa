@@ -8,9 +8,10 @@
 use crate::errors::Result;
 use crate::messages::{AuxinfoMessageType, MessageType};
 use crate::zkp::pimod::{PiModInput, PiModProof, PiModSecret};
-use crate::zkp::Proof;
+use crate::Identifier;
 use crate::Message;
 use libpaillier::unknown_order::BigNumber;
+use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
@@ -31,16 +32,30 @@ impl AuxInfoProof {
 
     pub(crate) fn prove<R: RngCore + CryptoRng>(
         rng: &mut R,
+        sid: Identifier,
+        rho: [u8; 32],
         N: &BigNumber,
         p: &BigNumber,
         q: &BigNumber,
     ) -> Result<Self> {
-        let pimod = PiModProof::prove(rng, &PiModInput::new(N), &PiModSecret::new(p, q))?;
+        let mut transcript = Transcript::new(b"PaillierBlumModulusProof");
+        transcript.append_message(b"Session Id", &serialize!(&sid)?);
+        transcript.append_message(b"rho", &rho);
+        let pimod = PiModProof::prove_with_transcript(
+            rng,
+            &PiModInput::new(N),
+            &PiModSecret::new(p, q),
+            &mut transcript,
+        )?;
         Ok(Self { pimod })
     }
 
-    pub(crate) fn verify(&self, N: &BigNumber) -> Result<()> {
-        self.pimod.verify(&PiModInput::new(N))?;
+    pub(crate) fn verify(&self, sid: Identifier, rho: [u8; 32], N: &BigNumber) -> Result<()> {
+        let mut transcript = Transcript::new(b"PaillierBlumModulusProof");
+        transcript.append_message(b"Session Id", &serialize!(&sid)?);
+        transcript.append_message(b"rho", &rho);
+        self.pimod
+            .verify_with_transcript(&PiModInput::new(N), &mut transcript)?;
         Ok(())
     }
 }
