@@ -107,9 +107,10 @@ impl Participant {
         );
 
         match message.message_type() {
-            MessageType::Auxinfo(_) => self
-                .auxinfo_participant
-                .process_message(message, &mut self.main_storage),
+            MessageType::Auxinfo(_) => {
+                self.auxinfo_participant
+                    .process_message(rng, message, &mut self.main_storage)
+            }
             MessageType::Keygen(_) => {
                 self.keygen_participant
                     .process_message(rng, message, &mut self.main_storage)

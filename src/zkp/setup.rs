@@ -10,7 +10,6 @@
 //! for a description.
 
 use crate::errors::*;
-use crate::zkp::pimod::{PiModInput, PiModProof, PiModSecret};
 use libpaillier::unknown_order::BigNumber;
 
 use super::piprm::{PiPrmInput, PiPrmProof, PiPrmSecret};
@@ -23,7 +22,7 @@ pub(crate) struct ZkSetupParameters {
     pub(crate) N: BigNumber,
     pub(crate) s: BigNumber,
     pub(crate) t: BigNumber,
-    pimod: PiModProof,
+    //pimod: PiModProof,
     piprm: PiPrmProof,
 }
 
@@ -48,7 +47,7 @@ impl ZkSetupParameters {
         let t = tau.modpow(&BigNumber::from(2), N);
         let s = t.modpow(&lambda, N);
 
-        let pimod = PiModProof::prove(rng, &PiModInput::new(N), &PiModSecret::new(p, q))?;
+        //let pimod = PiModProof::prove(rng, &PiModInput::new(N), &PiModSecret::new(p, q))?;
         let piprm = PiPrmProof::prove(
             rng,
             &PiPrmInput::new(N, &s, &t),
@@ -59,13 +58,13 @@ impl ZkSetupParameters {
             N: N.clone(),
             s,
             t,
-            pimod,
+            //pimod,
             piprm,
         })
     }
 
     pub(crate) fn verify(&self) -> Result<()> {
-        self.pimod.verify(&PiModInput::new(&self.N))?;
+        //self.pimod.verify(&PiModInput::new(&self.N))?;
         self.piprm
             .verify(&PiPrmInput::new(&self.N, &self.s, &self.t))?;
         Ok(())

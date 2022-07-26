@@ -37,6 +37,12 @@ pub enum AuxinfoMessageType {
     Ready,
     /// Public auxinfo produced by auxinfo generation for a participant
     Public,
+    /// A hash commitment to the public keyshare and associated proofs
+    R1CommitHash,
+    /// The information committed to in Round 1
+    R2Decommit,
+    /// A proof of knowledge of the discrete log of the value decommitted in Round 2
+    R3Proof,
 }
 
 /// An enum consisting of all keygen message types

@@ -6,51 +6,44 @@
 // of this source tree.
 
 use crate::{
+    auxinfo::info::AuxInfoPublic,
     errors::Result,
-    keygen::keyshare::KeySharePublic,
-    messages::KeygenMessageType,
-    messages::{Message, MessageType},
+    messages::{AuxinfoMessageType, Message, MessageType},
     protocol::Identifier,
     protocol::ParticipantIdentifier,
-    utils::CurvePoint,
-    zkp::pisch::PiSchPrecommit,
 };
 use merlin::Transcript;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct KeygenCommit {
+pub(crate) struct AuxInfoCommit {
     hash: [u8; 32],
 }
-impl KeygenCommit {
+impl AuxInfoCommit {
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
-        if message.message_type() != MessageType::Keygen(KeygenMessageType::R1CommitHash) {
-            return bail!(
-                "Wrong message type, expected MessageType::Keygen(KeygenMessageType::R1CommitHash)"
-            );
+        if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) {
+            return bail!("Wrong message type, expected MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash)");
         }
-        let keygen_commit: KeygenCommit = deserialize!(&message.unverified_bytes)?;
-        Ok(keygen_commit)
+        let auxinfo_commit: AuxInfoCommit = deserialize!(&message.unverified_bytes)?;
+        Ok(auxinfo_commit)
     }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub(crate) struct KeygenDecommit {
+pub(crate) struct AuxInfoDecommit {
     pub sid: Identifier,
     pub sender: ParticipantIdentifier,
     pub rid: [u8; 32],
     pub u_i: [u8; 32],
-    pub pk: KeySharePublic,
-    pub A: CurvePoint,
+    pub pk: AuxInfoPublic,
 }
 
-impl KeygenDecommit {
+impl AuxInfoDecommit {
     pub(crate) fn new(
         sid: &Identifier,
         sender: &ParticipantIdentifier,
-        pk: &KeySharePublic,
-        sch_precom: &PiSchPrecommit,
+        pk: &AuxInfoPublic,
     ) -> Self {
         let mut rng = rand::rngs::OsRng;
         let mut rid = [0u8; 32];
@@ -63,46 +56,45 @@ impl KeygenDecommit {
             rid,
             u_i,
             pk: pk.clone(),
-            A: sch_precom.A,
         }
     }
 
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
-        if message.message_type() != MessageType::Keygen(KeygenMessageType::R2Decommit) {
+        if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) {
             return bail!(
-                "Wrong message type, expected MessageType::Keygen(KeygenMessageType::R2Decommit)"
+                "Wrong message type, expected MessageType::Auxinfo(AuxinfoMessageType::R2Decommit)"
             );
         }
-        let keygen_decommit: KeygenDecommit = deserialize!(&message.unverified_bytes)?;
-        Ok(keygen_decommit)
+        let auxinfo_decommit: AuxInfoDecommit = deserialize!(&message.unverified_bytes)?;
+        Ok(auxinfo_decommit)
     }
 
-    pub(crate) fn get_keyshare(&self) -> &KeySharePublic {
+    pub(crate) fn get_pk(&self) -> &AuxInfoPublic {
         &self.pk
     }
 
-    pub(crate) fn commit(&self) -> Result<KeygenCommit> {
-        let mut transcript = Transcript::new(b"KeyGenR1");
+    pub(crate) fn commit(&self) -> Result<AuxInfoCommit> {
+        let mut transcript = Transcript::new(b"AuxinfoR1");
         transcript.append_message(b"decom", &serialize!(&self)?);
         let mut hash = [0u8; 32];
         transcript.challenge_bytes(b"hashing r1", &mut hash);
-        Ok(KeygenCommit { hash })
+        Ok(AuxInfoCommit { hash })
     }
 
     pub(crate) fn verify(
         &self,
         sid: &Identifier,
         sender: &ParticipantIdentifier,
-        com: &KeygenCommit,
+        com: &AuxInfoCommit,
     ) -> Result<bool> {
-        let mut transcript = Transcript::new(b"KeyGenR1");
+        let mut transcript = Transcript::new(b"AuxinfoR1");
         let mut decom = &mut self.clone();
         decom.sid = *sid;
         decom.sender = *sender;
         transcript.append_message(b"decom", &serialize!(&decom)?);
         let mut hash = [0u8; 32];
         transcript.challenge_bytes(b"hashing r1", &mut hash);
-        let rebuilt_com = KeygenCommit { hash };
+        let rebuilt_com = AuxInfoCommit { hash };
         Ok(rebuilt_com == *com)
     }
 }
