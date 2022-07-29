@@ -7,6 +7,7 @@
 
 pub(crate) mod piaffg;
 pub(crate) mod pienc;
+pub(crate) mod pifac;
 pub(crate) mod pilog;
 pub(crate) mod pimod;
 pub(crate) mod piprm;

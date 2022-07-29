@@ -191,11 +191,10 @@ impl Proof for PiAffgProof {
             .concat(),
         );
 
-        // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
-        // [0, 2*q] instead
+        // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(
             &mut transcript,
-            &(BigNumber::from(2u64) * &k256_order()),
+            &k256_order(),
         );
 
         let z1 = &alpha + &e * &secret.x;
@@ -247,11 +246,10 @@ impl Proof for PiAffgProof {
             .concat(),
         );
 
-        // Verifier is supposed to sample from e in +- q (where q is the group order), we sample from
-        // [0, 2*q] instead
+        // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(
             &mut transcript,
-            &(BigNumber::from(2u64) * &k256_order()),
+            &k256_order(),
         );
 
         if e != self.e {

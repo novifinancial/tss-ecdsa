@@ -72,7 +72,7 @@ pub(crate) fn modpow(a: &BigNumber, e: &BigNumber, n: &BigNumber) -> BigNumber {
     a.modpow(e, n)
 }
 
-/// Generate a random BigNumber in the range -n, ..., n
+/// Generate a random BigNumber in the range 0, ..., n
 pub(crate) fn random_positive_bn<R: RngCore + CryptoRng>(_rng: &mut R, n: &BigNumber) -> BigNumber {
     BigNumber::random(n)
 }
