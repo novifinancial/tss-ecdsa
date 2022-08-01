@@ -451,13 +451,68 @@ mod tests {
     fn test_no_small_factors_proof() -> Result<()> {
         let (input, proof) = random_no_small_factors_proof()?;
         proof.verify(&input)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_no_small_factors_proof_negative_cases() -> Result<()> {
+        let mut rng = OsRng;
+        let (input, proof) = random_no_small_factors_proof()?;
+
+        let incorrect_N = PiFacInput::new(
+            &input.setup_params,
+            &crate::utils::get_random_safe_prime_512(),
+        );
+        assert!(proof.verify(&incorrect_N).is_err());
+
+        let incorrect_startup_params =
+            PiFacInput::new(&ZkSetupParameters::gen(&mut rng)?, &input.N0);
+        assert!(proof.verify(&incorrect_startup_params).is_err());
+
+        let not_p0 = crate::utils::get_random_safe_prime_512();
+        let not_q0 = loop {
+            let not_q0 = crate::utils::get_random_safe_prime_512();
+            if not_p0 != not_q0 {
+                break not_q0;
+            }
+        };
+        let incorrect_factors =
+            PiFacProof::prove(&mut rng, &input, &PiFacSecret::new(&not_p0, &not_q0))?;
+        assert!(incorrect_factors.verify(&input).is_err());
+
+        let small_p = BigNumber::from(7u64);
+        let small_q = BigNumber::from(11u64);
+        let setup_params = ZkSetupParameters::gen(&mut rng)?;
+        let small_input = PiFacInput::new(&setup_params, &(&small_p * &small_q));
+        let small_proof =
+            PiFacProof::prove(&mut rng, &input, &PiFacSecret::new(&small_p, &small_q))?;
+        assert!(small_proof.verify(&small_input).is_err());
+
+        let regular_sized_q = crate::utils::get_random_safe_prime_512();
+        let mixed_input = PiFacInput::new(&setup_params, &(&small_p * &regular_sized_q));
+        let mixed_proof = PiFacProof::prove(
+            &mut rng,
+            &input,
+            &PiFacSecret::new(&small_p, &regular_sized_q),
+        )?;
+        assert!(mixed_proof.verify(&mixed_input).is_err());
+
+        let small_fac_p = &not_p0 * &BigNumber::from(2u64);
+        let small_fac_input = PiFacInput::new(&setup_params, &(&small_fac_p * &regular_sized_q));
+        let small_fac_proof = PiFacProof::prove(
+            &mut rng,
+            &input,
+            &PiFacSecret::new(&small_fac_p, &regular_sized_q),
+        )?;
+        assert!(small_fac_proof.verify(&small_fac_input).is_err());
 
         Ok(())
     }
 
     #[test]
-    fn test_make_sure_the_bytes_representations_for_BigNum_and_BigInt_didnt_change_in_a_code_breaking_way(
-    ) -> Result<()> {
+    // Make sure the bytes representations for BigNum and BigInt
+    // didn't change in a way that would mess up the sqrt funtion
+    fn test_bignum_bigint_byte_representation() -> Result<()> {
         let p0 = crate::utils::get_random_safe_prime_512();
         let q0 = loop {
             let q0 = crate::utils::get_random_safe_prime_512();
