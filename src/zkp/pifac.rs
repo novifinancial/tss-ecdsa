@@ -9,21 +9,16 @@
 
 use super::Proof;
 use crate::errors::*;
+use crate::parameters::{ELL, EPSILON};
+use crate::utils::{k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_plusminus};
+use crate::zkp::setup::ZkSetupParameters;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
+use num_bigint::{BigInt, Sign};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use utils::CurvePoint;
-use num_bigint::{BigInt, Sign};
-use crate::utils::{
-    self, k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_plusminus,
-};
-use crate::zkp::setup::ZkSetupParameters;
-use crate::{
-    parameters::{ELL, EPSILON},
-};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct PiFacProof {
     P: BigNumber,
     Q: BigNumber,
@@ -44,12 +39,6 @@ pub(crate) struct PiFacInput {
     N0: BigNumber,
 }
 
-#[derive(Serialize)]
-pub(crate) struct PiFacPublicParams {
-    g: CurvePoint,
-    q: BigNumber,
-}
-
 impl PiFacInput {
     pub(crate) fn new(setup_params: &ZkSetupParameters, N0: &BigNumber) -> Self {
         Self {
@@ -66,7 +55,10 @@ pub(crate) struct PiFacSecret {
 
 impl PiFacSecret {
     pub(crate) fn new(p: &BigNumber, q: &BigNumber) -> Self {
-        Self { p: p.clone(), q: q.clone() }
+        Self {
+            p: p.clone(),
+            q: q.clone(),
+        }
     }
 }
 
@@ -148,19 +140,28 @@ impl Proof for PiFacProof {
         );
 
         // Verifier samples e in +- q (where q is the group order)
-        let e = plusminus_bn_random_from_transcript(
-            &mut transcript, &k256_order(),
-        );
+        let e = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
 
         let sigma_hat = &sigma - &nu * &secret.p;
-        let z1 = &alpha + &e*&secret.p;
-        let z2 = &beta + &e*&secret.q;
-        let w1 = &x + &e*&mu;
-        let w2 = &y + &e*&nu;
-        let v = &r + &e*&sigma_hat;
+        let z1 = &alpha + &e * &secret.p;
+        let z2 = &beta + &e * &secret.q;
+        let w1 = &x + &e * &mu;
+        let w2 = &y + &e * &nu;
+        let v = &r + &e * &sigma_hat;
 
-
-        let proof = Self { P, Q, A, B, T, sigma, z1, z2, w1, w2, v };
+        let proof = Self {
+            P,
+            Q,
+            A,
+            B,
+            T,
+            sigma,
+            z1,
+            z2,
+            w1,
+            w2,
+            v,
+        };
         Ok(proof)
     }
 
@@ -180,9 +181,7 @@ impl Proof for PiFacProof {
             .concat(),
         );
         // Verifier samples e in +- q (where q is the group order)
-        let e = plusminus_bn_random_from_transcript(
-            &mut transcript, &k256_order(),
-        );
+        let e = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
 
         let eq_check_1 = {
             let a1 = modpow(&input.setup_params.s, &self.z1, &input.setup_params.N);
@@ -240,12 +239,187 @@ impl Proof for PiFacProof {
 }
 
 /// Find the square root of a positive BigNumber, rounding down
-fn sqrt(num: &BigNumber) -> BigNumber{
+fn sqrt(num: &BigNumber) -> BigNumber {
     // convert to a struct with a square root function first
     let num_bigint: BigInt = BigInt::from_bytes_be(Sign::Plus, &num.to_bytes());
     let sqrt = num_bigint.sqrt();
     let sqrt_bignum: BigNumber = BigNumber::from_slice(&sqrt.to_bytes_be().1);
     sqrt_bignum
+}
+
+impl PiFacProof {
+    pub(crate) fn prove_with_transcript<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        input: &PiFacInput,
+        secret: &PiFacSecret,
+        transcript: &mut Transcript,
+    ) -> Result<Self> {
+        // N_hat = input.setup_params.N
+        let sqrt_N0 = sqrt(&input.N0);
+        // 2^{ELL}
+        let two_ell = BigNumber::one() << (ELL);
+        // 2^{ELL + EPSILON}
+        let two_ell_eps = BigNumber::one() << (ELL + EPSILON);
+        // 2^{ELL + EPSILON} * sqrt(N_0)
+        let ab_range = &sqrt_N0 * &two_ell_eps;
+        // 2^{ELL} * N_hat
+        let uv_range = &two_ell * &input.setup_params.N;
+        // 2^{ELL} * N_0 * N_hat
+        let s_range = &two_ell * &input.N0 * &input.setup_params.N;
+        // 2^{ELL + EPSILON} * N_0 * N_hat
+        let r_range = &two_ell_eps * &input.N0 * &input.setup_params.N;
+        // 2^{ELL + EPSILON} * N_hat
+        let xy_range = &two_ell_eps * &input.setup_params.N;
+
+        let alpha = random_bn_plusminus(rng, &ab_range);
+        let beta = random_bn_plusminus(rng, &ab_range);
+        let mu = random_bn_plusminus(rng, &uv_range);
+        let nu = random_bn_plusminus(rng, &uv_range);
+        let sigma = random_bn_plusminus(rng, &s_range);
+        let r = random_bn_plusminus(rng, &r_range);
+        let x = random_bn_plusminus(rng, &xy_range);
+        let y = random_bn_plusminus(rng, &xy_range);
+
+        let P = {
+            let a = modpow(&input.setup_params.s, &secret.p, &input.setup_params.N);
+            let b = modpow(&input.setup_params.t, &mu, &input.setup_params.N);
+            a.modmul(&b, &input.setup_params.N)
+        };
+        let Q = {
+            let a = modpow(&input.setup_params.s, &secret.q, &input.setup_params.N);
+            let b = modpow(&input.setup_params.t, &nu, &input.setup_params.N);
+            a.modmul(&b, &input.setup_params.N)
+        };
+        let A = {
+            let a = modpow(&input.setup_params.s, &alpha, &input.setup_params.N);
+            let b = modpow(&input.setup_params.t, &x, &input.setup_params.N);
+            a.modmul(&b, &input.setup_params.N)
+        };
+        let B = {
+            let a = modpow(&input.setup_params.s, &beta, &input.setup_params.N);
+            let b = modpow(&input.setup_params.t, &y, &input.setup_params.N);
+            a.modmul(&b, &input.setup_params.N)
+        };
+        let T = {
+            let a = modpow(&Q, &alpha, &input.setup_params.N);
+            let b = modpow(&input.setup_params.t, &r, &input.setup_params.N);
+            a.modmul(&b, &input.setup_params.N)
+        };
+
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(
+            b"(P, Q, A, B, T, sigma)",
+            &[
+                P.to_bytes(),
+                Q.to_bytes(),
+                A.to_bytes(),
+                B.to_bytes(),
+                T.to_bytes(),
+                sigma.to_bytes(),
+            ]
+            .concat(),
+        );
+
+        // Verifier samples e in +- q (where q is the group order)
+        let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
+
+        let sigma_hat = &sigma - &nu * &secret.p;
+        let z1 = &alpha + &e * &secret.p;
+        let z2 = &beta + &e * &secret.q;
+        let w1 = &x + &e * &mu;
+        let w2 = &y + &e * &nu;
+        let v = &r + &e * &sigma_hat;
+
+        let proof = Self {
+            P,
+            Q,
+            A,
+            B,
+            T,
+            sigma,
+            z1,
+            z2,
+            w1,
+            w2,
+            v,
+        };
+        Ok(proof)
+    }
+
+    pub(crate) fn verify_with_transcript(
+        &self,
+        input: &PiFacInput,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
+        transcript.append_message(b"CommonInput", &serialize!(&input)?);
+        transcript.append_message(
+            b"(P, Q, A, B, T, sigma)",
+            &[
+                self.P.to_bytes(),
+                self.Q.to_bytes(),
+                self.A.to_bytes(),
+                self.B.to_bytes(),
+                self.T.to_bytes(),
+                self.sigma.to_bytes(),
+            ]
+            .concat(),
+        );
+        // Verifier samples e in +- q (where q is the group order)
+        let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
+
+        let eq_check_1 = {
+            let a1 = modpow(&input.setup_params.s, &self.z1, &input.setup_params.N);
+            let b1 = modpow(&input.setup_params.t, &self.w1, &input.setup_params.N);
+            let lhs = a1.modmul(&b1, &input.setup_params.N);
+            let b2 = modpow(&self.P, &e, &input.setup_params.N);
+            let rhs = self.A.modmul(&b2, &input.setup_params.N);
+            lhs == rhs
+        };
+        if !eq_check_1 {
+            return verify_err!("eq_check_1 failed");
+        }
+
+        let eq_check_2 = {
+            let a1 = modpow(&input.setup_params.s, &self.z2, &input.setup_params.N);
+            let b1 = modpow(&input.setup_params.t, &self.w2, &input.setup_params.N);
+            let lhs = a1.modmul(&b1, &input.setup_params.N);
+            let b2 = modpow(&self.Q, &e, &input.setup_params.N);
+            let rhs = self.B.modmul(&b2, &input.setup_params.N);
+            lhs == rhs
+        };
+        if !eq_check_2 {
+            return verify_err!("eq_check_2 failed");
+        }
+
+        let eq_check_3 = {
+            let a0 = modpow(&input.setup_params.s, &input.N0, &input.setup_params.N);
+            let b0 = modpow(&input.setup_params.t, &self.sigma, &input.setup_params.N);
+            let R = a0.modmul(&b0, &input.setup_params.N);
+            let a1 = modpow(&self.Q, &self.z1, &input.setup_params.N);
+            let b1 = modpow(&input.setup_params.t, &self.v, &input.setup_params.N);
+            let lhs = a1.modmul(&b1, &input.setup_params.N);
+            let b2 = modpow(&R, &e, &input.setup_params.N);
+            let rhs = self.T.modmul(&b2, &input.setup_params.N);
+            lhs == rhs
+        };
+        if !eq_check_3 {
+            return verify_err!("eq_check_3 failed");
+        }
+
+        let sqrt_N0 = sqrt(&input.N0);
+        // 2^{ELL + EPSILON}
+        let two_ell_eps = BigNumber::one() << (ELL + EPSILON);
+        // 2^{ELL + EPSILON} * sqrt(N_0)
+        let z_bound = &sqrt_N0 * &two_ell_eps;
+        if self.z1 < -z_bound.clone() || self.z1 > z_bound {
+            return verify_err!("self.z1 > z_bound check failed");
+        }
+        if self.z2 < -z_bound.clone() || self.z2 > z_bound {
+            return verify_err!("self.z2 > z_bound check failed");
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -282,7 +456,8 @@ mod tests {
     }
 
     #[test]
-    fn test_make_sure_the_bytes_representations_for_BigNum_and_BigInt_didnt_change_in_a_code_breaking_way()-> Result<()>{
+    fn test_make_sure_the_bytes_representations_for_BigNum_and_BigInt_didnt_change_in_a_code_breaking_way(
+    ) -> Result<()> {
         let p0 = crate::utils::get_random_safe_prime_512();
         let q0 = loop {
             let q0 = crate::utils::get_random_safe_prime_512();

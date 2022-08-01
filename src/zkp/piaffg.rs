@@ -192,10 +192,7 @@ impl Proof for PiAffgProof {
         );
 
         // Verifier samples e in +- q (where q is the group order)
-        let e = plusminus_bn_random_from_transcript(
-            &mut transcript,
-            &k256_order(),
-        );
+        let e = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
 
         let z1 = &alpha + &e * &secret.x;
         let z2 = &beta + &e * &secret.y;
@@ -247,10 +244,7 @@ impl Proof for PiAffgProof {
         );
 
         // Verifier samples e in +- q (where q is the group order)
-        let e = plusminus_bn_random_from_transcript(
-            &mut transcript,
-            &k256_order(),
-        );
+        let e = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
 
         if e != self.e {
             return verify_err!("Fiat-Shamir consistency check failed");
