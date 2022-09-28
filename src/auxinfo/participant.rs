@@ -238,7 +238,7 @@ impl AuxInfoParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
-        // check that we've generated our keyshare before trying to retrieve it
+        // check that we've generated our public info before trying to retrieve it
         let fetch = vec![(StorableType::AuxInfoPublic, message.id(), self.id)];
         let public_keyshare_generated = self.storage.contains_batch(&fetch).is_ok();
         let mut messages = vec![];
@@ -360,6 +360,12 @@ impl AuxInfoParticipant {
             message.id(),
             self.id
         )?)?;
+        let my_public: AuxInfoPublic = deserialize!(&self.storage.retrieve(
+            StorableType::AuxInfoPublic,
+            message.id(),
+            self.id
+        )?)?;
+
         let mut global_rid = my_decom.rid;
         // xor all the rids together. In principle, many different options for combining these should be okay
         for rid in rids.iter() {
@@ -384,6 +390,7 @@ impl AuxInfoParticipant {
             rng,
             message.id(),
             global_rid,
+            &my_public.params,
             &(&witness.p * &witness.q),
             &witness.p,
             &witness.q,
@@ -436,7 +443,12 @@ impl AuxInfoParticipant {
         let auxinfo_pub = decom.get_pk();
 
         let proof = AuxInfoProof::from_message(message)?;
-        proof.verify(message.id(), global_rid, auxinfo_pub.pk.n())?;
+        proof.verify(
+            message.id(),
+            global_rid,
+            &auxinfo_pub.params,
+            auxinfo_pub.pk.n(),
+        )?;
 
         self.storage.store(
             StorableType::AuxInfoPublic,

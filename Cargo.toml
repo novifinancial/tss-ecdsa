@@ -17,6 +17,7 @@ flame_it = ["flame", "flamer"]
 thiserror = "1"
 k256 = { version = "0.10", features = ["arithmetic", "digest", "sha256", "ecdsa", "serde"] }
 libpaillier = "0.2"
+num-bigint = "0.4"
 bincode = "1"
 displaydoc = { version = "0.2", default-features = false }
 hex = "0.4"
