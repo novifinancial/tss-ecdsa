@@ -83,9 +83,7 @@ impl BroadcastParticipant {
                 Ok((output_option, messages))
             }
             _ => {
-                return bail!(
-                    "Attempting to process a non-broadcast message with a broadcast participant"
-                );
+                bail!("Attempting to process a non-broadcast message with a broadcast participant")
             }
         }
     }
@@ -202,7 +200,7 @@ impl BroadcastParticipant {
                 return Ok(Some(out));
             }
         }
-        return bail!("error: no message received enough votes");
+        bail!("error: no message received enough votes")
     }
 
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
