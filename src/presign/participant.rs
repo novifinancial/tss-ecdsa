@@ -64,6 +64,7 @@ impl PresignParticipant {
     /// Processes the incoming message given the storage from the protocol participant
     /// (containing auxinfo and keygen artifacts). Optionally produces a [PresignRecord]
     /// once presigning is complete.
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -139,7 +140,7 @@ impl PresignParticipant {
     /// stores a round one secret, and publishes a unique public component to every other participant.
     ///
     /// This can only be run after all participants have finished with key generation.
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -198,7 +199,7 @@ impl PresignParticipant {
     /// This can be run as soon as each round one message to this participant has been published.
     /// These round two messages are returned in response to the sender, without having to
     /// rely on any other round one messages from other participants aside from the sender.
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -270,6 +271,7 @@ impl PresignParticipant {
         Ok(vec![message])
     }
 
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -329,7 +331,7 @@ impl PresignParticipant {
     /// and produces a set of per-participant round 3 public values and one private value.
     ///
     /// Each participant is only going to run round three once.
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -386,6 +388,7 @@ impl PresignParticipant {
         Ok(ret_messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
@@ -414,7 +417,7 @@ impl PresignParticipant {
     ///
     /// In this step, the participant simply collects all r3 public values and its r3
     /// private value, and assembles them into a PresignRecord.
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn do_presign_finish(&mut self, message: &Message) -> Result<PresignRecord> {
         let r3_pubs = self.get_other_participants_round_three_publics(message.id())?;
 
@@ -452,6 +455,7 @@ impl PresignParticipant {
         Ok((*id1, *id2))
     }
 
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_two_public(
         &mut self,
         main_storage: &Storage,
@@ -504,6 +508,7 @@ impl PresignParticipant {
         Ok(())
     }
 
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_three_public(
         &mut self,
         main_storage: &Storage,
@@ -686,7 +691,7 @@ impl PresignKeyShareAndInfo {
     ///
     /// The public_keys parameter corresponds to a KeygenPublic for
     /// each of the other parties.
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn round_one<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
@@ -755,7 +760,7 @@ impl PresignKeyShareAndInfo {
     ///
     /// Constructs a D = gamma * K and D_hat = x * K, and Gamma = g * gamma.
     ///
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn round_two<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
@@ -872,7 +877,7 @@ impl PresignKeyShareAndInfo {
     ///
     /// First computes alpha = dec(D), alpha_hat = dec(D_hat).
     /// Computes a delta = gamma * k
-    #[cfg_attr(feature = "flame_it", flame)]
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn round_three<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,

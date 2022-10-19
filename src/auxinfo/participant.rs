@@ -74,6 +74,7 @@ impl AuxInfoParticipant {
         }
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -108,6 +109,7 @@ impl AuxInfoParticipant {
         }
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -129,6 +131,7 @@ impl AuxInfoParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -181,6 +184,7 @@ impl AuxInfoParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -228,6 +232,7 @@ impl AuxInfoParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -264,6 +269,7 @@ impl AuxInfoParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -329,6 +335,7 @@ impl AuxInfoParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -408,6 +415,7 @@ impl AuxInfoParticipant {
         Ok(more_messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
@@ -497,6 +505,7 @@ impl AuxInfoParticipant {
     }
 }
 
+#[cfg_attr(feature = "flame_it", flame("auxinfo"))]
 fn new_auxinfo<R: RngCore + CryptoRng>(
     rng: &mut R,
     _prime_bits: usize,

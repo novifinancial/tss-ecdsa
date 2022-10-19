@@ -73,6 +73,7 @@ impl KeygenParticipant {
     /// Processes the incoming message given the storage from the protocol participant
     /// (containing auxinfo and keygen artifacts). Optionally produces a [KeysharePrivate]
     /// and [KeysharePublic] once keygen is complete.
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -105,6 +106,7 @@ impl KeygenParticipant {
         }
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -126,6 +128,7 @@ impl KeygenParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -181,6 +184,7 @@ impl KeygenParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -228,6 +232,7 @@ impl KeygenParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -264,6 +269,7 @@ impl KeygenParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -327,6 +333,7 @@ impl KeygenParticipant {
         Ok(messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
@@ -414,6 +421,7 @@ impl KeygenParticipant {
         Ok(more_messages)
     }
 
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
