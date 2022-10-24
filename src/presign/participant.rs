@@ -104,7 +104,7 @@ impl PresignParticipant {
             &self.other_participant_ids,
             &mut self.storage,
             message,
-            StorableType::KeygenReady,
+            StorableType::PresignReady,
         )?;
 
         if is_ready {
@@ -280,7 +280,7 @@ impl PresignParticipant {
             self.get_associated_identifiers_for_presign(&message.id())?;
 
         // First, verify the bytes of the round two value, and then
-        // store it locally. In order to v
+        // store it locally.
         self.validate_and_store_round_two_public(
             main_storage,
             message,
@@ -298,21 +298,24 @@ impl PresignParticipant {
             auxinfo_identifier
         )?);
 
-        // Check if storage has all of the other participants' round two values (both
-        // private and public), and call do_round_three() if so
-        match has_collected_all_of_others(
+        // Check if storage has all of the other participants' round 2 values (both
+        // private and public), and start generating the messages for round 3 if so
+        let all_privates_received = has_collected_all_of_others(
             &self.other_participant_ids,
             &self.storage,
             StorableType::RoundTwoPrivate,
             message.id(),
-        )? && has_collected_all_of_others(
+        )?;
+        let all_publics_received = has_collected_all_of_others(
             &self.other_participant_ids,
             &self.storage,
             StorableType::RoundTwoPublic,
             message.id(),
-        )? {
-            true => Ok(self.gen_round_three_msgs(rng, message, main_storage)?),
-            false => Ok(vec![]),
+        )?;
+        if all_privates_received && all_publics_received {
+            Ok(self.gen_round_three_msgs(rng, message, main_storage)?)
+        } else {
+            Ok(vec![])
         }
     }
 
