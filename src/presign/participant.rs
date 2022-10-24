@@ -188,6 +188,7 @@ impl PresignParticipant {
         Ok(ret_messages)
     }
 
+    /// Processes a single request from round one to create public keyshares for that participant, to be sent in round two.
     /// Presign: Round Two
     ///
     /// During round two, each participant retrieves the public keyshares for each other participant from the
