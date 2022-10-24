@@ -1,6 +1,10 @@
 # tss-ecdsa
 
-This repo is a work-in-progress implementation of the ECDSA signing protocol described in "UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts" [CGGMP20] which can be found at https://eprint.iacr.org/2021/060.pdf.
+This repo is a work-in-progress implementation of Canetti et al.'s threshold ECDSA protocol described in
+
+[CGGMP20] R. Canetti, R. Gennaro, S. Goldfeder, N. Makriyannis, and U. Peled. UC non-interactive, proactive,  threshold ECDSA with identifiable aborts. In  ACM CCS 2020, pp. 1769–1787. ACM Press, 2020.
+
+For details, see the [paper](https://eprint.iacr.org/2021/060.pdf).
 
 Specifically, we are targeting the three-round presigning protocol (with quadratic overhead for identifying faulty actors).
 
@@ -14,7 +18,7 @@ KeyGen generates a threshold signing key, shares of which are distributed to eac
 
 ### Auxinfo (CGGMP20 Figure 6, minus the key refreshing)
 
-Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxilary information. This is run after KeyGen and only needs to be run once.
+Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxilary information. This is run after KeyGen and only needs to be run once.
 
 ### Three Round Pre-signing (Figure 7 of CGGMP20)
 
@@ -35,6 +39,3 @@ Additionally, no notions of Identifiable Aborts are implemented. If a node crash
 Furthermore, the Key Refreshing portion of Auxilary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
 
 While some thought has been put into handling invalid messages (duplicate messages are ignored, as are some malformed ones), this has not been evaluated fully. Additionally, message authenticity (i.e. that a given message is actually coming from the sender in the "sender" field) is currently assumed to be handled outside of the protocol, by whatever networking code is shuttling messages around.
-
-## References
-[CGGMP20] R. Canetti, R. Gennaro, S. Goldfeder, N. Makriyannis, and U. Peled. UC non-interactive, proactive,  threshold ECDSA with identifiable aborts. In  ACM CCS 2020, pp. 1769–1787. ACM Press, 2020.
