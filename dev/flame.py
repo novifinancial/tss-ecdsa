@@ -52,7 +52,6 @@ def organize_children(blob):
 # flame-graph.html is composed of a large json data blob and some code to process and display it
 # this parses out the json part specifically and formats it in a way the python json module can handle
 def parse_html():
-    #d3.select("body").datum({ children:
     f = open("flame-graph.html", "r")
     text = "".join(f.readlines())
     
