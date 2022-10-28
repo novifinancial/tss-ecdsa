@@ -1,9 +1,9 @@
 # flame.py: a script to reorganize flame-graph.html
-# running this script while a copy of flame-graph.html is found in the same directory
+# Running this script while a copy of flame-graph.html is found in the same directory
 # will produce a new file called flame-graph-new.html in which all invocations of the
-# same subfunction within a given function are grouped together
+# same subfunction within a given function are grouped together.
 #
-# context: the "flame" rust crate produces flame graphs which can help visualize which
+# Context: The "flame" rust crate produces flame graphs which can help visualize which
 # parts of the program require the most time to execute. This flamegraph orders functions 
 # chronologically on the x axis, but if the same function is called in multiple places in 
 # the general execution flow, then it will appear broken up into various chunks, making 
@@ -17,10 +17,10 @@
 import json
 import re
 
-# merges any separate timings of the same function with the same parent together 
-# e.g. if function A() calls C() twice and function B() calls C() four times,
+# Merges any separate timings of the same function with the same parent together.
+# For example, if function A() calls C() twice and function B() calls C() four times,
 # this would show A() and C() both calling B() once, but it taking around twice as long in C()
-# (assuming in this example that all calls to C() take roughly the same amount of time)
+# (assuming in this example that all calls to C() take roughly the same amount of time).
 def merge(blob):
     if len(blob['children']) == 0:
         return
@@ -37,8 +37,8 @@ def merge(blob):
     for new_child_idx in range(len(new_children_list)):
         merge(new_children_list[new_child_idx])
 
-# aligns a function's subfunctions (children) to all be positioned sequentially along the x axis
-# and start at the same time as their parent
+# Aligns a function's subfunctions (children) to all be positioned sequentially along the x axis
+# and start at the same time as their parent.
 def organize_children(blob):
     parent_start = blob['start']
     last_end = parent_start
@@ -49,8 +49,8 @@ def organize_children(blob):
         if len(blob['children'][child_idx]['children']) > 0:
             organize_children(blob['children'][child_idx])
 
-# flame-graph.html is composed of a large json data blob and some code to process and display it
-# this parses out the json part specifically and formats it in a way the python json module can handle
+# flame-graph.html is composed of a large json data blob and some code to process and display it.
+# This parses out the json part specifically and formats it in a way the python json module can handle.
 def parse_html():
     f = open("flame-graph.html", "r")
     text = "".join(f.readlines())
