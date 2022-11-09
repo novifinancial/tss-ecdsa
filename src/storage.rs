@@ -5,12 +5,12 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::errors::Result;
-use crate::protocol::{Identifier, ParticipantIdentifier};
+use crate::{
+    errors::Result,
+    protocol::{Identifier, ParticipantIdentifier},
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::hash::Hash;
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /////////////////////////
 // Private Storage API //
@@ -59,7 +59,7 @@ impl Storable for StorableIndex {}
 
 pub(crate) trait Storable: Serialize + Debug {}
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct Storage(HashMap<Vec<u8>, Vec<u8>>);
 
 impl Storage {
@@ -123,7 +123,8 @@ impl Storage {
         self.contains_index_batch(&storable_indices)
     }
 
-    /// Check if storage contains entries for a given StorableType for each listed ParticipantIdentifier (in the same sid)
+    /// Check if storage contains entries for a given StorableType for each
+    /// listed ParticipantIdentifier (in the same sid)
     pub(crate) fn contains_for_all_ids(
         &self,
         s_type: StorableType,
@@ -141,7 +142,7 @@ impl Storage {
 
     fn store_index<I: Storable>(&mut self, storable_index: I, val: &[u8]) -> Result<()> {
         let key = serialize!(&storable_index)?;
-        self.0.insert(key, val.to_vec());
+        let _ = self.0.insert(key, val.to_vec());
         Ok(())
     }
 
@@ -163,7 +164,7 @@ impl Storage {
 
     fn delete_index<I: Storable>(&mut self, storable_index: I) -> Result<()> {
         let key = serialize!(&storable_index)?;
-        self.0.remove(&key).ok_or_else(|| {
+        let _ = self.0.remove(&key).ok_or_else(|| {
             bail_context!(
                 "Could not find {:?} when getting from storage",
                 storable_index
