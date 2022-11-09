@@ -5,12 +5,13 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::errors::Result;
-use crate::messages::{Message, MessageType};
-use crate::protocol::Identifier;
+use crate::{
+    errors::Result,
+    messages::{Message, MessageType},
+    protocol::Identifier,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 /// A message that can be posted to (and read from) the broadcast channel
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,7 +45,7 @@ impl MessageQueue {
             None => vec![],
         };
         queue.push(message);
-        self.0.insert(key, queue);
+        let _ = self.0.insert(key, queue);
         Ok(())
     }
 
@@ -58,7 +59,8 @@ impl MessageQueue {
             identifier,
         };
         let key = serialize!(&message_index)?;
-        // delete retrieved messages from storage so that they aren't accidentally processed again
+        // delete retrieved messages from storage so that they aren't accidentally
+        // processed again
         let queue = match self.0.remove(&key) {
             Some(a) => a,
             None => vec![],

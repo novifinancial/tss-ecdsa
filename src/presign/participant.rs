@@ -5,42 +5,44 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::auxinfo::info::AuxInfoPrivate;
-use crate::auxinfo::info::AuxInfoPublic;
-use crate::errors::Result;
-use crate::keygen::keyshare::KeySharePrivate;
-use crate::keygen::keyshare::KeySharePublic;
-use crate::messages::PresignMessageType;
-use crate::messages::{Message, MessageType};
-use crate::paillier::PaillierCiphertext;
-use crate::parameters::ELL;
-use crate::presign::record::{PresignRecord, RecordPair};
-use crate::presign::round_one::{Private as RoundOnePrivate, Public as RoundOnePublic};
-use crate::presign::round_three::RoundThreeInput;
-use crate::presign::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic};
-use crate::presign::round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic};
-use crate::protocol::ParticipantIdentifier;
-use crate::storage::StorableType;
-use crate::storage::Storage;
-use crate::utils::{
-    bn_to_scalar, get_other_participants_public_auxinfo, has_collected_all_of_others, k256_order,
-    process_ready_message, random_bn_in_range, random_positive_bn,
+use crate::{
+    auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
+    errors::Result,
+    keygen::keyshare::{KeySharePrivate, KeySharePublic},
+    messages::{Message, MessageType, PresignMessageType},
+    paillier::PaillierCiphertext,
+    parameters::ELL,
+    presign::{
+        record::{PresignRecord, RecordPair},
+        round_one::{Private as RoundOnePrivate, Public as RoundOnePublic},
+        round_three::{Private as RoundThreePrivate, Public as RoundThreePublic, RoundThreeInput},
+        round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
+    },
+    protocol::ParticipantIdentifier,
+    storage::{StorableType, Storage},
+    utils::{
+        bn_to_scalar, get_other_participants_public_auxinfo, has_collected_all_of_others,
+        k256_order, process_ready_message, random_bn_in_range, random_positive_bn,
+    },
+    zkp::{
+        piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
+        pienc::PiEncProof,
+        pilog::{PiLogInput, PiLogProof, PiLogSecret},
+        Proof,
+    },
+    CurvePoint, Identifier,
 };
-use crate::zkp::piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret};
-use crate::zkp::pienc::PiEncProof;
-use crate::zkp::pilog::{PiLogInput, PiLogProof, PiLogSecret};
-use crate::zkp::Proof;
-use crate::{CurvePoint, Identifier};
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct PresignParticipant {
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
-    /// A list of all other participant identifiers participating in the protocol
+    /// A list of all other participant identifiers participating in the
+    /// protocol
     other_participant_ids: Vec<ParticipantIdentifier>,
     /// Local storage for this participant to store secrets
     storage: Storage,
@@ -61,9 +63,9 @@ impl PresignParticipant {
         }
     }
 
-    /// Processes the incoming message given the storage from the protocol participant
-    /// (containing auxinfo and keygen artifacts). Optionally produces a [PresignRecord]
-    /// once presigning is complete.
+    /// Processes the incoming message given the storage from the protocol
+    /// participant (containing auxinfo and keygen artifacts). Optionally
+    /// produces a [PresignRecord] once presigning is complete.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
@@ -122,7 +124,8 @@ impl PresignParticipant {
         identifier: Identifier,
     ) -> Message {
         // Set the presign map internally
-        self.presign_map
+        let _ = self
+            .presign_map
             .insert(identifier, (auxinfo_identifier, keyshare_identifier));
 
         Message::new(
@@ -136,10 +139,12 @@ impl PresignParticipant {
 
     /// Presign: Round One
     ///
-    /// During round one, each participant produces and stores their own secret values, and then
-    /// stores a round one secret, and publishes a unique public component to every other participant.
+    /// During round one, each participant produces and stores their own secret
+    /// values, and then stores a round one secret, and publishes a unique
+    /// public component to every other participant.
     ///
-    /// This can only be run after all participants have finished with key generation.
+    /// This can only be run after all participants have finished with key
+    /// generation.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
@@ -150,7 +155,8 @@ impl PresignParticipant {
         let (auxinfo_identifier, keyshare_identifier) =
             self.get_associated_identifiers_for_presign(&message.id())?;
 
-        // Reconstruct keyshare and other participants' public keyshares from local storage
+        // Reconstruct keyshare and other participants' public keyshares from local
+        // storage
         let keyshare = get_keyshare(
             self.id,
             auxinfo_identifier,
@@ -189,17 +195,19 @@ impl PresignParticipant {
         Ok(ret_messages)
     }
 
-    /// Processes a single request from round one to create public keyshares for that participant, to be sent in round two.
-    /// Presign: Round Two
+    /// Processes a single request from round one to create public keyshares for
+    /// that participant, to be sent in round two. Presign: Round Two
     ///
-    /// During round two, each participant retrieves the public keyshares for each other participant from the
-    /// key generation phase, the round 1 public values from each other participant, its own round 1 private
-    /// value, and its own round one keyshare from key generation, and produces per-participant
-    /// round 2 public and private values.
+    /// During round two, each participant retrieves the public keyshares for
+    /// each other participant from the key generation phase, the round 1
+    /// public values from each other participant, its own round 1 private
+    /// value, and its own round one keyshare from key generation, and produces
+    /// per-participant round 2 public and private values.
     ///
-    /// This can be run as soon as each round one message to this participant has been published.
-    /// These round two messages are returned in response to the sender, without having to
-    /// rely on any other round one messages from other participants aside from the sender.
+    /// This can be run as soon as each round one message to this participant
+    /// has been published. These round two messages are returned in
+    /// response to the sender, without having to rely on any other round
+    /// one messages from other participants aside from the sender.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
@@ -210,7 +218,8 @@ impl PresignParticipant {
         let (auxinfo_identifier, keyshare_identifier) =
             self.get_associated_identifiers_for_presign(&message.id())?;
 
-        // Reconstruct keyshare and other participants' public keyshares from local storage
+        // Reconstruct keyshare and other participants' public keyshares from local
+        // storage
         let keyshare = get_keyshare(
             self.id,
             auxinfo_identifier,
@@ -324,15 +333,16 @@ impl PresignParticipant {
 
     /// Presign: Round Three
     ///
-    /// During round three, to process all round 3 messages from a sender, the participant
-    /// must first wait for round 2 to be completely finished for all participants.
-    /// Then, the participant retrieves:
+    /// During round three, to process all round 3 messages from a sender, the
+    /// participant must first wait for round 2 to be completely finished
+    /// for all participants. Then, the participant retrieves:
     /// - all participants' public keyshares,
     /// - its own round 1 private value,
     /// - all round 2 per-participant private values,
     /// - all round 2 per-participant public values,
     ///
-    /// and produces a set of per-participant round 3 public values and one private value.
+    /// and produces a set of per-participant round 3 public values and one
+    /// private value.
     ///
     /// Each participant is only going to run round three once.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
@@ -419,8 +429,8 @@ impl PresignParticipant {
     }
     /// Presign: Finish
     ///
-    /// In this step, the participant simply collects all r3 public values and its r3
-    /// private value, and assembles them into a PresignRecord.
+    /// In this step, the participant simply collects all r3 public values and
+    /// its r3 private value, and assembles them into a PresignRecord.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn do_presign_finish(&mut self, message: &Message) -> Result<PresignRecord> {
         let r3_pubs = self.get_other_participants_round_three_publics(message.id())?;
@@ -552,12 +562,14 @@ impl PresignParticipant {
         Ok(())
     }
 
-    /// Aggregate the other participants' values needed for round three from storage. This includes:
+    /// Aggregate the other participants' values needed for round three from
+    /// storage. This includes:
     /// - public keyshares
     /// - round two private values
     /// - round two public values
     ///
-    /// This returns a HashMap with the key as the participant id and these values being mapped
+    /// This returns a HashMap with the key as the participant id and these
+    /// values being mapped
     fn get_other_participants_round_three_values(
         &self,
         identifier: Identifier,
@@ -600,7 +612,7 @@ impl PresignParticipant {
                 identifier,
                 other_participant_id,
             )?;
-            hm.insert(
+            let _ = hm.insert(
                 other_participant_id,
                 RoundThreeInput {
                     auxinfo_public: deserialize!(&auxinfo_public)?,
@@ -612,8 +624,8 @@ impl PresignParticipant {
         Ok(hm)
     }
 
-    /// Aggregate the other participants' round three public values from storage. But don't remove them
-    /// from storage.
+    /// Aggregate the other participants' round three public values from
+    /// storage. But don't remove them from storage.
     ///
     /// This returns a Vec with the values
     fn get_other_participants_round_three_publics(
@@ -745,7 +757,7 @@ impl PresignKeyShareAndInfo {
                 G: PaillierCiphertext(G.clone()),
                 proof: proof.clone(),
             };
-            ret_publics.insert(*id, r1_public);
+            let _ = ret_publics.insert(*id, r1_public);
         }
 
         let r1_private = RoundOnePrivate {
@@ -763,7 +775,6 @@ impl PresignKeyShareAndInfo {
     /// Needs to be run once per party j != i
     ///
     /// Constructs a D = gamma * K and D_hat = x * K, and Gamma = g * gamma.
-    ///
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     pub(crate) fn round_two<R: RngCore + CryptoRng>(
         &self,
@@ -772,9 +783,9 @@ impl PresignKeyShareAndInfo {
         sender_r1_priv: &RoundOnePrivate,
         receiver_r1_pub: &RoundOnePublic,
     ) -> (RoundTwoPrivate, RoundTwoPublic) {
-        // Picking betas as elements of [+- 2^384] here is like sampling them from the distribution
-        // [1, 2^256], which is akin to 2^{ell + epsilon} where ell = epsilon = 384. Note that
-        // we need q/2^epsilon to be negligible.
+        // Picking betas as elements of [+- 2^384] here is like sampling them from the
+        // distribution [1, 2^256], which is akin to 2^{ell + epsilon} where ell
+        // = epsilon = 384. Note that we need q/2^epsilon to be negligible.
         let beta = random_bn_in_range(rng, ELL);
         let beta_hat = random_bn_in_range(rng, ELL);
 
@@ -939,7 +950,7 @@ impl PresignKeyShareAndInfo {
                 psi_double_prime,
                 Gamma,
             };
-            ret_publics.insert(*other_id, val);
+            let _ = ret_publics.insert(*other_id, val);
         }
 
         let private = RoundThreePrivate {
