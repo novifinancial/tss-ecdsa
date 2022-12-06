@@ -137,7 +137,7 @@ impl KeygenParticipant {
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
-        let (keyshare_private, keyshare_public) = new_keyshare()?;
+        let (keyshare_private, keyshare_public) = new_keyshare(rng)?;
         self.storage.store(
             StorableType::PrivateKeyshare,
             message.id(),
@@ -516,9 +516,9 @@ impl KeygenParticipant {
 }
 
 /// Generates a new [KeySharePrivate] and [KeySharePublic]
-fn new_keyshare() -> Result<(KeySharePrivate, KeySharePublic)> {
+fn new_keyshare<R: RngCore + CryptoRng>(rng: &mut R) -> Result<(KeySharePrivate, KeySharePublic)> {
     let order = k256_order();
-    let x = BigNumber::random(&order);
+    let x = BigNumber::from_rng(&order, rng);
     let g = CurvePoint::GENERATOR;
     let X = CurvePoint(
         g.0 * crate::utils::bn_to_scalar(&x)

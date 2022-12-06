@@ -362,10 +362,10 @@ mod tests {
         };
         let N1 = &p1 * &q1;
 
-        let sk0 = DecryptionKey::with_safe_primes_unchecked(&p0, &q0).unwrap();
+        let sk0 = DecryptionKey::with_primes_unchecked(&p0, &q0).unwrap();
         let pk0 = PaillierEncryptionKey(EncryptionKey::from(&sk0));
 
-        let sk1 = DecryptionKey::with_safe_primes_unchecked(&p1, &q1).unwrap();
+        let sk1 = DecryptionKey::with_primes_unchecked(&p1, &q1).unwrap();
         let pk1 = PaillierEncryptionKey(EncryptionKey::from(&sk1));
 
         let g = k256::ProjectivePoint::GENERATOR;

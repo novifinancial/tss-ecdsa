@@ -248,7 +248,7 @@ mod tests {
         let q0 = crate::utils::get_random_safe_prime_512();
         let N0 = &p0 * &q0;
 
-        let sk = DecryptionKey::with_safe_primes_unchecked(&p0, &q0).unwrap();
+        let sk = DecryptionKey::with_primes_unchecked(&p0, &q0).unwrap();
         let pk = PaillierEncryptionKey(EncryptionKey::from(&sk));
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);

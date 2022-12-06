@@ -440,13 +440,14 @@ mod tests {
 
     #[test]
     fn test_jacobi() {
+        let mut rng = OsRng;
         let p = get_random_safe_prime_512();
         let q = get_random_safe_prime_512();
 
         let N = &p * &q;
 
         for _ in 0..100 {
-            let a = BigNumber::random(&N);
+            let a = BigNumber::from_rng(&N, &mut rng);
 
             let a_p = jacobi(&a, &p);
             let a_q = jacobi(&a, &q);
@@ -471,10 +472,11 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_prime() {
+        let mut rng = OsRng;
         let p = get_random_safe_prime_512();
 
         for _ in 0..100 {
-            let a = BigNumber::random(&p);
+            let a = BigNumber::from_rng(&p, &mut rng);
             let a_p = jacobi(&a, &p);
 
             let roots = square_roots_mod_prime(&a, &p);
@@ -496,6 +498,7 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_composite() {
+        let mut rng = OsRng;
         let p = get_random_safe_prime_512();
         let q = get_random_safe_prime_512();
         let N = &p * &q;
@@ -506,7 +509,7 @@ mod tests {
             if success == 10 {
                 return;
             }
-            let a = BigNumber::random(&N);
+            let a = BigNumber::from_rng(&N, &mut rng);
             let a_n = jacobi(&a, &N);
 
             let roots = square_roots_mod_composite(&a, &p, &q);
@@ -527,6 +530,7 @@ mod tests {
 
     #[test]
     fn test_fourth_roots_mod_composite() {
+        let mut rng = OsRng;
         let p = get_random_safe_prime_512();
         let q = get_random_safe_prime_512();
         let N = &p * &q;
@@ -537,7 +541,7 @@ mod tests {
             if success == 10 {
                 return;
             }
-            let a = BigNumber::random(&N);
+            let a = BigNumber::from_rng(&N, &mut rng);
             let a_n = jacobi(&a, &N);
 
             let roots = fourth_roots_mod_composite(&a, &p, &q);
@@ -558,12 +562,13 @@ mod tests {
 
     #[test]
     fn test_chinese_remainder_theorem() {
+        let mut rng = OsRng;
         let p = get_random_safe_prime_512();
         let q = get_random_safe_prime_512();
 
         for _ in 0..100 {
-            let a1 = BigNumber::random(&p);
-            let a2 = BigNumber::random(&q);
+            let a1 = BigNumber::from_rng(&p, &mut rng);
+            let a2 = BigNumber::from_rng(&q, &mut rng);
 
             let x = chinese_remainder_theorem(&a1, &a2, &p, &q).unwrap();
 
