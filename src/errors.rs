@@ -34,6 +34,14 @@ pub enum InternalError {
     BailError(String),
     /// Represents some code assumption that was checked at runtime but failed to be true.
     InternalInvariantFailed,
+    /// The inputs to a homomorphic operation on a paillier ciphertext were malformed
+    InvalidPaillierOperation,
+    /// The attemped decryption of a pailler ciphertext failed
+    PaillierDecryptionFailed,
+    /// Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)
+    CouldNotConvertToScalar,
+    /// Could not invert a Scaler
+    CouldNotInvertScalar,
 }
 
 macro_rules! serialize {

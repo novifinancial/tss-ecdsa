@@ -6,7 +6,7 @@
 // of this source tree.
 
 use crate::broadcast::participant::BroadcastTag;
-use crate::errors::InternalError::InternalInvariantFailed;
+use crate::errors::InternalError::{InternalInvariantFailed, InvalidPaillierOperation};
 use crate::{
     auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
     broadcast::participant::{BroadcastOutput, BroadcastParticipant},
@@ -402,7 +402,7 @@ impl PresignParticipant {
         )?;
 
         let (r2_priv_ij, r2_pub_ij) =
-            keyshare.round_two(rng, keyshare_from, &r1_priv, &r1_public_broadcast);
+            keyshare.round_two(rng, keyshare_from, &r1_priv, &r1_public_broadcast)?;
 
         // Store the private value for this round 2 pair
         self.storage.store(
@@ -655,7 +655,7 @@ impl PresignParticipant {
             private: r3_private,
             publics: r3_pubs,
         }
-        .into();
+        .try_into()?;
 
         Ok(presign_record)
     }
@@ -988,7 +988,7 @@ impl PresignKeyShareAndInfo {
         receiver_aux_info: &AuxInfoPublic,
         sender_r1_priv: &RoundOnePrivate,
         receiver_r1_pub_broadcast: &RoundOnePublicBroadcast,
-    ) -> (RoundTwoPrivate, RoundTwoPublic) {
+    ) -> Result<(RoundTwoPrivate, RoundTwoPublic)> {
         // Picking betas as elements of [+- 2^384] here is like sampling them from the
         // distribution [1, 2^256], which is akin to 2^{ell + epsilon} where ell
         // = epsilon = 384. Note that we need q/2^epsilon to be negligible.
@@ -1006,10 +1006,10 @@ impl PresignKeyShareAndInfo {
                     .pk
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &sender_r1_priv.gamma)
-                    .unwrap(),
+                    .ok_or(InvalidPaillierOperation)?,
                 &beta_ciphertext,
             )
-            .unwrap();
+            .ok_or(InvalidPaillierOperation)?;
 
         let D_hat = receiver_aux_info
             .pk
@@ -1019,16 +1019,16 @@ impl PresignKeyShareAndInfo {
                     .pk
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &self.keyshare_private.x)
-                    .unwrap(),
+                    .ok_or(InvalidPaillierOperation)?,
                 &beta_hat_ciphertext,
             )
-            .unwrap();
+            .ok_or(InvalidPaillierOperation)?;
 
         let (F, r) = self.aux_info_public.pk.encrypt(&beta);
         let (F_hat, r_hat) = self.aux_info_public.pk.encrypt(&beta_hat);
 
         let g = CurvePoint::GENERATOR;
-        let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
+        let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma)?);
 
         // Generate three proofs
 
@@ -1045,8 +1045,7 @@ impl PresignKeyShareAndInfo {
                 &Gamma,
             ),
             &PiAffgSecret::new(&sender_r1_priv.gamma, &beta, &s, &r),
-        )
-        .unwrap();
+        )?;
 
         let psi_hat = PiAffgProof::prove(
             rng,
@@ -1061,8 +1060,7 @@ impl PresignKeyShareAndInfo {
                 &self.keyshare_public.X,
             ),
             &PiAffgSecret::new(&self.keyshare_private.x, &beta_hat, &s_hat, &r_hat),
-        )
-        .unwrap();
+        )?;
 
         let psi_prime = PiLogProof::prove(
             rng,
@@ -1075,10 +1073,9 @@ impl PresignKeyShareAndInfo {
                 &g,
             ),
             &PiLogSecret::new(&sender_r1_priv.gamma, &sender_r1_priv.nu),
-        )
-        .unwrap();
+        )?;
 
-        (
+        Ok((
             RoundTwoPrivate { beta, beta_hat },
             RoundTwoPublic {
                 D: PaillierCiphertext(D),
@@ -1090,7 +1087,7 @@ impl PresignKeyShareAndInfo {
                 psi_hat,
                 psi_prime,
             },
-        )
+        ))
     }
 
     /// From the perspective of party i
@@ -1113,16 +1110,15 @@ impl PresignKeyShareAndInfo {
         let mut chi: BigNumber = self.keyshare_private.x.modmul(&sender_r1_priv.k, &order);
 
         let g = CurvePoint::GENERATOR;
-        let mut Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma).unwrap());
+        let mut Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma)?);
 
         for round_three_input in other_participant_inputs.values() {
             let r2_pub_j = round_three_input.r2_public.clone();
             let r2_priv_j = round_three_input.r2_private.clone();
 
-            let alpha =
-                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D.0).unwrap());
+            let alpha = BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D.0)?);
             let alpha_hat =
-                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat.0).unwrap());
+                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat.0)?);
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
@@ -1130,10 +1126,10 @@ impl PresignKeyShareAndInfo {
             Gamma = CurvePoint(Gamma.0 + r2_pub_j.Gamma.0);
         }
 
-        let Delta = CurvePoint(Gamma.0 * bn_to_scalar(&sender_r1_priv.k).unwrap());
+        let Delta = CurvePoint(Gamma.0 * bn_to_scalar(&sender_r1_priv.k)?);
 
-        let delta_scalar = bn_to_scalar(&delta).unwrap();
-        let chi_scalar = bn_to_scalar(&chi).unwrap();
+        let delta_scalar = bn_to_scalar(&delta)?;
+        let chi_scalar = bn_to_scalar(&chi)?;
 
         let mut ret_publics = HashMap::new();
         for (other_id, round_three_input) in other_participant_inputs {
@@ -1148,8 +1144,7 @@ impl PresignKeyShareAndInfo {
                     &Gamma,
                 ),
                 &PiLogSecret::new(&sender_r1_priv.k, &sender_r1_priv.rho),
-            )
-            .unwrap();
+            )?;
             let val = RoundThreePublic {
                 delta: delta_scalar,
                 Delta,

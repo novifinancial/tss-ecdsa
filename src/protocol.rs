@@ -233,7 +233,7 @@ impl Participant {
             self.main_storage
                 .retrieve(StorableType::PresignRecord, presign_identifier, self.id)?;
         let presign_record: PresignRecord = deserialize!(&pr_bytes)?;
-        let (r, s) = presign_record.sign(digest);
+        let (r, s) = presign_record.sign(digest)?;
         let ret = SignatureShare { r: Some(r), s };
 
         // Clear the presign record after being used once
@@ -290,7 +290,7 @@ impl SignatureShare {
     /// Converts the [SignatureShare] into a signature
     pub fn finish(&self) -> Result<k256::ecdsa::Signature> {
         let mut s = self.s;
-        if s.is_high().unwrap_u8() == 1 {
+        if bool::from(s.is_high()) {
             s = s.negate();
         }
 

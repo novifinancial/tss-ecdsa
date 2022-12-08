@@ -5,7 +5,12 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use crate::errors::{
+    InternalError::{CouldNotConvertToScalar, CouldNotInvertScalar},
+    Result,
+};
 use crate::{utils::bn_to_scalar, CurvePoint};
+use k256::Scalar;
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -26,8 +31,9 @@ pub(crate) struct PresignRecord {
     chi: k256::Scalar,
 }
 
-impl From<RecordPair> for PresignRecord {
-    fn from(RecordPair { private, publics }: RecordPair) -> Self {
+impl TryFrom<RecordPair> for PresignRecord {
+    type Error = crate::errors::InternalError;
+    fn try_from(RecordPair { private, publics }: RecordPair) -> Result<Self> {
         let mut delta = private.delta;
         let mut Delta = private.Delta;
         for p in publics {
@@ -41,27 +47,29 @@ impl From<RecordPair> for PresignRecord {
             panic!("Error, failed to validate");
         }
 
-        let R = CurvePoint(private.Gamma.0 * delta.invert().unwrap());
+        let delta_inv = Option::<Scalar>::from(delta.invert()).ok_or(CouldNotInvertScalar)?;
+        let R = CurvePoint(private.Gamma.0 * delta_inv);
 
-        PresignRecord {
+        Ok(PresignRecord {
             R,
             k: private.k,
             chi: private.chi,
-        }
+        })
     }
 }
 
 impl PresignRecord {
-    fn x_from_point(p: &CurvePoint) -> k256::Scalar {
+    fn x_from_point(p: &CurvePoint) -> Result<k256::Scalar> {
         let r = &p.0.to_affine().x();
-        k256::Scalar::from_repr(*r).unwrap()
+        Option::from(k256::Scalar::from_repr(*r)).ok_or(CouldNotConvertToScalar)
     }
 
-    pub(crate) fn sign(&self, d: sha2::Sha256) -> (k256::Scalar, k256::Scalar) {
-        let r = Self::x_from_point(&self.R);
-        let m = k256::Scalar::from_repr(d.finalize()).unwrap();
-        let s = bn_to_scalar(&self.k).unwrap() * m + r * self.chi;
+    pub(crate) fn sign(&self, d: sha2::Sha256) -> Result<(k256::Scalar, k256::Scalar)> {
+        let r = Self::x_from_point(&self.R)?;
+        let m = Option::<Scalar>::from(k256::Scalar::from_repr(d.finalize()))
+            .ok_or(CouldNotConvertToScalar)?;
+        let s = bn_to_scalar(&self.k)? * m + r * self.chi;
 
-        (r, s)
+        Ok((r, s))
     }
 }

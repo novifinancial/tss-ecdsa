@@ -5,6 +5,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use crate::errors::{InternalError::PaillierDecryptionFailed, Result};
 use crate::utils::random_bn_in_z_star;
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,7 @@ impl PaillierEncryptionKey {
 pub(crate) struct PaillierDecryptionKey(pub(crate) libpaillier::DecryptionKey);
 
 impl PaillierDecryptionKey {
-    pub(crate) fn decrypt(&self, c: &BigNumber) -> Option<Vec<u8>> {
-        self.0.decrypt(c)
+    pub(crate) fn decrypt(&self, c: &BigNumber) -> Result<Vec<u8>> {
+        self.0.decrypt(c).ok_or(PaillierDecryptionFailed)
     }
 }

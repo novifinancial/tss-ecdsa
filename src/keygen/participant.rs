@@ -348,18 +348,14 @@ impl KeygenParticipant {
             .other_participant_ids
             .iter()
             .map(|&other_participant_id| {
-                let decom: KeygenDecommit = deserialize!(&self
-                    .storage
-                    .retrieve(
-                        StorableType::KeygenDecommit,
-                        message.id(),
-                        other_participant_id
-                    )
-                    .unwrap())
-                .unwrap();
-                decom.rid
+                let decom: KeygenDecommit = deserialize!(&self.storage.retrieve(
+                    StorableType::KeygenDecommit,
+                    message.id(),
+                    other_participant_id
+                )?)?;
+                Ok(decom.rid)
             })
-            .collect();
+            .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom: KeygenDecommit = deserialize!(&self.storage.retrieve(
             StorableType::KeygenDecommit,
             message.id(),
@@ -521,10 +517,7 @@ fn new_keyshare<R: RngCore + CryptoRng>(rng: &mut R) -> Result<(KeySharePrivate,
     let order = k256_order();
     let x = BigNumber::from_rng(&order, rng);
     let g = CurvePoint::GENERATOR;
-    let X = CurvePoint(
-        g.0 * crate::utils::bn_to_scalar(&x)
-            .ok_or_else(|| bail_context!("Could not generate public component"))?,
-    );
+    let X = CurvePoint(g.0 * crate::utils::bn_to_scalar(&x)?);
 
     Ok((KeySharePrivate { x }, KeySharePublic { X }))
 }
@@ -711,10 +704,7 @@ mod tests {
                 player_id
             )?)?;
             let g = CurvePoint::GENERATOR;
-            let X = CurvePoint(
-                g.0 * crate::utils::bn_to_scalar(&sk.x)
-                    .ok_or_else(|| bail_context!("Could not generate public component"))?,
-            );
+            let X = CurvePoint(g.0 * crate::utils::bn_to_scalar(&sk.x)?);
             assert!(X == pk.X);
         }
 
