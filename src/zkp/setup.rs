@@ -42,8 +42,8 @@ impl ZkSetupParameters {
         q: &BigNumber,
     ) -> Result<Self> {
         let phi_n = (p - 1) * (q - 1);
-        let tau = BigNumber::random(N);
-        let lambda = BigNumber::random(&phi_n);
+        let tau = BigNumber::from_rng(N, rng);
+        let lambda = BigNumber::from_rng(&phi_n, rng);
         let t = tau.modpow(&BigNumber::from(2), N);
         let s = t.modpow(&lambda, N);
 

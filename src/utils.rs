@@ -70,13 +70,13 @@ pub(crate) fn modpow(a: &BigNumber, e: &BigNumber, n: &BigNumber) -> BigNumber {
 }
 
 /// Generate a random BigNumber in the range 0, ..., n
-pub(crate) fn random_positive_bn<R: RngCore + CryptoRng>(_rng: &mut R, n: &BigNumber) -> BigNumber {
-    BigNumber::random(n)
+pub(crate) fn random_positive_bn<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
+    BigNumber::from_rng(n, rng)
 }
 
 /// Generate a random BigNumber in the range -n, ..., n
 pub(crate) fn random_bn_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
-    let val = BigNumber::random(n);
+    let val = BigNumber::from_rng(n, rng);
     let is_positive: bool = rng.gen();
     match is_positive {
         true => val,
@@ -86,7 +86,7 @@ pub(crate) fn random_bn_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNu
 
 /// Generate a random BigNumber in the range -2^n, ..., 0, ..., 2^n
 pub(crate) fn random_bn_in_range<R: RngCore + CryptoRng>(rng: &mut R, n: usize) -> BigNumber {
-    let val = BigNumber::random(&(BigNumber::one() << n));
+    let val = BigNumber::from_rng(&(BigNumber::one() << n), rng);
     let is_positive: bool = rng.gen();
     match is_positive {
         true => val,
@@ -106,7 +106,7 @@ pub(crate) fn random_bn_in_range_min<R: RngCore + CryptoRng>(
         return bail!("min_bound needs to be less than n");
     }
     let min_bound_bn = (BigNumber::one() << n) - (BigNumber::one() << min_bound);
-    let val = BigNumber::random(&(min_bound_bn + (BigNumber::one() << min_bound)));
+    let val = BigNumber::from_rng(&(min_bound_bn + (BigNumber::one() << min_bound)), rng);
     let is_positive: bool = rng.gen();
     Ok(match is_positive {
         true => val,
@@ -147,12 +147,9 @@ pub(crate) fn positive_bn_random_from_transcript(
 }
 
 /// Generate a random BigNumber in the range 1..N-1 (Z_N^*) (non-zero)
-pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(
-    _rng: &mut R,
-    n: &BigNumber,
-) -> BigNumber {
+pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
     for _ in 0..MAX_ITER {
-        let bn = BigNumber::random(n);
+        let bn = BigNumber::from_rng(n, rng);
         if bn != BigNumber::zero() {
             return bn;
         }

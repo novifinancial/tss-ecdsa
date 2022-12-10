@@ -154,12 +154,13 @@ mod tests {
     use rand::rngs::OsRng;
 
     fn random_ring_pedersen_proof() -> Result<(PiPrmInput, PiPrmProof)> {
+        let mut rng = OsRng;
         let p = crate::utils::get_random_safe_prime_512();
         let q = crate::utils::get_random_safe_prime_512();
         let N = &p * &q;
         let phi_n = (p - 1) * (q - 1);
-        let tau = BigNumber::random(&N);
-        let lambda = BigNumber::random(&phi_n);
+        let tau = BigNumber::from_rng(&N, &mut rng);
+        let lambda = BigNumber::from_rng(&phi_n, &mut rng);
         let t = modpow(&tau, &BigNumber::from(2), &N);
         let s = modpow(&t, &lambda, &N);
 

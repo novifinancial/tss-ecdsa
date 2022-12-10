@@ -527,7 +527,7 @@ fn new_auxinfo<R: RngCore + CryptoRng>(
     let q = two_safe_primes[1].clone();
 
     let sk = PaillierDecryptionKey(
-        DecryptionKey::with_safe_primes_unchecked(&p, &q)
+        DecryptionKey::with_primes_unchecked(&p, &q)
             .ok_or_else(|| bail_context!("Could not generate decryption key"))?,
     );
 

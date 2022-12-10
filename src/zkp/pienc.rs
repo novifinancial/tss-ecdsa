@@ -220,7 +220,7 @@ mod tests {
         let q = crate::utils::get_random_safe_prime_512();
         let N = &p * &q;
 
-        let sk = DecryptionKey::with_safe_primes_unchecked(&p, &q).unwrap();
+        let sk = DecryptionKey::with_primes_unchecked(&p, &q).unwrap();
         let pk = PaillierEncryptionKey(EncryptionKey::from(&sk));
 
         let (K, rho) = pk.encrypt(k);
