@@ -99,12 +99,6 @@ impl Participant {
         message: &Message,
         rng: &mut R,
     ) -> Result<Vec<Message>> {
-        println!(
-            "processing participant: {}, with message type: {:?}",
-            &self.id,
-            &message.message_type(),
-        );
-
         match message.message_type() {
             MessageType::Auxinfo(_) => {
                 self.auxinfo_participant
@@ -428,6 +422,11 @@ mod tests {
         // This is done to simulate arbitrary message arrival ordering
         let index = rng.gen_range(0..inbox.len());
         let message = inbox.remove(index);
+        println!(
+            "processing participant: {}, with message type: {:?}",
+            &participant.id,
+            &message.message_type(),
+        );
         let messages = participant.process_single_message(&message, rng)?;
         deliver_all(&messages, inboxes)?;
 
