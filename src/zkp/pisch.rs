@@ -76,7 +76,7 @@ impl Proof for PiSchProof {
     ) -> Result<Self> {
         // Sample alpha from F_q
         let alpha = crate::utils::random_positive_bn(rng, &input.q);
-        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
+        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
 
         let mut transcript = Transcript::new(b"PiSchProof");
         transcript.append_message(b"CommonInput", &serialize!(&input)?);
@@ -108,8 +108,8 @@ impl Proof for PiSchProof {
         // Do equality checks
 
         let eq_check_1 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z).unwrap());
-            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z)?);
+            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
             lhs == rhs
         };
         if !eq_check_1 {
@@ -127,7 +127,7 @@ impl PiSchProof {
     ) -> Result<PiSchPrecommit> {
         // Sample alpha from F_q
         let alpha = crate::utils::random_positive_bn(rng, &input.q);
-        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
+        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
         Ok(PiSchPrecommit { A, alpha })
     }
 
@@ -168,8 +168,8 @@ impl PiSchProof {
         // Do equality checks
 
         let eq_check_1 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z).unwrap());
-            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z)?);
+            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
             lhs == rhs
         };
         if !eq_check_1 {

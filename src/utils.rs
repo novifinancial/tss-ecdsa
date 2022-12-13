@@ -7,7 +7,11 @@
 
 use std::collections::HashMap;
 
-use crate::{auxinfo::info::AuxInfoPublic, errors::Result, Message};
+use crate::{
+    auxinfo::info::AuxInfoPublic,
+    errors::{InternalError::CouldNotConvertToScalar, Result},
+    Message,
+};
 use generic_array::GenericArray;
 use k256::{
     elliptic_curve::{bigint::Encoding, group::ff::PrimeField, AffinePoint, Curve},
@@ -157,7 +161,7 @@ pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNu
     BigNumber::zero()
 }
 
-pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
+pub(crate) fn bn_to_scalar(x: &BigNumber) -> Result<k256::Scalar> {
     // Take (mod q)
     let order = k256_order();
 
@@ -169,14 +173,14 @@ pub(crate) fn bn_to_scalar(x: &BigNumber) -> Option<k256::Scalar> {
     let mut ret: k256::Scalar = Option::from(k256::Scalar::from_repr(
         GenericArray::clone_from_slice(&slice),
     ))
-    .unwrap();
+    .ok_or(CouldNotConvertToScalar)?;
 
     // Make sure to negate the scalar if the original input was negative
     if x < &BigNumber::zero() {
         ret = ret.negate();
     }
 
-    Some(ret)
+    Ok(ret)
 }
 
 pub(crate) fn k256_order() -> BigNumber {

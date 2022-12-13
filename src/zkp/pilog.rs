@@ -118,7 +118,7 @@ impl Proof for PiLogProof {
             let b = modpow(&r, &input.N0, &N0_squared);
             a.modmul(&b, &N0_squared)
         };
-        let Y = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
+        let Y = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
         let D = {
             let a = modpow(&input.setup_params.s, &alpha, &input.setup_params.N);
             let b = modpow(&input.setup_params.t, &gamma, &input.setup_params.N);
@@ -129,13 +129,7 @@ impl Proof for PiLogProof {
         transcript.append_message(b"CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, A, Y, D)",
-            &[
-                S.to_bytes(),
-                A.to_bytes(),
-                bincode::serialize(&Y).unwrap(),
-                D.to_bytes(),
-            ]
-            .concat(),
+            &[S.to_bytes(), A.to_bytes(), serialize!(&Y)?, D.to_bytes()].concat(),
         );
 
         // Verifier samples from e in +- q (where q is the group order)
@@ -170,7 +164,7 @@ impl Proof for PiLogProof {
             &[
                 self.S.to_bytes(),
                 self.A.to_bytes(),
-                bincode::serialize(&self.Y).unwrap(),
+                serialize!(&self.Y)?,
                 self.D.to_bytes(),
             ]
             .concat(),
@@ -201,8 +195,8 @@ impl Proof for PiLogProof {
         }
 
         let eq_check_2 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1).unwrap());
-            let rhs = CurvePoint(self.Y.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1)?);
+            let rhs = CurvePoint(self.Y.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
             lhs == rhs
         };
         if !eq_check_2 {

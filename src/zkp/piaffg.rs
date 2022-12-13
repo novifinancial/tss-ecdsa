@@ -147,7 +147,7 @@ impl Proof for PiAffgProof {
             };
             a.modmul(&b, &N0_squared)
         };
-        let B_x = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha).unwrap());
+        let B_x = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
         let B_y = {
             let a = modpow(&(BigNumber::one() + &input.N1), &beta, &N1_squared);
             let b = modpow(&r_y, &input.N1, &N1_squared);
@@ -182,7 +182,7 @@ impl Proof for PiAffgProof {
                 S.to_bytes(),
                 T.to_bytes(),
                 A.to_bytes(),
-                bincode::serialize(&B_x).unwrap(),
+                serialize!(&B_x)?,
                 B_y.to_bytes(),
                 E.to_bytes(),
                 F.to_bytes(),
@@ -234,7 +234,7 @@ impl Proof for PiAffgProof {
                 self.S.to_bytes(),
                 self.T.to_bytes(),
                 self.A.to_bytes(),
-                bincode::serialize(&self.B_x).unwrap(),
+                serialize!(&self.B_x)?,
                 self.B_y.to_bytes(),
                 self.E.to_bytes(),
                 self.F.to_bytes(),
@@ -269,8 +269,8 @@ impl Proof for PiAffgProof {
         }
 
         let eq_check_2 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1).unwrap());
-            let rhs = CurvePoint(self.B_x.0 + input.X.0 * utils::bn_to_scalar(&self.e).unwrap());
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z1)?);
+            let rhs = CurvePoint(self.B_x.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
             lhs == rhs
         };
         if !eq_check_2 {

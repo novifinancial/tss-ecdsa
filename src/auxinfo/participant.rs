@@ -347,18 +347,14 @@ impl AuxInfoParticipant {
             .other_participant_ids
             .iter()
             .map(|&other_participant_id| {
-                let decom: AuxInfoDecommit = deserialize!(&self
-                    .storage
-                    .retrieve(
-                        StorableType::AuxInfoDecommit,
-                        message.id(),
-                        other_participant_id
-                    )
-                    .unwrap())
-                .unwrap();
-                decom.rid
+                let decom: AuxInfoDecommit = deserialize!(&self.storage.retrieve(
+                    StorableType::AuxInfoDecommit,
+                    message.id(),
+                    other_participant_id
+                )?)?;
+                Ok(decom.rid)
             })
-            .collect();
+            .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom: AuxInfoDecommit = deserialize!(&self.storage.retrieve(
             StorableType::AuxInfoDecommit,
             message.id(),
