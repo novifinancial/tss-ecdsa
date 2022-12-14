@@ -11,6 +11,8 @@ use core::fmt::Debug;
 use displaydoc::Display;
 use thiserror::Error;
 
+use crate::paillier::PaillierError;
+
 /// The default Result type used in this crate
 pub type Result<T> = std::result::Result<T, InternalError>;
 
@@ -36,10 +38,8 @@ pub enum InternalError {
     BailError(String),
     /// Represents some code assumption that was checked at runtime but failed to be true.
     InternalInvariantFailed,
-    /// The inputs to a homomorphic operation on a paillier ciphertext were malformed
-    InvalidPaillierOperation,
-    /// The attemped decryption of a pailler ciphertext failed
-    PaillierDecryptionFailed,
+    /// Paillier error: `{0}`
+    PaillierError(PaillierError),
     /// Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)
     CouldNotConvertToScalar,
     /// Could not invert a Scaler

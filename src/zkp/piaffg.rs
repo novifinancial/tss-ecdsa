@@ -337,8 +337,7 @@ impl Proof for PiAffgProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierEncryptionKey, utils::random_bn_in_range_min};
-    use libpaillier::*;
+    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
     use rand::rngs::OsRng;
 
     fn random_paillier_affg_proof(x: &BigNumber, y: &BigNumber) -> Result<()> {
@@ -349,11 +348,8 @@ mod tests {
         let (p1, q1) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
         let N1 = &p1 * &q1;
 
-        let sk0 = DecryptionKey::with_primes_unchecked(&p0, &q0).unwrap();
-        let pk0 = PaillierEncryptionKey(EncryptionKey::from(&sk0));
-
-        let sk1 = DecryptionKey::with_primes_unchecked(&p1, &q1).unwrap();
-        let pk1 = PaillierEncryptionKey(EncryptionKey::from(&sk1));
+        let pk0 = PaillierDecryptionKey::from_primes(&p0, &q0)?.encryption_key();
+        let pk1 = PaillierDecryptionKey::from_primes(&p1, &q1)?.encryption_key();
 
         let g = k256::ProjectivePoint::GENERATOR;
 

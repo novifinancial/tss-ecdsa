@@ -7,7 +7,8 @@
 // of this source tree.
 
 use crate::broadcast::participant::BroadcastTag;
-use crate::errors::InternalError::{InternalInvariantFailed, InvalidPaillierOperation};
+use crate::errors::InternalError::InternalInvariantFailed;
+use crate::paillier::PaillierError;
 use crate::{
     auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
     broadcast::participant::{BroadcastOutput, BroadcastParticipant},
@@ -1007,10 +1008,10 @@ impl PresignKeyShareAndInfo {
                     .pk
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &sender_r1_priv.gamma)
-                    .ok_or(InvalidPaillierOperation)?,
+                    .ok_or(PaillierError::InvalidOperation)?,
                 &beta_ciphertext,
             )
-            .ok_or(InvalidPaillierOperation)?;
+            .ok_or(PaillierError::InvalidOperation)?;
 
         let D_hat = receiver_aux_info
             .pk
@@ -1020,10 +1021,10 @@ impl PresignKeyShareAndInfo {
                     .pk
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &self.keyshare_private.x)
-                    .ok_or(InvalidPaillierOperation)?,
+                    .ok_or(PaillierError::InvalidOperation)?,
                 &beta_hat_ciphertext,
             )
-            .ok_or(InvalidPaillierOperation)?;
+            .ok_or(PaillierError::InvalidOperation)?;
 
         let (F, r) = self.aux_info_public.pk.encrypt(&beta);
         let (F_hat, r_hat) = self.aux_info_public.pk.encrypt(&beta_hat);

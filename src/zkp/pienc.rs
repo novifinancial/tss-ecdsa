@@ -210,8 +210,7 @@ impl Proof for PiEncProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierEncryptionKey, utils::random_bn_in_range_min};
-    use libpaillier::*;
+    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
     use rand::rngs::OsRng;
 
     fn random_paillier_encryption_in_range_proof(k: &BigNumber) -> Result<()> {
@@ -220,8 +219,7 @@ mod tests {
         let (p, q) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
         let N = &p * &q;
 
-        let sk = DecryptionKey::with_primes_unchecked(&p, &q).unwrap();
-        let pk = PaillierEncryptionKey(EncryptionKey::from(&sk));
+        let pk = PaillierDecryptionKey::from_primes(&p, &q)?.encryption_key();
 
         let (K, rho) = pk.encrypt(k);
         let setup_params = ZkSetupParameters::gen(&mut rng)?;

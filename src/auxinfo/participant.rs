@@ -15,7 +15,7 @@ use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant},
     errors::Result,
     messages::{AuxinfoMessageType, Message, MessageType},
-    paillier::{PaillierDecryptionKey, PaillierEncryptionKey},
+    paillier::PaillierDecryptionKey,
     participant::{Broadcast, ProtocolParticipant},
     protocol::ParticipantIdentifier,
     run_only_once,
@@ -23,7 +23,6 @@ use crate::{
     utils::process_ready_message,
     zkp::setup::ZkSetupParameters,
 };
-use libpaillier::{DecryptionKey, EncryptionKey};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
@@ -518,17 +517,16 @@ fn new_auxinfo<R: RngCore + CryptoRng>(
     #[cfg(test)]
     let (p, q) = crate::utils::get_prime_pair_from_pool_insecure(rng);
 
-    let sk = PaillierDecryptionKey(
-        DecryptionKey::with_primes_unchecked(&p, &q)
-            .ok_or_else(|| bail_context!("Could not generate decryption key"))?,
-    );
-
-    let pk = PaillierEncryptionKey(EncryptionKey::from(&sk.0));
+    let decryption_key = PaillierDecryptionKey::from_primes(&p, &q)?;
+    let encryption_key = decryption_key.encryption_key();
     let params = ZkSetupParameters::gen_from_primes(rng, &(&p * &q), &p, &q)?;
 
     Ok((
-        AuxInfoPrivate { sk },
-        AuxInfoPublic { pk, params },
+        AuxInfoPrivate { sk: decryption_key },
+        AuxInfoPublic {
+            pk: encryption_key,
+            params,
+        },
         AuxInfoWitnesses { p, q },
     ))
 }
@@ -719,7 +717,7 @@ mod tests {
                 keyshare_identifier,
                 player_id
             )?)?;
-            let pk2 = PaillierEncryptionKey(EncryptionKey::from(&sk.sk.0));
+            let pk2 = sk.sk.encryption_key();
             assert!(serialize!(&pk2) == serialize!(&pk.pk));
         }
 

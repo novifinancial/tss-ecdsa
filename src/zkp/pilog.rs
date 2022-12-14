@@ -232,8 +232,7 @@ impl Proof for PiLogProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::*, utils::random_bn_in_range_min};
-    use libpaillier::*;
+    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
     use rand::rngs::OsRng;
 
     fn random_paillier_log_proof(x: &BigNumber) -> Result<()> {
@@ -242,8 +241,7 @@ mod tests {
         let (p0, q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
         let N0 = &p0 * &q0;
 
-        let sk = DecryptionKey::with_primes_unchecked(&p0, &q0).unwrap();
-        let pk = PaillierEncryptionKey(EncryptionKey::from(&sk));
+        let pk = PaillierDecryptionKey::from_primes(&p0, &q0)?.encryption_key();
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
