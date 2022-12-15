@@ -30,6 +30,8 @@ use crate::{
 
 const MAX_ITER: usize = 50_000usize;
 
+use crate::parameters::PRIME_BITS;
+
 /// Wrapper around k256::ProjectivePoint so that we can define our own
 /// serialization/deserialization for it
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
@@ -221,17 +223,29 @@ mod tests {
         let scalar = bn_to_scalar(&neg1).unwrap();
         assert_eq!(k256::Scalar::ZERO, scalar.add(&k256::Scalar::ONE));
     }
+
+    #[test]
+    fn test_get_random_safe_prime_512() -> Result<()> {
+        let mut rng = OsRng;
+        let p = get_random_safe_prime_512(&mut rng);
+        assert!(p.is_prime());
+        let q: BigNumber = (p - 1) / 2;
+        assert!(q.is_prime());
+        Ok(())
+    }
 }
 
 // Prime generation functions
 
 // Generate safe primes from a file. Usually, generating safe primes takes
 // awhile (0-5 minutes per 512-bit safe prime on my laptop, average 50 seconds)
+#[cfg(test)]
 lazy_static::lazy_static! {
-    static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes();
+    static ref POOL_OF_PRIMES: Vec<BigNumber> = get_safe_primes_from_file();
 }
 
-pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
+#[cfg(test)]
+fn get_safe_primes_from_file() -> Vec<BigNumber> {
     let safe_primes: Vec<BigNumber> = crate::safe_primes_512::SAFE_PRIMES
         .iter()
         .map(|s| BigNumber::from_slice(&hex::decode(s).unwrap()))
@@ -242,10 +256,30 @@ pub(crate) fn get_safe_primes() -> Vec<BigNumber> {
 /// We sample safe primes that are 512 bits long. This comes from the security
 /// parameter setting of κ = 128, and safe primes being of length 4κ (Figure 6,
 /// Round 1 of the CGGMP'21 paper)
+pub(crate) fn get_random_safe_prime_512<R: RngCore + CryptoRng>(rng: &mut R) -> BigNumber {
+    BigNumber::safe_prime_from_rng(PRIME_BITS, rng)
+}
+
+/// Function to read from a precompiled list of safe primes. For testing purposes only
 #[cfg(test)]
-pub(crate) fn get_random_safe_prime_512() -> BigNumber {
-    // FIXME: should just return BigNumber::safe_prime(PRIME_BITS);
-    POOL_OF_PRIMES[rand::thread_rng().gen_range(0..POOL_OF_PRIMES.len())].clone()
+pub(crate) fn get_prime_from_pool_insecure<R: RngCore + CryptoRng>(rng: &mut R) -> BigNumber {
+    POOL_OF_PRIMES[rng.gen_range(0..POOL_OF_PRIMES.len())].clone()
+}
+
+/// Function to read from a precompiled list of safe primes. For testing purposes only
+/// Returns two unique primes
+#[cfg(test)]
+pub(crate) fn get_prime_pair_from_pool_insecure<R: RngCore + CryptoRng>(
+    rng: &mut R,
+) -> (BigNumber, BigNumber) {
+    let p = POOL_OF_PRIMES[rng.gen_range(0..POOL_OF_PRIMES.len())].clone();
+    let q = loop {
+        let q = POOL_OF_PRIMES[rng.gen_range(0..POOL_OF_PRIMES.len())].clone();
+        if p != q {
+            break q;
+        }
+    };
+    (p, q)
 }
 
 ////////////////////////////////
