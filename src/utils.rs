@@ -143,7 +143,7 @@ pub(crate) fn positive_bn_random_from_transcript(
     n: &BigNumber,
 ) -> BigNumber {
     let len = n.to_bytes().len();
-    let mut t = vec![0u8; len as usize];
+    let mut t = vec![0u8; len];
     loop {
         transcript.challenge_bytes(b"sampling randomness", t.as_mut_slice());
         let b = BigNumber::from_slice(t.as_slice());
@@ -248,7 +248,7 @@ lazy_static::lazy_static! {
 fn get_safe_primes_from_file() -> Vec<BigNumber> {
     let safe_primes: Vec<BigNumber> = crate::safe_primes_512::SAFE_PRIMES
         .iter()
-        .map(|s| BigNumber::from_slice(&hex::decode(s).unwrap()))
+        .map(|s| BigNumber::from_slice(hex::decode(s).unwrap()))
         .collect();
     safe_primes
 }

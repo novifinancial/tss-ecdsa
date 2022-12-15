@@ -246,8 +246,7 @@ fn sqrt(num: &BigNumber) -> BigNumber {
     // convert to a struct with a square root function first
     let num_bigint: BigInt = BigInt::from_bytes_be(Sign::Plus, &num.to_bytes());
     let sqrt = num_bigint.sqrt();
-    let sqrt_bignum: BigNumber = BigNumber::from_slice(&sqrt.to_bytes_be().1);
-    sqrt_bignum
+    BigNumber::from_slice(sqrt.to_bytes_be().1)
 }
 
 impl PiFacProof {
@@ -508,9 +507,9 @@ mod tests {
 
         let num = &p0 * &q0;
         let num_bigint: BigInt = BigInt::from_bytes_be(Sign::Plus, &num.to_bytes());
-        let num_bignum: BigNumber = BigNumber::from_slice(&num_bigint.to_bytes_be().1);
-        assert!(num == num_bignum);
-        assert!(num.to_string() == num_bigint.to_string());
+        let num_bignum: BigNumber = BigNumber::from_slice(num_bigint.to_bytes_be().1);
+        assert_eq!(num, num_bignum);
+        assert_eq!(num.to_string(), num_bigint.to_string());
         Ok(())
     }
 }
