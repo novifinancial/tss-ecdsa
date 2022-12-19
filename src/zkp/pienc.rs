@@ -216,10 +216,9 @@ mod tests {
     fn random_paillier_encryption_in_range_proof(k: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
-        let (p, q) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (decryption_key, p, q) = PaillierDecryptionKey::new(&mut rng)?;
+        let pk = decryption_key.encryption_key();
         let N = &p * &q;
-
-        let pk = PaillierDecryptionKey::from_primes(&p, &q)?.encryption_key();
 
         let (K, rho) = pk.encrypt(k);
         let setup_params = ZkSetupParameters::gen(&mut rng)?;

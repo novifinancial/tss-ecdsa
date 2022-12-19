@@ -426,13 +426,15 @@ impl PiFacProof {
 
 #[cfg(test)]
 mod tests {
+    use crate::paillier::prime_gen;
+
     use super::*;
     use rand::rngs::OsRng;
 
     fn random_no_small_factors_proof() -> Result<(PiFacInput, PiFacProof)> {
         let mut rng = OsRng;
 
-        let (p0, q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (p0, q0) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng);
         let N0 = &p0 * &q0;
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
@@ -456,7 +458,7 @@ mod tests {
 
         let incorrect_N = PiFacInput::new(
             &input.setup_params,
-            &crate::utils::get_prime_from_pool_insecure(&mut rng),
+            &prime_gen::get_prime_from_pool_insecure(&mut rng),
         );
         assert!(proof.verify(&incorrect_N).is_err());
 
@@ -464,7 +466,7 @@ mod tests {
             PiFacInput::new(&ZkSetupParameters::gen(&mut rng)?, &input.N0);
         assert!(proof.verify(&incorrect_startup_params).is_err());
 
-        let (not_p0, not_q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (not_p0, not_q0) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng);
         let incorrect_factors =
             PiFacProof::prove(&mut rng, &input, &PiFacSecret::new(&not_p0, &not_q0))?;
         assert!(incorrect_factors.verify(&input).is_err());
@@ -477,7 +479,7 @@ mod tests {
             PiFacProof::prove(&mut rng, &input, &PiFacSecret::new(&small_p, &small_q))?;
         assert!(small_proof.verify(&small_input).is_err());
 
-        let regular_sized_q = crate::utils::get_prime_from_pool_insecure(&mut rng);
+        let regular_sized_q = prime_gen::get_prime_from_pool_insecure(&mut rng);
         let mixed_input = PiFacInput::new(&setup_params, &(&small_p * &regular_sized_q));
         let mixed_proof = PiFacProof::prove(
             &mut rng,
@@ -503,7 +505,7 @@ mod tests {
     // didn't change in a way that would mess up the sqrt funtion
     fn test_bignum_bigint_byte_representation() -> Result<()> {
         let mut rng = OsRng;
-        let (p0, q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (p0, q0) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng);
 
         let num = &p0 * &q0;
         let num_bigint: BigInt = BigInt::from_bytes_be(Sign::Plus, &num.to_bytes());

@@ -44,6 +44,8 @@ pub enum InternalError {
     CouldNotConvertToScalar,
     /// Could not invert a Scaler
     CouldNotInvertScalar,
+    /// Reached the maximum allowed number of retries.
+    RetryFailed,
 }
 
 macro_rules! serialize {

@@ -238,10 +238,9 @@ mod tests {
     fn random_paillier_log_proof(x: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
 
-        let (p0, q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (decryption_key, p0, q0) = PaillierDecryptionKey::new(&mut rng)?;
+        let pk = decryption_key.encryption_key();
         let N0 = &p0 * &q0;
-
-        let pk = PaillierDecryptionKey::from_primes(&p0, &q0)?.encryption_key();
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 

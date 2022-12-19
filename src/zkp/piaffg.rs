@@ -342,14 +342,14 @@ mod tests {
 
     fn random_paillier_affg_proof(x: &BigNumber, y: &BigNumber) -> Result<()> {
         let mut rng = OsRng;
-        let (p0, q0) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+
+        let (decryption_key_0, p0, q0) = PaillierDecryptionKey::new(&mut rng)?;
         let N0 = &p0 * &q0;
+        let pk0 = decryption_key_0.encryption_key();
 
-        let (p1, q1) = crate::utils::get_prime_pair_from_pool_insecure(&mut rng);
+        let (decryption_key_1, p1, q1) = PaillierDecryptionKey::new(&mut rng)?;
         let N1 = &p1 * &q1;
-
-        let pk0 = PaillierDecryptionKey::from_primes(&p0, &q0)?.encryption_key();
-        let pk1 = PaillierDecryptionKey::from_primes(&p1, &q1)?.encryption_key();
+        let pk1 = decryption_key_1.encryption_key();
 
         let g = k256::ProjectivePoint::GENERATOR;
 

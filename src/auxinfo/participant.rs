@@ -507,17 +507,7 @@ impl AuxInfoParticipant {
 fn new_auxinfo<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
-    // As generating safe primes is very computationally expensive (> one minute per prime in github CI),
-    // we read precomputed ones from a file (but only in tests!)
-    #[cfg(not(test))]
-    let (p, q) = (
-        crate::utils::get_random_safe_prime_512(rng),
-        crate::utils::get_random_safe_prime_512(rng),
-    );
-    #[cfg(test)]
-    let (p, q) = crate::utils::get_prime_pair_from_pool_insecure(rng);
-
-    let decryption_key = PaillierDecryptionKey::from_primes(&p, &q)?;
+    let (decryption_key, p, q) = PaillierDecryptionKey::new(rng)?;
     let encryption_key = decryption_key.encryption_key();
     let params = ZkSetupParameters::gen_from_primes(rng, &(&p * &q), &p, &q)?;
 
