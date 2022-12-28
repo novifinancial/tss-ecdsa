@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-    name: test
+    name: ci
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -28,7 +28,7 @@ jobs:
         with:
           command: install
           args: --debug cargo-make
-      - name: Run Tests
+      - name: Run full CI (fmt, clippy, build, test, doctest, docs)
         run: cargo make ci
 
   deny-check:

@@ -635,6 +635,7 @@ mod tests {
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
+    #[ignore = "slow"]
     // This test is cheap. Try a bunch of message permutations to decrease error
     // likelihood
     fn test_run_keygen_protocol_many_times() -> Result<()> {
