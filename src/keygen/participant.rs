@@ -76,7 +76,8 @@ impl KeygenParticipant {
 
     /// Processes the incoming message given the storage from the protocol
     /// participant (containing auxinfo and keygen artifacts). Optionally
-    /// produces a [KeysharePrivate] and [KeysharePublic] once keygen is
+    /// produces a [`KeysharePrivate`](super::keyshare::KeySharePrivate) and
+    /// [`KeySharePublic`](super::keyshare::KeySharePublic) once keygen is
     /// complete.
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(

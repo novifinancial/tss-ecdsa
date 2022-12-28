@@ -60,7 +60,6 @@ mod parameters;
 mod participant;
 mod presign;
 mod protocol;
-mod safe_primes_512;
 mod storage;
 mod utils;
 mod zkp;
@@ -72,3 +71,8 @@ pub use protocol::{
 pub use utils::CurvePoint;
 
 use crate::presign::*;
+
+#[cfg(test)]
+mod safe_primes_1024;
+#[cfg(test)]
+mod safe_primes_512;

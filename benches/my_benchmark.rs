@@ -188,8 +188,8 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     run_benchmarks_for_given_size(c, 3);
-    run_benchmarks_for_given_size(c, 10);
-    run_benchmarks_for_given_size(c, 20);
+    run_benchmarks_for_given_size(c, 6);
+    run_benchmarks_for_given_size(c, 9);
 }
 
 criterion_group!(benches, criterion_benchmark);

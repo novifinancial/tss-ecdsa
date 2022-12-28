@@ -158,7 +158,7 @@ mod tests {
 
     fn random_ring_pedersen_proof() -> Result<(PiPrmInput, PiPrmProof)> {
         let mut rng = OsRng;
-        let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng);
+        let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let N = &p * &q;
         let phi_n = (p - 1) * (q - 1);
         let tau = BigNumber::from_rng(&N, &mut rng);
