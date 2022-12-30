@@ -313,13 +313,22 @@ fn extended_euclidean(a: &BigNumber, b: &BigNumber) -> Result<(BigNumber, BigNum
     let result = a.extended_gcd(b);
 
     if result.gcd != BigNumber::one() {
-        return Err(InternalError::NotCoprime);
+        Err(InternalError::NotCoprime)?
     }
 
     Ok((result.x, result.y))
 }
 
-/// Finds an x such that x = a1 (mod p) and x = a2 (mod q)
+/// Compute the Chinese remainder theorem with two congruences.
+///
+/// That is, find the unique `x` such that:
+/// - `x = a1 (mod p)`, and
+/// - `x = a2 (mod q)`.
+///
+/// This returns an error if:
+/// - `p` and `q` aren't co-prime;
+/// - `a1` is not in the range `[0, p)`;
+/// - `a2` is not in the range `[0, q)`.
 #[allow(clippy::many_single_char_names)]
 #[cfg_attr(feature = "flame_it", flame("PaillierBlumModulusProof"))]
 fn chinese_remainder_theorem(
@@ -328,6 +337,10 @@ fn chinese_remainder_theorem(
     p: &BigNumber,
     q: &BigNumber,
 ) -> Result<BigNumber> {
+    let zero = &BigNumber::zero();
+    if a1 >= p || a1 < zero || a2 >= q || a2 < zero {
+        Err(InternalError::InvalidIntegers)?
+    }
     let (z, w) = extended_euclidean(p, q)?;
     let x = a1 * w * q + a2 * z * p;
     Ok(bn_mod(&x, &(p * q)))
@@ -437,7 +450,17 @@ fn y_prime_combinations(
 mod tests {
     use super::*;
     use crate::paillier::prime_gen;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::{
+        rngs::{OsRng, StdRng},
+        Rng, RngCore, SeedableRng,
+    };
+
+    fn rng() -> StdRng {
+        let mut seeder = OsRng;
+        let seed = seeder.gen();
+        eprintln!("seed: {:?}", seed);
+        StdRng::from_seed(seed)
+    }
 
     #[test]
     fn test_jacobi() {
@@ -558,11 +581,14 @@ mod tests {
     }
 
     #[test]
-    fn test_chinese_remainder_theorem() {
-        let mut rng = OsRng;
+    fn chinese_remainder_theorem_works() {
+        let mut rng = rng();
+        // This guarantees p and q are coprime and not equal.
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
+        assert!(p != q);
 
         for _ in 0..100 {
+            // This method guarantees a1 and a2 are smaller than their moduli.
             let a1 = BigNumber::from_rng(&p, &mut rng);
             let a2 = BigNumber::from_rng(&q, &mut rng);
 
@@ -572,6 +598,96 @@ mod tests {
             assert_eq!(bn_mod(&x, &q), a2);
             assert!(x < &p * &q);
         }
+    }
+
+    #[test]
+    fn chinese_remainder_theorem_integers_must_be_in_range() {
+        let mut rng = rng();
+
+        // This guarantees p and q are coprime and not equal.
+        let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
+        assert!(p != q);
+
+        // a1 = p
+        let a1 = &p;
+        let a2 = BigNumber::from_rng(&q, &mut rng);
+        assert_eq!(
+            chinese_remainder_theorem(a1, &a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+
+        // a1 > p
+        let a1 = a1 + BigNumber::one();
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+
+        // a1 < 0
+        let a1 = -BigNumber::from_rng(&p, &mut rng);
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+
+        // a2 = q
+        let a1 = BigNumber::from_rng(&p, &mut rng);
+        let a2 = &q;
+        assert_eq!(
+            chinese_remainder_theorem(&a1, a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+
+        // a2 > q
+        let a2 = a2 + BigNumber::one();
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+
+        // a2 < 0
+        let a2 = -BigNumber::from_rng(&q, &mut rng);
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &p, &q),
+            Err(InternalError::InvalidIntegers)
+        );
+    }
+
+    #[test]
+    fn chinese_remainder_theorem_moduli_must_be_coprime() {
+        let mut rng = rng();
+
+        // This guarantees p and q are coprime and not equal.
+        let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
+        assert!(p != q);
+
+        // choose small a1, a2 so that they work for all our tests
+        let smaller_prime = if p < q { &p } else { &q };
+        let a1 = BigNumber::from_rng(smaller_prime, &mut rng);
+        let a2 = BigNumber::from_rng(smaller_prime, &mut rng);
+
+        // p = q
+        let bad_q = &p;
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a1, &p, bad_q),
+            Err(InternalError::NotCoprime)
+        );
+
+        // p = kq for some k
+        let mult_p = &q + &q;
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &mult_p, &q),
+            Err(InternalError::NotCoprime)
+        );
+
+        // q = kp for some k
+        let mult_q = &p + &p;
+        assert_eq!(
+            chinese_remainder_theorem(&a1, &a2, &p, &mult_q),
+            Err(InternalError::NotCoprime)
+        );
+
+        assert!(chinese_remainder_theorem(&a1, &a2, &p, &q).is_ok());
     }
 
     fn random_big_number() -> BigNumber {

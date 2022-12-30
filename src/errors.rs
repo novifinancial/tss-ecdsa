@@ -8,7 +8,6 @@
 
 //! A list of error types which are produced during an execution of the protocol
 use core::fmt::Debug;
-use displaydoc::Display;
 use thiserror::Error;
 
 use crate::paillier::PaillierError;
@@ -17,34 +16,38 @@ use crate::paillier::PaillierError;
 pub type Result<T> = std::result::Result<T, InternalError>;
 
 /// Represents an error in the manipulation of internal cryptographic data
-#[derive(Clone, Display, Eq, Hash, PartialEq, Error, Debug)]
+#[derive(Clone, Eq, PartialEq, Error, Debug)]
+#[allow(missing_docs)]
 pub enum InternalError {
-    /// Could not find square roots modulo n
-    NoSquareRoots,
-    /// Elements are not coprime
-    NotCoprime,
-    /**Could not find uniqueness for fourth roots combination in Paillier-Blum
-    modulus proof*/
-    NonUniqueFourthRootsCombination,
-    /// Could not invert a BigNumber
-    CouldNotInvertBigNumber,
-    /// Serialization Error
+    #[error("Serialization Error")]
     Serialization,
-    /// Could not successfully generate proof
+    #[error("Could not successfully generate proof")]
     CouldNotGenerateProof,
-    /// Failed to verify proof: `{0}`
+    #[error("Failed to verify proof: `{0}`")]
     FailedToVerifyProof(String),
-    /// `{0}`
+    #[error("Could not find square roots modulo n")]
+    NoSquareRoots,
+    #[error("Elements are not coprime")]
+    NotCoprime,
+    #[error("One or more of the integer inputs to the Chinese remainder theorem were outside the expected range")]
+    InvalidIntegers,
+    #[error(
+        "Could not find uniqueness for fourth roots combination in Paillier-Blum modulus proof"
+    )]
+    NonUniqueFourthRootsCombination,
+    #[error("Could not invert a BigNumber")]
+    CouldNotInvertBigNumber,
+    #[error("`{0}`")]
     BailError(String),
-    /// Represents some code assumption that was checked at runtime but failed to be true.
+    #[error("Represents some code assumption that was checked at runtime but failed to be true")]
     InternalInvariantFailed,
-    /// Paillier error: `{0}`
+    #[error("Paillier error: `{0}`")]
     PaillierError(PaillierError),
-    /// Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)
+    #[error("Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)")]
     CouldNotConvertToScalar,
-    /// Could not invert a Scaler
+    #[error("Could not invert a Scalar")]
     CouldNotInvertScalar,
-    /// Reached the maximum allowed number of retries.
+    #[error("Reached the maximum allowed number of retries")]
     RetryFailed,
 }
 
