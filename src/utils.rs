@@ -118,7 +118,7 @@ pub(crate) fn random_bn_in_range_min<R: RngCore + CryptoRng>(
     })
 }
 
-/// Produces a random value in [-n, ..., 0, ..., n]
+/// Derive a deterministic pseudorandom value in `[-n, n]` from the [`Transcript`].
 pub(crate) fn plusminus_bn_random_from_transcript(
     transcript: &mut Transcript,
     n: &BigNumber,
@@ -127,24 +127,29 @@ pub(crate) fn plusminus_bn_random_from_transcript(
     transcript.challenge_bytes(b"sampling negation bit", is_neg_byte.as_mut_slice());
     let is_neg: bool = is_neg_byte[0] & 1 == 1;
 
-    let b = positive_bn_random_from_transcript(transcript, n);
+    // The sampling method samples from the open interval, so add 1 to sample from the _closed_
+    // interval we want here.
+    let open_interval_max = n + 1;
+    let b = positive_bn_random_from_transcript(transcript, &open_interval_max);
     match is_neg {
         true => -b,
         false => b,
     }
 }
 
-/// Produces a random value in [0, ..., n]
+/// Derive a deterministic pseduorandom value in `[0, n)` from the [`Transcript`].
 pub(crate) fn positive_bn_random_from_transcript(
     transcript: &mut Transcript,
     n: &BigNumber,
 ) -> BigNumber {
     let len = n.to_bytes().len();
     let mut t = vec![0u8; len];
+    // To avoid sample bias, we can't take `t mod n`, because that would bias smaller numbers.
+    // Instead, we re-sample a new value (different because there's a new label in the transcript).
     loop {
         transcript.challenge_bytes(b"sampling randomness", t.as_mut_slice());
         let b = BigNumber::from_slice(t.as_slice());
-        if &b <= n {
+        if &b < n {
             return b;
         }
     }
