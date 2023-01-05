@@ -92,7 +92,7 @@ impl Proof for PiEncProof {
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
 
         let mu = random_bn_in_range(rng, ELL) * &input.setup_params.N;
-        let r = random_bn_in_z_star(rng, &input.N0);
+        let r = random_bn_in_z_star(rng, &input.N0)?;
         let gamma = random_bn_in_range(rng, ELL + EPSILON) * &input.setup_params.N;
 
         let N0_squared = &input.N0 * &input.N0;
@@ -220,7 +220,7 @@ mod tests {
         let pk = decryption_key.encryption_key();
         let N = &p * &q;
 
-        let (K, rho) = pk.encrypt(k);
+        let (K, rho) = pk.encrypt(k)?;
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 
         let input = PiEncInput {

@@ -10,8 +10,12 @@ use std::collections::HashMap;
 
 use crate::{
     auxinfo::info::AuxInfoPublic,
-    errors::{InternalError::CouldNotConvertToScalar, Result},
-    Message,
+    errors::{
+        InternalError::{CouldNotConvertToScalar, RetryFailed},
+        Result,
+    },
+    storage::{StorableType, Storage},
+    Identifier, Message, ParticipantIdentifier,
 };
 use generic_array::GenericArray;
 use k256::{
@@ -22,11 +26,6 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-use crate::{
-    storage::{StorableType, Storage},
-    Identifier, ParticipantIdentifier,
-};
 
 pub(crate) const CRYPTOGRAPHIC_RETRY_MAX: usize = 500usize;
 
@@ -151,15 +150,23 @@ pub(crate) fn positive_bn_random_from_transcript(
     }
 }
 
-/// Generate a random BigNumber in the range 1..N-1 (Z_N^*) (non-zero)
-pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
-    for _ in 0..CRYPTOGRAPHIC_RETRY_MAX {
-        let bn = BigNumber::from_rng(n, rng);
-        if bn != BigNumber::zero() {
-            return bn;
-        }
-    }
-    BigNumber::zero()
+/// Generate a random `BigNumber` that is in the multiplicative group of integers modulo `n`.
+///
+/// Note: In this application, `n` is typically the product of two primes. If the drawn element
+/// is not coprime with `n` and is not `0 mod n`, then the caller has accidentally stumbled upon
+/// the factorization of `n`!
+/// This is a security issue when `n` is someone else's Paillier modulus, but the chance of this
+/// happening is basically 0 and we drop the element anyway.
+pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    n: &BigNumber,
+) -> Result<BigNumber> {
+    // Try up to `CRYPTOGRAPHIC_RETRY_MAX` times to draw a non-zero element. This should virtually
+    // never error, though.
+    std::iter::repeat_with(|| BigNumber::from_rng(n, rng))
+        .take(CRYPTOGRAPHIC_RETRY_MAX)
+        .find(|result| result != &BigNumber::zero() && result.gcd(n) == BigNumber::one())
+        .ok_or(RetryFailed)
 }
 
 pub(crate) fn bn_to_scalar(x: &BigNumber) -> Result<k256::Scalar> {

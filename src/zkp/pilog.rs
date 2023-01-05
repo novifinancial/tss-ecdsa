@@ -97,7 +97,7 @@ impl Proof for PiLogProof {
         // Sample alpha from 2^{ELL + EPSILON}
         let alpha = random_bn_in_range(rng, ELL + EPSILON);
 
-        let r = random_bn_in_z_star(rng, &input.N0);
+        let r = random_bn_in_z_star(rng, &input.N0)?;
 
         // range = 2^{ELL} * N_hat
         let range_ell = (BigNumber::one() << ELL) * &input.setup_params.N;
@@ -245,7 +245,7 @@ mod tests {
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
         let X = CurvePoint(g.0 * utils::bn_to_scalar(x).unwrap());
-        let (C, rho) = pk.encrypt(x);
+        let (C, rho) = pk.encrypt(x)?;
 
         let setup_params = ZkSetupParameters::gen(&mut rng)?;
 

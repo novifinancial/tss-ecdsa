@@ -46,16 +46,16 @@ impl PaillierEncryptionKey {
         self.0.n()
     }
 
-    pub(crate) fn encrypt(&self, x: &BigNumber) -> (BigNumber, BigNumber) {
+    pub(crate) fn encrypt(&self, x: &BigNumber) -> Result<(BigNumber, BigNumber)> {
         let mut rng = rand::rngs::OsRng;
-        let nonce = random_bn_in_z_star(&mut rng, self.0.n());
+        let nonce = random_bn_in_z_star(&mut rng, self.0.n())?;
 
         let one = BigNumber::one();
         let base = one + self.n();
         let a = base.modpow(x, self.0.nn());
         let b = nonce.modpow(self.n(), self.0.nn());
         let c = a.modmul(&b, self.0.nn());
-        (c, nonce)
+        Ok((c, nonce))
     }
 }
 

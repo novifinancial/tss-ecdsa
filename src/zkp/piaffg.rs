@@ -123,8 +123,8 @@ impl Proof for PiAffgProof {
         // Sample beta from 2^{ELL_PRIME + EPSILON}.
         let beta = random_bn_in_range(rng, ELL_PRIME + EPSILON);
 
-        let r = random_bn_in_z_star(rng, &input.N0);
-        let r_y = random_bn_in_z_star(rng, &input.N1);
+        let r = random_bn_in_z_star(rng, &input.N0)?;
+        let r_y = random_bn_in_z_star(rng, &input.N1)?;
 
         // range_ell_eps = 2^{ELL + EPSILON} * N_hat
         let range_ell_eps = (BigNumber::one() << (ELL + EPSILON)) * &input.setup_params.N;
@@ -354,14 +354,14 @@ mod tests {
         let g = k256::ProjectivePoint::GENERATOR;
 
         let X = CurvePoint(g * utils::bn_to_scalar(x).unwrap());
-        let (Y, rho_y) = pk1.encrypt(y);
+        let (Y, rho_y) = pk1.encrypt(y)?;
 
         let N0_squared = &N0 * &N0;
         let C = crate::utils::random_positive_bn(&mut rng, &N0_squared);
 
         // Compute D = C^x * (1 + N0)^y rho^N0 (mod N0^2)
         let (D, rho) = {
-            let (D_intermediate, rho) = pk0.encrypt(y);
+            let (D_intermediate, rho) = pk0.encrypt(y)?;
             let D = modpow(&C, x, &N0_squared).modmul(&D_intermediate, &N0_squared);
             (D, rho)
         };
