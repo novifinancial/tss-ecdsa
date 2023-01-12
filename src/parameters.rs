@@ -59,7 +59,4 @@ pub(crate) const PRIME_BITS: usize = 1024;
 
 /// Number of repetitions required for statistical security in proofs that allow an adversary to
 /// guess a challenge value correctly with probability 1/2.
-///
-/// Historical documentation note without a verified source:
-/// > Needs to be a multiple of 8 for Pi_prm
-pub(crate) const SOUNDNESS_PARAMETER: usize = 8;
+pub(crate) const SOUNDNESS_PARAMETER: usize = 80;

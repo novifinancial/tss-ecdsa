@@ -13,19 +13,20 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 
 use super::Proof;
 
 // Soundness parameter lambda.
-// Must be a multiple of 8
 const LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
 
+/// Proof of ...
+///
+/// Each set of values must have length `LAMBDA`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PiPrmProof {
-    a_values: [BigNumber; LAMBDA],
-    e_values: [u8; LAMBDA],
-    z_values: [BigNumber; LAMBDA],
+    a_values: Vec<BigNumber>,
+    e_values: Vec<u8>,
+    z_values: Vec<BigNumber>,
 }
 
 #[derive(Serialize)]
@@ -70,42 +71,39 @@ impl Proof for PiPrmProof {
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
-        let mut secret_a_values = vec![];
-        let mut public_a_values = vec![];
+        let secret_a_values: Vec<_> =
+            std::iter::repeat_with(|| random_positive_bn(rng, &secret.phi_n))
+                .take(LAMBDA)
+                .collect();
 
-        for _ in 0..LAMBDA {
-            let a = random_positive_bn(rng, &secret.phi_n);
-            let a_commit = modpow(&input.t, &a, &input.N);
-
-            secret_a_values.push(a);
-            public_a_values.push(a_commit);
-        }
-        let a_values: [BigNumber; LAMBDA] = public_a_values
-            .try_into()
-            .map_err(|_| InternalError::Serialization)?;
+        let public_a_values = secret_a_values
+            .iter()
+            .map(|a| modpow(&input.t, a, &input.N))
+            .collect::<Vec<_>>();
 
         let mut transcript = Transcript::new(b"RingPedersenProof");
         transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"A_i values", &serialize!(&a_values)?);
+        transcript.append_message(b"A_i values", &serialize!(&public_a_values)?);
 
         let mut e_values = [0u8; LAMBDA];
         transcript.challenge_bytes(b"e_i values", e_values.as_mut_slice());
 
-        let mut z_values = vec![];
-        for i in 0..LAMBDA {
-            let z = match e_values[i] % 2 == 1 {
-                true => secret_a_values[i].modadd(&secret.lambda, &secret.phi_n),
-                false => secret_a_values[i].clone(),
-            };
-            z_values.push(z);
-        }
+        let z_values = e_values
+            .iter()
+            .zip(secret_a_values)
+            .map(|(e, a)| {
+                if e % 2 == 1 {
+                    a.modadd(&secret.lambda, &secret.phi_n)
+                } else {
+                    a
+                }
+            })
+            .collect();
 
         let proof = Self {
-            a_values,
-            e_values,
-            z_values: z_values
-                .try_into()
-                .map_err(|_| InternalError::Serialization)?,
+            a_values: public_a_values,
+            e_values: e_values.into(),
+            z_values,
         };
 
         Ok(proof)
@@ -129,20 +127,28 @@ impl Proof for PiPrmProof {
         transcript.challenge_bytes(b"e_i values", e_values.as_mut_slice());
 
         // Check Fiat-Shamir consistency
-        if e_values != self.e_values {
+        if e_values != self.e_values.as_slice() {
             return verify_err!("Fiat-Shamir consistency check failed");
         }
 
-        for (i, e) in e_values.iter().enumerate() {
-            // Verify that t^z = A * s^e (mod N)
-            let lhs = modpow(&input.t, &self.z_values[i], &input.N);
-            let rhs = match e % 2 == 1 {
-                true => self.a_values[i].modmul(&input.s, &input.N),
-                false => self.a_values[i].modadd(&BigNumber::zero(), &input.N),
-            };
-            if lhs != rhs {
-                return verify_err!("Verify that t^z = A * s^e (mod N) check failed");
-            }
+        let is_sound = e_values
+            .iter()
+            .zip(&self.z_values)
+            .zip(&self.a_values)
+            .map(|((e, z), a)| {
+                // Verify that t^z = A * s^e (mod N)
+                let lhs = modpow(&input.t, z, &input.N);
+                let rhs = if e % 2 == 1 {
+                    a.modmul(&input.s, &input.N)
+                } else {
+                    a.nmod(&input.N)
+                };
+                lhs == rhs
+            })
+            .all(|check| check);
+
+        if !is_sound {
+            return verify_err!("Verify that t^z = A * s^e (mod N) check failed");
         }
 
         Ok(())
