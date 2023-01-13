@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Bolt Labs Holdings, Inc
+// Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
 //
 // This source code is licensed under both the MIT license found in the
 // LICENSE-MIT file in the root directory of this source tree and the Apache
