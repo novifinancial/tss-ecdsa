@@ -367,8 +367,6 @@ impl PresignParticipant {
             auxinfo_identifier,
         )?;
 
-        assert_eq!(message.to(), self.id);
-
         // Find the keyshare corresponding to the "from" participant
         let keyshare_from = other_public_keyshares.get(&message.from()).ok_or_else(|| {
             bail_context!("Could not find corresponding public keyshare for participant in round 2")
@@ -472,12 +470,14 @@ impl PresignParticipant {
         // Since we are in round 2, it should certainly be the case that all
         // public auxinfo for other participants have been stored, since
         // this was a requirement to proceed for round 1.
-        assert!(has_collected_all_of_others(
+        if !has_collected_all_of_others(
             &self.other_participant_ids,
             main_storage,
             StorableType::AuxInfoPublic,
-            auxinfo_identifier
-        )?);
+            auxinfo_identifier,
+        )? {
+            return Err(InternalInvariantFailed);
+        }
 
         // Check if storage has all of the other participants' round 2 values (both
         // private and public), and start generating the messages for round 3 if so
