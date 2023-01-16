@@ -246,7 +246,14 @@ mod tests {
 
         let setup_params = ZkSetupParameters::gen(rng)?;
 
-        let input = PiLogInput::new(&setup_params, &crate::utils::k256_order(), &N0, &C, &X, &g);
+        let input = PiLogInput::new(
+            &setup_params,
+            &crate::utils::k256_order(),
+            &N0,
+            &C.0,
+            &X,
+            &g,
+        );
 
         let proof = PiLogProof::prove(rng, &input, &PiLogSecret::new(x, &rho))?;
 
