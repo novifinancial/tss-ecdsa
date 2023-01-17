@@ -50,7 +50,7 @@ impl PaillierEncryptionKey {
         &self,
         rng: &mut R,
         x: &BigNumber,
-    ) -> Result<(BigNumber, BigNumber)> {
+    ) -> Result<(PaillierCiphertext, BigNumber)> {
         let nonce = random_bn_in_z_star(rng, self.0.n())?;
 
         let one = BigNumber::one();
@@ -58,7 +58,7 @@ impl PaillierEncryptionKey {
         let a = base.modpow(x, self.0.nn());
         let b = nonce.modpow(self.n(), self.0.nn());
         let c = a.modmul(&b, self.0.nn());
-        Ok((c, nonce))
+        Ok((PaillierCiphertext(c), nonce))
     }
 }
 
@@ -66,8 +66,11 @@ impl PaillierEncryptionKey {
 pub(crate) struct PaillierDecryptionKey(libpaillier::DecryptionKey);
 
 impl PaillierDecryptionKey {
-    pub(crate) fn decrypt(&self, c: &BigNumber) -> Result<Vec<u8>> {
-        Ok(self.0.decrypt(c).ok_or(PaillierError::DecryptionFailed)?)
+    pub(crate) fn decrypt(&self, c: &PaillierCiphertext) -> Result<Vec<u8>> {
+        Ok(self
+            .0
+            .decrypt(&c.0)
+            .ok_or(PaillierError::DecryptionFailed)?)
     }
 
     /// Generate a new [`PaillierDecryptionKey`] and its factors.

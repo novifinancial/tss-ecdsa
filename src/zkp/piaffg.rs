@@ -363,13 +363,13 @@ mod tests {
         // Compute D = C^x * (1 + N0)^y rho^N0 (mod N0^2)
         let (D, rho) = {
             let (D_intermediate, rho) = pk0.encrypt(rng, y)?;
-            let D = modpow(&C, x, &N0_squared).modmul(&D_intermediate, &N0_squared);
+            let D = modpow(&C, x, &N0_squared).modmul(&D_intermediate.0, &N0_squared);
             (D, rho)
         };
 
         let setup_params = ZkSetupParameters::gen(rng)?;
 
-        let input = PiAffgInput::new(&setup_params, &CurvePoint(g), &N0, &N1, &C, &D, &Y, &X);
+        let input = PiAffgInput::new(&setup_params, &CurvePoint(g), &N0, &N1, &C, &D, &Y.0, &X);
         let proof = PiAffgProof::prove(rng, &input, &PiAffgSecret::new(x, y, &rho, &rho_y))?;
 
         proof.verify(&input)

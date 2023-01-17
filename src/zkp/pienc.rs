@@ -226,7 +226,7 @@ mod tests {
         let input = PiEncInput {
             setup_params,
             N0: N,
-            K: PaillierCiphertext(K),
+            K,
         };
 
         let proof = PiEncProof::prove(rng, &input, &PiEncSecret { k: k.clone(), rho })?;

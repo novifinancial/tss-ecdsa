@@ -953,7 +953,7 @@ impl PresignKeyShareAndInfo {
                 &crate::zkp::pienc::PiEncInput::new(
                     &aux_info_public.params,
                     self.aux_info_public.pk.n(),
-                    &PaillierCiphertext(K.clone()),
+                    &K.clone(),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
             )?;
@@ -964,8 +964,8 @@ impl PresignKeyShareAndInfo {
         }
 
         let r1_public_broadcast = RoundOnePublicBroadcast {
-            K: PaillierCiphertext(K.clone()),
-            G: PaillierCiphertext(G.clone()),
+            K: K.clone(),
+            G: G.clone(),
         };
 
         let r1_private = RoundOnePrivate {
@@ -973,8 +973,8 @@ impl PresignKeyShareAndInfo {
             rho,
             gamma,
             nu,
-            G: PaillierCiphertext(G),
-            K: PaillierCiphertext(K),
+            G,
+            K,
         };
 
         Ok((r1_private, r1_publics, r1_public_broadcast))
@@ -1009,7 +1009,7 @@ impl PresignKeyShareAndInfo {
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &sender_r1_priv.gamma)
                     .ok_or(PaillierError::InvalidOperation)?,
-                &beta_ciphertext,
+                &beta_ciphertext.0,
             )
             .ok_or(PaillierError::InvalidOperation)?;
 
@@ -1022,7 +1022,7 @@ impl PresignKeyShareAndInfo {
                     .0
                     .mul(&receiver_r1_pub_broadcast.K.0, &self.keyshare_private.x)
                     .ok_or(PaillierError::InvalidOperation)?,
-                &beta_hat_ciphertext,
+                &beta_hat_ciphertext.0,
             )
             .ok_or(PaillierError::InvalidOperation)?;
 
@@ -1043,7 +1043,7 @@ impl PresignKeyShareAndInfo {
                 self.aux_info_public.pk.n(),
                 &receiver_r1_pub_broadcast.K.0,
                 &D,
-                &F,
+                &F.0,
                 &Gamma,
             ),
             &PiAffgSecret::new(&sender_r1_priv.gamma, &beta, &s, &r),
@@ -1058,7 +1058,7 @@ impl PresignKeyShareAndInfo {
                 self.aux_info_public.pk.n(),
                 &receiver_r1_pub_broadcast.K.0,
                 &D_hat,
-                &F_hat,
+                &F_hat.0,
                 &self.keyshare_public.X,
             ),
             &PiAffgSecret::new(&self.keyshare_private.x, &beta_hat, &s_hat, &r_hat),
@@ -1082,8 +1082,8 @@ impl PresignKeyShareAndInfo {
             RoundTwoPublic {
                 D: PaillierCiphertext(D),
                 D_hat: PaillierCiphertext(D_hat),
-                F: PaillierCiphertext(F),
-                F_hat: PaillierCiphertext(F_hat),
+                F,
+                F_hat,
                 Gamma,
                 psi,
                 psi_hat,
@@ -1118,9 +1118,9 @@ impl PresignKeyShareAndInfo {
             let r2_pub_j = round_three_input.r2_public.clone();
             let r2_priv_j = round_three_input.r2_private.clone();
 
-            let alpha = BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D.0)?);
+            let alpha = BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D)?);
             let alpha_hat =
-                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat.0)?);
+                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat)?);
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
