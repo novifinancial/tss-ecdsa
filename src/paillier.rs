@@ -50,10 +50,10 @@ pub(crate) struct PaillierNonce(BigNumber);
 
 /// A masked version of [`PaillierNonce`] produced by [`PaillierEncryptionKey::mask()`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct MaskedNonce(pub(crate) BigNumber);
+pub(crate) struct MaskedNonce(BigNumber);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub(crate) struct PaillierCiphertext(pub(crate) BigNumber);
+pub(crate) struct PaillierCiphertext(BigNumber);
 
 impl PaillierCiphertext {
     /// Converts a [`PaillierCiphertext`] into its big-endian byte representation.
@@ -79,30 +79,56 @@ impl PaillierEncryptionKey {
         (self.0.n() - 1) / 2
     }
 
-    /// Encrypt a value `x` under the encryption key.
+    /// Encrypt plaintext `x` under the encryption key, returning the resulting [`PaillierCiphertext`]
+    /// and [`PaillierNonce`].
     ///
-    /// The input must be an element of the integers mod `N`, where `N` is the modulus defined by
-    /// the `PaillierEncryptionKey`. The expected format for these is the range
+    /// The plaintext must be an element of the integers mod `N`, where `N` is the modulus defined by
+    /// the [`PaillierEncryptionKey`]. The expected format for these is the range
     /// `[-N/2, N/2]`. Encryption will fail if `x` is outside this range.
     pub(crate) fn encrypt<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
         x: &BigNumber,
     ) -> Result<(PaillierCiphertext, PaillierNonce)> {
+        // Note: the check that `x` is in the proper range happens in `encrypt_with_nonce`.
+        let nonce = random_bn_in_z_star(rng, self.n())?;
+        let c = self.encrypt_with_nonce(x, &MaskedNonce(nonce.clone()))?;
+        Ok((c, PaillierNonce(nonce)))
+    }
+
+    /// Encrypt plaintext `x` using the provided [`MaskedNonce`], producing a [`PaillierCiphertext`].
+    ///
+    /// The plaintext must be an element of the integers mod `N`, where `N` is the modulus defined by
+    /// the [`PaillierEncryptionKey`]. The expected format for these is the range
+    /// `[-N/2, N/2]`. Encryption will fail if `x` is outside this range.
+    pub(crate) fn encrypt_with_nonce(
+        &self,
+        x: &BigNumber,
+        nonce: &MaskedNonce,
+    ) -> Result<PaillierCiphertext> {
         if &self.half_n() < x || x < &-self.half_n() {
             Err(PaillierError::EncryptionFailed {
                 x: x.clone(),
                 n: self.n().clone(),
             })?
         }
-        let nonce = random_bn_in_z_star(rng, self.n())?;
-
         let one = BigNumber::one();
         let base = one + self.n();
         let a = base.modpow(x, self.0.nn());
-        let b = nonce.modpow(self.n(), self.0.nn());
+        let b = nonce.0.modpow(self.n(), self.0.nn());
         let c = a.modmul(&b, self.0.nn());
-        Ok((PaillierCiphertext(c), PaillierNonce(nonce)))
+        Ok(PaillierCiphertext(c))
+    }
+
+    #[cfg(test)]
+    /// Generate a random ciphertext for testing purposes.
+    pub(crate) fn random_ciphertext(
+        &self,
+        rng: &mut (impl RngCore + CryptoRng),
+    ) -> PaillierCiphertext {
+        use crate::utils::random_positive_bn;
+
+        PaillierCiphertext(random_positive_bn(rng, self.0.nn()))
     }
 
     /// Masks a [`PaillierNonce`] `nonce` with another [`PaillierNonce`] `mask` and exponent `e`
