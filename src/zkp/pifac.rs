@@ -12,7 +12,7 @@ use super::Proof;
 use crate::{
     errors::*,
     parameters::{ELL, EPSILON},
-    utils::{k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_plusminus},
+    utils::{k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus_scaled},
     zkp::setup::ZkSetupParameters,
 };
 use libpaillier::unknown_order::BigNumber;
@@ -75,31 +75,22 @@ impl Proof for PiFacProof {
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
-        // N_hat = input.setup_params.N
-        let sqrt_N0 = sqrt(&input.N0);
-        // 2^{ELL}
-        let two_ell = BigNumber::one() << (ELL);
-        // 2^{ELL + EPSILON}
-        let two_ell_eps = BigNumber::one() << (ELL + EPSILON);
-        // 2^{ELL + EPSILON} * sqrt(N_0)
-        let ab_range = &sqrt_N0 * &two_ell_eps;
-        // 2^{ELL} * N_hat
-        let uv_range = &two_ell * &input.setup_params.N;
-        // 2^{ELL} * N_0 * N_hat
-        let s_range = &two_ell * &input.N0 * &input.setup_params.N;
-        // 2^{ELL + EPSILON} * N_0 * N_hat
-        let r_range = &two_ell_eps * &input.N0 * &input.setup_params.N;
-        // 2^{ELL + EPSILON} * N_hat
-        let xy_range = &two_ell_eps * &input.setup_params.N;
+        // Small names for scaling factors in our ranges
+        let sqrt_N0 = &sqrt(&input.N0);
+        let n_hat = &input.setup_params.N;
 
-        let alpha = random_bn_plusminus(rng, &ab_range);
-        let beta = random_bn_plusminus(rng, &ab_range);
-        let mu = random_bn_plusminus(rng, &uv_range);
-        let nu = random_bn_plusminus(rng, &uv_range);
-        let sigma = random_bn_plusminus(rng, &s_range);
-        let r = random_bn_plusminus(rng, &r_range);
-        let x = random_bn_plusminus(rng, &xy_range);
-        let y = random_bn_plusminus(rng, &xy_range);
+        let alpha = random_plusminus_scaled(rng, ELL + EPSILON, sqrt_N0);
+        let beta = random_plusminus_scaled(rng, ELL + EPSILON, sqrt_N0);
+
+        let mu = random_plusminus_scaled(rng, ELL, n_hat);
+        let nu = random_plusminus_scaled(rng, ELL, n_hat);
+
+        let modulus_product = &input.N0 * n_hat;
+        let sigma = random_plusminus_scaled(rng, ELL, &modulus_product);
+        let r = random_plusminus_scaled(rng, ELL + EPSILON, &modulus_product);
+
+        let x = random_plusminus_scaled(rng, ELL + EPSILON, n_hat);
+        let y = random_plusminus_scaled(rng, ELL + EPSILON, n_hat);
 
         let P = {
             let a = modpow(&input.setup_params.s, &secret.p, &input.setup_params.N);
@@ -256,31 +247,22 @@ impl PiFacProof {
         secret: &PiFacSecret,
         transcript: &mut Transcript,
     ) -> Result<Self> {
-        // N_hat = input.setup_params.N
-        let sqrt_N0 = sqrt(&input.N0);
-        // 2^{ELL}
-        let two_ell = BigNumber::one() << (ELL);
-        // 2^{ELL + EPSILON}
-        let two_ell_eps = BigNumber::one() << (ELL + EPSILON);
-        // 2^{ELL + EPSILON} * sqrt(N_0)
-        let ab_range = &sqrt_N0 * &two_ell_eps;
-        // 2^{ELL} * N_hat
-        let uv_range = &two_ell * &input.setup_params.N;
-        // 2^{ELL} * N_0 * N_hat
-        let s_range = &two_ell * &input.N0 * &input.setup_params.N;
-        // 2^{ELL + EPSILON} * N_0 * N_hat
-        let r_range = &two_ell_eps * &input.N0 * &input.setup_params.N;
-        // 2^{ELL + EPSILON} * N_hat
-        let xy_range = &two_ell_eps * &input.setup_params.N;
+        // Small names for scaling factors in our ranges
+        let sqrt_N0 = &sqrt(&input.N0);
+        let n_hat = &input.setup_params.N;
 
-        let alpha = random_bn_plusminus(rng, &ab_range);
-        let beta = random_bn_plusminus(rng, &ab_range);
-        let mu = random_bn_plusminus(rng, &uv_range);
-        let nu = random_bn_plusminus(rng, &uv_range);
-        let sigma = random_bn_plusminus(rng, &s_range);
-        let r = random_bn_plusminus(rng, &r_range);
-        let x = random_bn_plusminus(rng, &xy_range);
-        let y = random_bn_plusminus(rng, &xy_range);
+        let alpha = random_plusminus_scaled(rng, ELL + EPSILON, sqrt_N0);
+        let beta = random_plusminus_scaled(rng, ELL + EPSILON, sqrt_N0);
+
+        let mu = random_plusminus_scaled(rng, ELL, n_hat);
+        let nu = random_plusminus_scaled(rng, ELL, n_hat);
+
+        let modulus_product = &input.N0 * n_hat;
+        let sigma = random_plusminus_scaled(rng, ELL, &modulus_product);
+        let r = random_plusminus_scaled(rng, ELL + EPSILON, &modulus_product);
+
+        let x = random_plusminus_scaled(rng, ELL + EPSILON, n_hat);
+        let y = random_plusminus_scaled(rng, ELL + EPSILON, n_hat);
 
         let P = {
             let a = modpow(&input.setup_params.s, &secret.p, &input.setup_params.N);

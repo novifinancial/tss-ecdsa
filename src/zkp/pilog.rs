@@ -15,7 +15,8 @@ use crate::{
     paillier::{PaillierCiphertext, PaillierEncryptionKey},
     parameters::{ELL, EPSILON},
     utils::{
-        self, modpow, plusminus_bn_random_from_transcript, random_bn_in_range, random_bn_plusminus,
+        self, modpow, plusminus_bn_random_from_transcript, random_plusminus_by_size,
+        random_plusminus_scaled,
     },
     zkp::setup::ZkSetupParameters,
 };
@@ -96,16 +97,14 @@ impl Proof for PiLogProof {
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
-        // Sample alpha from 2^{ELL + EPSILON}
-        let alpha = random_bn_in_range(rng, ELL + EPSILON);
+        // Sample alpha from plus/minus 2^{ELL + EPSILON}
+        let alpha = random_plusminus_by_size(rng, ELL + EPSILON);
 
         // range = 2^{ELL} * N_hat
-        let range_ell = (BigNumber::one() << ELL) * &input.setup_params.N;
-        let mu = random_bn_plusminus(rng, &range_ell);
+        let mu = random_plusminus_scaled(rng, ELL, &input.setup_params.N);
 
         // range = 2^{ELL+EPSILON} * N_hat
-        let range_ell_epsilon = (BigNumber::one() << (ELL + EPSILON)) * &input.setup_params.N;
-        let gamma = random_bn_plusminus(rng, &range_ell_epsilon);
+        let gamma = random_plusminus_scaled(rng, ELL + EPSILON, &input.setup_params.N);
 
         let S = {
             let a = modpow(&input.setup_params.s, &secret.x, &input.setup_params.N);
@@ -230,7 +229,7 @@ impl Proof for PiLogProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
+    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_log_proof<R: RngCore + CryptoRng>(rng: &mut R, x: &BigNumber) -> Result<()> {
         let (decryption_key, _, _) = PaillierDecryptionKey::new(rng)?;
@@ -254,8 +253,9 @@ mod tests {
     fn test_paillier_log_proof() -> Result<()> {
         let mut rng = crate::utils::get_test_rng();
 
-        let x_small = random_bn_in_range(&mut rng, ELL);
-        let x_large = random_bn_in_range_min(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let x_small = random_plusminus_by_size(&mut rng, ELL);
+        let x_large =
+            random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
 
         // Sampling x in the range 2^ELL should always succeed
         random_paillier_log_proof(&mut rng, &x_small)?;

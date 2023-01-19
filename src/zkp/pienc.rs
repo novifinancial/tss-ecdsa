@@ -16,7 +16,10 @@ use crate::{
     errors::*,
     paillier::{PaillierCiphertext, PaillierEncryptionKey, PaillierNonce},
     parameters::{ELL, EPSILON},
-    utils::{k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_in_range},
+    utils::{
+        k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus_by_size,
+        random_plusminus_scaled,
+    },
     zkp::setup::ZkSetupParameters,
 };
 use libpaillier::unknown_order::BigNumber;
@@ -87,10 +90,10 @@ impl Proof for PiEncProof {
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
         // Sample alpha from +- 2^{ELL + EPSILON}
-        let alpha = random_bn_in_range(rng, ELL + EPSILON);
+        let alpha = random_plusminus_by_size(rng, ELL + EPSILON);
 
-        let mu = random_bn_in_range(rng, ELL) * &input.setup_params.N;
-        let gamma = random_bn_in_range(rng, ELL + EPSILON) * &input.setup_params.N;
+        let mu = random_plusminus_scaled(rng, ELL, &input.setup_params.N);
+        let gamma = random_plusminus_scaled(rng, ELL + EPSILON, &input.setup_params.N);
 
         let N0 = input.pk.n();
 
@@ -205,7 +208,7 @@ impl Proof for PiEncProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
+    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_encryption_in_range_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -237,8 +240,9 @@ mod tests {
     fn test_paillier_encryption_in_range_proof() -> Result<()> {
         let mut rng = crate::utils::get_test_rng();
 
-        let k_small = random_bn_in_range(&mut rng, ELL);
-        let k_large = random_bn_in_range_min(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let k_small = random_plusminus_by_size(&mut rng, ELL);
+        let k_large =
+            random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
 
         // Sampling k in the range 2^ELL should always succeed
         random_paillier_encryption_in_range_proof(&mut rng, &k_small)?;

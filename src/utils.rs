@@ -67,20 +67,23 @@ impl<'de> Deserialize<'de> for CurvePoint {
     }
 }
 
-/// Computes a^e (mod n)
+/// Compute a^e (mod n).
 #[cfg_attr(feature = "flame_it", flame("utils"))]
 pub(crate) fn modpow(a: &BigNumber, e: &BigNumber, n: &BigNumber) -> BigNumber {
     a.modpow(e, n)
 }
 
-/// Generate a random BigNumber in the range 0, ..., n
+/// Sample a number uniformly at random from the range [0, n). This can be used for sampling from
+/// a prime field `F_p` or the integers modulo `n` (for any `n`).
 pub(crate) fn random_positive_bn<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
     BigNumber::from_rng(n, rng)
 }
 
-/// Generate a random BigNumber in the range -n, ..., n
-pub(crate) fn random_bn_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
-    let val = BigNumber::from_rng(n, rng);
+/// Sample a number uniformly at random from the range [-n, n].
+pub(crate) fn random_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNumber) -> BigNumber {
+    // `from_rng()` samples the _open_ interval, so add 1 to get the closed interval for `n`
+    let open_interval_max: BigNumber = n + 1;
+    let val = BigNumber::from_rng(&open_interval_max, rng);
     let is_positive: bool = rng.gen();
     match is_positive {
         true => val,
@@ -88,29 +91,36 @@ pub(crate) fn random_bn_plusminus<R: RngCore + CryptoRng>(rng: &mut R, n: &BigNu
     }
 }
 
-/// Generate a random BigNumber in the range -2^n, ..., 0, ..., 2^n
-pub(crate) fn random_bn_in_range<R: RngCore + CryptoRng>(rng: &mut R, n: usize) -> BigNumber {
-    let val = BigNumber::from_rng(&(BigNumber::one() << n), rng);
-    let is_positive: bool = rng.gen();
-    match is_positive {
-        true => val,
-        false => -val,
-    }
+/// Sample a number uniformly at random from the range `[-2^n, 2^n]`.
+pub(crate) fn random_plusminus_by_size<R: RngCore + CryptoRng>(rng: &mut R, n: usize) -> BigNumber {
+    let range = BigNumber::one() << n;
+    random_plusminus(rng, &range)
 }
 
-/// Generate a random BigNumber x in the range -2^n, ..., 0, ..., 2^n, where |x|
-/// > 2^min_bound
-#[cfg(test)]
-pub(crate) fn random_bn_in_range_min<R: RngCore + CryptoRng>(
+/// Sample a number uniformly at random from the range `[-scale * 2^n, scale * 2^n]`.
+pub(crate) fn random_plusminus_scaled<R: RngCore + CryptoRng>(
     rng: &mut R,
     n: usize,
-    min_bound: usize,
+    scale: &BigNumber,
+) -> BigNumber {
+    let range = (BigNumber::one() << n) * scale;
+    random_plusminus(rng, &range)
+}
+
+/// Sample a number uniformly at random from the range `[-2^max, -2^min] U [2^min, 2^max]`.
+#[cfg(test)]
+pub(crate) fn random_plusminus_by_size_with_minimum<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    max: usize,
+    min: usize,
 ) -> crate::errors::Result<BigNumber> {
-    if min_bound >= n {
+    if min >= max {
         return bail!("min_bound needs to be less than n");
     }
-    let min_bound_bn = (BigNumber::one() << n) - (BigNumber::one() << min_bound);
-    let val = BigNumber::from_rng(&(min_bound_bn + (BigNumber::one() << min_bound)), rng);
+    // Sample from [0, 2^max - 2^min], then add 2^min to bump into correct range.
+    let min_bound_bn = (BigNumber::one() << max) - (BigNumber::one() << min);
+    let val = BigNumber::from_rng(&min_bound_bn, rng) + (BigNumber::one() << min);
+
     let is_positive: bool = rng.gen();
     Ok(match is_positive {
         true => val,
@@ -215,7 +225,7 @@ mod tests {
 
         let mut rng = get_test_rng();
         for _ in 0..1000 {
-            let bn = random_bn_in_range(&mut rng, num_bytes * 8);
+            let bn = random_plusminus_by_size(&mut rng, num_bytes * 8);
             let len = bn.to_bytes().len();
             if max_len < len {
                 max_len = len;

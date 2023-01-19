@@ -31,7 +31,7 @@ use crate::{
     storage::{StorableType, Storage},
     utils::{
         bn_to_scalar, get_other_participants_public_auxinfo, has_collected_all_of_others,
-        k256_order, process_ready_message, random_bn_in_range, random_positive_bn,
+        k256_order, process_ready_message, random_plusminus_by_size, random_positive_bn,
     },
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
@@ -982,8 +982,8 @@ impl PresignKeyShareAndInfo {
         // Picking betas as elements of [+- 2^384] here is like sampling them from the
         // distribution [1, 2^256], which is akin to 2^{ell + epsilon} where ell
         // = epsilon = 384. Note that we need q/2^epsilon to be negligible.
-        let beta = random_bn_in_range(rng, ELL);
-        let beta_hat = random_bn_in_range(rng, ELL);
+        let beta = random_plusminus_by_size(rng, ELL);
+        let beta_hat = random_plusminus_by_size(rng, ELL);
 
         let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(rng, &beta)?;
         let (beta_hat_ciphertext, s_hat) = receiver_aux_info.pk.encrypt(rng, &beta_hat)?;

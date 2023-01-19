@@ -18,8 +18,8 @@ use crate::{
     paillier::{PaillierCiphertext, PaillierEncryptionKey},
     parameters::{ELL, ELL_PRIME, EPSILON},
     utils::{
-        self, k256_order, modpow, plusminus_bn_random_from_transcript, random_bn_in_range,
-        random_bn_plusminus,
+        self, k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus,
+        random_plusminus_by_size,
     },
     zkp::setup::ZkSetupParameters,
 };
@@ -128,19 +128,19 @@ impl Proof for PiAffgProof {
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
         // Sample alpha from 2^{ELL + EPSILON}
-        let alpha = random_bn_in_range(rng, ELL + EPSILON);
+        let alpha = random_plusminus_by_size(rng, ELL + EPSILON);
         // Sample beta from 2^{ELL_PRIME + EPSILON}.
-        let beta = random_bn_in_range(rng, ELL_PRIME + EPSILON);
+        let beta = random_plusminus_by_size(rng, ELL_PRIME + EPSILON);
 
         // range_ell_eps = 2^{ELL + EPSILON} * N_hat
         let range_ell_eps = (BigNumber::one() << (ELL + EPSILON)) * &input.setup_params.N;
-        let gamma = random_bn_plusminus(rng, &range_ell_eps);
-        let delta = random_bn_plusminus(rng, &range_ell_eps);
+        let gamma = random_plusminus(rng, &range_ell_eps);
+        let delta = random_plusminus(rng, &range_ell_eps);
 
         // range_ell = 2^ELL * N_hat
         let range_ell = (BigNumber::one() << ELL) * &input.setup_params.N;
-        let m = random_bn_plusminus(rng, &range_ell);
-        let mu = random_bn_plusminus(rng, &range_ell);
+        let m = random_plusminus(rng, &range_ell);
+        let mu = random_plusminus(rng, &range_ell);
 
         let N0_squared = input.pk0.n() * input.pk0.n();
 
@@ -339,7 +339,7 @@ impl Proof for PiAffgProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_bn_in_range_min};
+    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -380,11 +380,15 @@ mod tests {
     fn test_paillier_affg_proof() -> Result<()> {
         let mut rng = crate::utils::get_test_rng();
 
-        let x_small = random_bn_in_range(&mut rng, ELL);
-        let y_small = random_bn_in_range(&mut rng, ELL_PRIME);
-        let x_large = random_bn_in_range_min(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
-        let y_large =
-            random_bn_in_range_min(&mut rng, ELL_PRIME + EPSILON + 1, ELL_PRIME + EPSILON)?;
+        let x_small = random_plusminus_by_size(&mut rng, ELL);
+        let y_small = random_plusminus_by_size(&mut rng, ELL_PRIME);
+        let x_large =
+            random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let y_large = random_plusminus_by_size_with_minimum(
+            &mut rng,
+            ELL_PRIME + EPSILON + 1,
+            ELL_PRIME + EPSILON,
+        )?;
 
         // Sampling x in 2^ELL and y in 2^{ELL_PRIME} should always succeed
         random_paillier_affg_proof(&mut rng, &x_small, &y_small)?;
