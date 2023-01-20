@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Paillier-specific errors
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PaillierError {
     #[error("Failed to create a Paillier decryption key from inputs")]
     CouldNotCreateKey,
@@ -22,6 +22,10 @@ pub enum PaillierError {
     InvalidOperation,
     #[error("The attemped decryption of a Pailler ciphertext failed")]
     DecryptionFailed,
+    #[error(
+        "Cannot encrypt out-of-range value; x must be in the group of integers mod n. Got {x}, {n}"
+    )]
+    EncryptionFailed { x: BigNumber, n: BigNumber },
 
     #[cfg(test)]
     #[error("No pre-generated primes with size {0}")]
@@ -38,7 +42,7 @@ impl From<PaillierError> for InternalError {
 /// A nonce generated as part of [`PaillierEncryptionKey::encrypt()`].
 /// A nonce is drawn from the multiplicative group of integers modulo `n`, where `n`
 /// is the modulus from the associated [`PaillierEncryptionKey`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct PaillierNonce(BigNumber);
 
 impl PaillierNonce {
@@ -66,12 +70,32 @@ impl PaillierEncryptionKey {
         self.0.n()
     }
 
+    /// Compute the floor of `n/2` for the modulus `n`.
+    ///
+    /// Since `n` is the product of two primes, it'll be odd, so we
+    /// can do this to make sure we get the actual floor. BigNumber division doesn't document
+    /// whether it truncates or rounds for integer division.
+    fn half_n(&self) -> BigNumber {
+        (self.0.n() - 1) / 2
+    }
+
+    /// Encrypt a value `x` under the encryption key.
+    ///
+    /// The input must be an element of the integers mod `N`, where `N` is the modulus defined by
+    /// the `PaillierEncryptionKey`. The expected format for these is the range
+    /// `[-N/2, N/2]`. Encryption will fail if `x` is outside this range.
     pub(crate) fn encrypt<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
         x: &BigNumber,
     ) -> Result<(PaillierCiphertext, PaillierNonce)> {
-        let nonce = random_bn_in_z_star(rng, self.0.n())?;
+        if &self.half_n() < x || x < &-self.half_n() {
+            Err(PaillierError::EncryptionFailed {
+                x: x.clone(),
+                n: self.n().clone(),
+            })?
+        }
+        let nonce = random_bn_in_z_star(rng, self.n())?;
 
         let one = BigNumber::one();
         let base = one + self.n();
@@ -86,11 +110,30 @@ impl PaillierEncryptionKey {
 pub(crate) struct PaillierDecryptionKey(libpaillier::DecryptionKey);
 
 impl PaillierDecryptionKey {
-    pub(crate) fn decrypt(&self, c: &PaillierCiphertext) -> Result<Vec<u8>> {
-        Ok(self
+    /// Compute the floor of `n/2` for the modulus `n`.
+    ///
+    /// Since `n` is the product of two primes, it'll be odd, so we
+    /// can do this to make sure we get the actual floor. BigNumber division doesn't document
+    /// whether it truncates or rounds for integer division.
+    fn half_n(&self) -> BigNumber {
+        (self.0.n() - 1) / 2
+    }
+
+    pub(crate) fn decrypt(&self, c: &PaillierCiphertext) -> Result<BigNumber> {
+        let mut x = self
             .0
             .decrypt(&c.0)
-            .ok_or(PaillierError::DecryptionFailed)?)
+            .ok_or(PaillierError::DecryptionFailed)
+            .map(BigNumber::from_slice)?;
+
+        // Switch representation into `[-N/2, N/2]`. libpaillier (and indeed, `BigNumber`s
+        // in general) returns values represented in the canonical range `[0, N)`. A single
+        // subtraction will land us in the expected range for this application.
+        if x > self.half_n() {
+            x -= self.0.n();
+        }
+
+        Ok(x)
     }
 
     /// Generate a new [`PaillierDecryptionKey`] and its factors.
@@ -228,15 +271,20 @@ pub(crate) mod prime_gen {
 #[cfg(test)]
 mod test {
     use libpaillier::unknown_order::BigNumber;
+    use rand::{CryptoRng, Rng, RngCore};
 
-    use crate::parameters::PRIME_BITS;
+    use crate::{
+        paillier::PaillierCiphertext,
+        parameters::PRIME_BITS,
+        utils::{get_test_rng, random_plusminus},
+    };
 
-    use super::{prime_gen, PaillierDecryptionKey};
+    use super::{prime_gen, PaillierDecryptionKey, PaillierEncryptionKey};
 
     #[test]
     #[ignore = "sometimes slow in debug mode"]
     fn get_random_safe_prime_512_produces_safe_primes() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = get_test_rng();
         let p = prime_gen::get_random_safe_prime(&mut rng);
         assert!(p.is_prime());
         let q: BigNumber = (p - 1) / 2;
@@ -245,7 +293,7 @@ mod test {
 
     #[test]
     fn paillier_keygen_produces_good_primes() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = get_test_rng();
 
         let (decryption_key, p, q) = PaillierDecryptionKey::new(&mut rng).unwrap();
 
@@ -271,5 +319,152 @@ mod test {
         for _ in 0..100 {
             paillier_keygen_produces_good_primes()
         }
+    }
+
+    /// Draw a random message from the expected range [-N/2, N/2].
+    fn random_message(
+        rng: &mut (impl CryptoRng + RngCore),
+        encryption_key: &PaillierEncryptionKey,
+    ) -> BigNumber {
+        random_plusminus(rng, &encryption_key.half_n())
+    }
+
+    #[test]
+    fn paillier_encryption_works() {
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        for _ in 0..100 {
+            let msg = random_message(&mut rng, &encryption_key);
+
+            // Encryption on good inputs doesn't fail
+            let enc_result = encryption_key.encrypt(&mut rng, &msg);
+            assert!(enc_result.is_ok());
+            let (ciphertext, _) = enc_result.unwrap();
+
+            // Decryption on good inputs doesn't fail
+            let dec_result = decryption_key.decrypt(&ciphertext);
+            assert!(dec_result.is_ok());
+            let decrypted_msg = dec_result.unwrap();
+
+            // Decrypted message matches original
+            assert_eq!(msg, decrypted_msg);
+        }
+    }
+
+    #[test]
+    fn pailler_decryption_requires_correct_key() {
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        let msg = random_message(&mut rng, &encryption_key);
+        let (ciphertext, _) = encryption_key.encrypt(&mut rng, &msg).unwrap();
+
+        let (wrong_decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let decryption_result = wrong_decryption_key.decrypt(&ciphertext);
+        assert!(decryption_result.is_err() || decryption_result.unwrap() != msg);
+
+        assert_eq!(decryption_key.decrypt(&ciphertext).unwrap(), msg);
+    }
+
+    #[test]
+    fn pailler_encryption_requires_input_in_Zn() {
+        // Specifically, the integers mod N must be in the interval around 0.
+        // So, inputs in the range [-N/2, N/2] are acceptable, but not [0, N).
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        // In the acceptable range, 0 is allowed
+        assert!(encryption_key.encrypt(&mut rng, &BigNumber::zero()).is_ok());
+
+        // Test a number in between N/2 and N (both + and -)
+        let too_big = (encryption_key.n() / 3) * 2;
+        assert!(encryption_key.encrypt(&mut rng, &too_big).is_err());
+        assert!(encryption_key.encrypt(&mut rng, &-too_big).is_err());
+
+        // Test a number bigger than N (both + and -)
+        let way_too_big = encryption_key.n() + 1;
+        assert!(encryption_key.encrypt(&mut rng, &way_too_big).is_err());
+        assert!(encryption_key.encrypt(&mut rng, &-way_too_big).is_err());
+
+        // Test the boundary cases
+        let barely_in = encryption_key.half_n();
+        assert!(encryption_key.encrypt(&mut rng, &barely_in).is_ok());
+        assert!(encryption_key.encrypt(&mut rng, &-barely_in).is_ok());
+
+        let barely_out = encryption_key.half_n() + 1;
+        assert!(encryption_key.encrypt(&mut rng, &barely_out).is_err());
+        assert!(encryption_key.encrypt(&mut rng, &-barely_out).is_err());
+    }
+
+    #[test]
+    fn paillier_encryption_generates_unique_nonces() {
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        let nonces = std::iter::repeat_with(|| {
+            let msg = random_message(&mut rng, &encryption_key);
+            let (_, nonce) = encryption_key.encrypt(&mut rng, &msg).unwrap();
+            nonce
+        })
+        .take(100)
+        .collect::<Vec<_>>();
+
+        // This slow, ugly uniqueness check is because `BigNumber` doesn't implement `Hash`, so we
+        // can't use any reasonable, built-in solutions
+        for nonce in nonces.clone() {
+            assert_eq!(1, nonces.iter().filter(|n| n == &&nonce).count())
+        }
+    }
+
+    #[test]
+    fn paillier_ciphertext_bits_matter() {
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        let msg = random_message(&mut rng, &encryption_key);
+        let (ciphertext, _) = encryption_key.encrypt(&mut rng, &msg).unwrap();
+
+        let mut bytes = ciphertext.0.to_bytes();
+
+        for i in 0..bytes.len() {
+            let original_byte = bytes[i];
+
+            // Mangle the ith byte by replacing it with something random
+            loop {
+                bytes[i] = rng.gen();
+                if bytes[i] != original_byte {
+                    break;
+                }
+            }
+
+            // Re-serialize the ciphertext
+            let mangled_ciphertext = PaillierCiphertext(BigNumber::from_slice(&bytes));
+
+            // Decryption should fail.
+            let decryption_result = decryption_key.decrypt(&mangled_ciphertext);
+            assert!(decryption_result.is_err() || decryption_result.clone().unwrap() != msg);
+
+            // Put the ith byte back
+            bytes[i] = original_byte;
+        }
+
+        // When it's all reconstructed, decryption should work
+        let correct_ciphertext = PaillierCiphertext(BigNumber::from_slice(&bytes));
+        assert_eq!(decryption_key.decrypt(&correct_ciphertext).unwrap(), msg);
+    }
+
+    #[test]
+    fn half_ns_match() {
+        let mut rng = get_test_rng();
+        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let encryption_key = decryption_key.encryption_key();
+
+        assert_eq!(encryption_key.half_n(), decryption_key.half_n());
     }
 }

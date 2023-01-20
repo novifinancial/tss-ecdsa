@@ -1108,9 +1108,8 @@ impl PresignKeyShareAndInfo {
             let r2_pub_j = round_three_input.r2_public.clone();
             let r2_priv_j = round_three_input.r2_private.clone();
 
-            let alpha = BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D)?);
-            let alpha_hat =
-                BigNumber::from_slice(self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat)?);
+            let alpha = self.aux_info_private.sk.decrypt(&r2_pub_j.D)?;
+            let alpha_hat = self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat)?;
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
