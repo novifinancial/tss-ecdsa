@@ -8,6 +8,8 @@
 
 //! Implements the ZKP from Figure 16 of <https://eprint.iacr.org/2021/060.pdf>
 
+use std::cmp::Ordering;
+
 use super::Proof;
 use crate::{errors::*, utils::*};
 use libpaillier::unknown_order::BigNumber;
@@ -113,8 +115,22 @@ impl Proof for PiModProof {
 
     #[cfg_attr(feature = "flame_it", flame("PaillierBlumModulusProof"))]
     fn verify(&self, input: &Self::CommonInput) -> Result<()> {
-        // Verify that N is an odd composite number
+        // Verify that proof is sound -- it must have exactly LAMBDA elements
+        match self.elements.len().cmp(&LAMBDA) {
+            Ordering::Less => verify_err!(format!(
+                "PiMod proof is not sound: has {} elements, expected {}",
+                self.elements.len(),
+                LAMBDA,
+            ))?,
+            Ordering::Greater => verify_err!(format!(
+                "PiMod proof has too many elements: has {}, expected {}",
+                self.elements.len(),
+                LAMBDA
+            ))?,
+            Ordering::Equal => {}
+        }
 
+        // Verify that N is an odd composite number
         if &input.N % BigNumber::from(2u64) == BigNumber::zero() {
             return verify_err!("N is even");
         }
@@ -207,8 +223,22 @@ impl PiModProof {
         input: &PiModInput,
         transcript: &mut Transcript,
     ) -> Result<()> {
-        // Verify that N is an odd composite number
+        // Verify that proof is sound -- it must have exactly LAMBDA elements
+        match self.elements.len().cmp(&LAMBDA) {
+            Ordering::Less => verify_err!(format!(
+                "PiMod proof is not sound: has {} elements, expected {}",
+                self.elements.len(),
+                LAMBDA,
+            ))?,
+            Ordering::Greater => verify_err!(format!(
+                "PiMod proof has too many elements: has {}, expected {}",
+                self.elements.len(),
+                LAMBDA
+            ))?,
+            Ordering::Equal => {}
+        }
 
+        // Verify that N is an odd composite number
         if &input.N % BigNumber::from(2u64) == BigNumber::zero() {
             return verify_err!("N is even");
         }
@@ -449,7 +479,10 @@ fn y_prime_combinations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paillier::prime_gen;
+    use crate::{
+        paillier::{prime_gen, DecryptionKey},
+        parameters::SOUNDNESS_PARAMETER,
+    };
 
     #[test]
     fn test_jacobi() {
@@ -726,5 +759,97 @@ mod tests {
         let buf = bincode::serialize(&pbmp).unwrap();
         let roundtrip_pbmp: PiModProof = bincode::deserialize(&buf).unwrap();
         assert_eq!(buf, bincode::serialize(&roundtrip_pbmp).unwrap());
+    }
+
+    fn random_pimod_proof<R: CryptoRng + RngCore>(rng: &mut R) -> (PiModProof, PiModInput) {
+        let (decryption_key, p, q) = DecryptionKey::new(rng).unwrap();
+
+        let input = PiModInput {
+            N: decryption_key.encryption_key().n().to_owned(),
+        };
+        let secret = PiModSecret { p, q };
+
+        let proof_result = PiModProof::prove(rng, &input, &secret);
+        assert!(proof_result.is_ok());
+        (proof_result.unwrap(), input)
+    }
+
+    fn random_pimod_proof_with_transcript<R: CryptoRng + RngCore>(
+        rng: &mut R,
+        transcript: &Transcript,
+    ) -> (PiModProof, PiModInput) {
+        let (decryption_key, p, q) = DecryptionKey::new(rng).unwrap();
+
+        let input = PiModInput {
+            N: decryption_key.encryption_key().n().to_owned(),
+        };
+        let secret = PiModSecret { p, q };
+
+        let proof_result =
+            PiModProof::prove_with_transcript(rng, &input, &secret, &mut transcript.clone());
+        assert!(proof_result.is_ok());
+        (proof_result.unwrap(), input)
+    }
+
+    #[test]
+    fn pimod_proof_verifies() {
+        let mut rng = get_test_rng();
+        let (proof, input) = random_pimod_proof(&mut rng);
+        assert!(proof.verify(&input).is_ok());
+
+        let mut transcript = Transcript::new(b"PiMod Test Proof");
+        let (proof, input) = random_pimod_proof_with_transcript(&mut rng, &transcript);
+        assert!(proof
+            .verify_with_transcript(&input, &mut transcript)
+            .is_ok());
+    }
+
+    #[test]
+    fn pimod_proof_requires_correct_number_of_elements_for_soundness() {
+        let mut rng = get_test_rng();
+
+        let transform = |proof: &PiModProof| {
+            // Remove iterations from the proof
+            let short_proof = PiModProof {
+                w: proof.w.clone(),
+                elements: proof.elements[..SOUNDNESS_PARAMETER - 1].into(),
+            };
+
+            // Add elements to the proof. Not sure if this is actually a problem, but we'll
+            // stick to the spec for now.
+            let long_proof = PiModProof {
+                w: proof.w.clone(),
+                elements: proof
+                    .elements
+                    .clone()
+                    .into_iter()
+                    .cycle()
+                    .take(SOUNDNESS_PARAMETER * 2)
+                    .collect(),
+            };
+
+            (short_proof, long_proof)
+        };
+
+        // Make un-sound a proof generated with the standard API
+        let (proof, input) = random_pimod_proof(&mut rng);
+        let (short_proof, long_proof) = transform(&proof);
+        assert!(short_proof.verify(&input).is_err());
+        assert!(long_proof.verify(&input).is_err());
+        assert!(proof.verify(&input).is_ok());
+
+        // Make un-sound a proof generated with the transcript-included API
+        let mut transcript = Transcript::new(b"PiMod Soundness Proof");
+        let (proof, input) = random_pimod_proof_with_transcript(&mut rng, &transcript);
+        let (short_proof, long_proof) = transform(&proof);
+        assert!(short_proof
+            .verify_with_transcript(&input, &mut transcript.clone())
+            .is_err());
+        assert!(long_proof
+            .verify_with_transcript(&input, &mut transcript.clone())
+            .is_err());
+        assert!(proof
+            .verify_with_transcript(&input, &mut transcript)
+            .is_ok());
     }
 }
