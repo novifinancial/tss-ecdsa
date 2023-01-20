@@ -940,7 +940,7 @@ impl PresignKeyShareAndInfo {
                 rng,
                 &crate::zkp::pienc::PiEncInput::new(
                     &aux_info_public.params,
-                    self.aux_info_public.pk.n(),
+                    &self.aux_info_public.pk,
                     &K.clone(),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
@@ -1029,8 +1029,8 @@ impl PresignKeyShareAndInfo {
             &PiAffgInput::new(
                 &receiver_aux_info.params,
                 &g,
-                receiver_aux_info.pk.n(),
-                self.aux_info_public.pk.n(),
+                &receiver_aux_info.pk,
+                &self.aux_info_public.pk,
                 &receiver_r1_pub_broadcast.K,
                 &D,
                 &F,
@@ -1044,8 +1044,8 @@ impl PresignKeyShareAndInfo {
             &PiAffgInput::new(
                 &receiver_aux_info.params,
                 &g,
-                receiver_aux_info.pk.n(),
-                self.aux_info_public.pk.n(),
+                &receiver_aux_info.pk,
+                &self.aux_info_public.pk,
                 &receiver_r1_pub_broadcast.K,
                 &D_hat,
                 &F_hat,
@@ -1059,7 +1059,7 @@ impl PresignKeyShareAndInfo {
             &PiLogInput::new(
                 &receiver_aux_info.params,
                 &k256_order(),
-                self.aux_info_public.pk.n(),
+                &self.aux_info_public.pk,
                 &sender_r1_priv.G,
                 &Gamma,
                 &g,
@@ -1130,7 +1130,7 @@ impl PresignKeyShareAndInfo {
                 &PiLogInput::new(
                     &round_three_input.auxinfo_public.params,
                     &order,
-                    self.aux_info_public.pk.n(),
+                    &self.aux_info_public.pk,
                     &sender_r1_priv.K,
                     &Delta,
                     &Gamma,

@@ -57,8 +57,8 @@ impl Public {
         let psi_input = PiAffgInput::new(
             &receiver_auxinfo_public.params,
             &g,
-            receiver_auxinfo_public.pk.n(),
-            sender_auxinfo_public.pk.n(),
+            &receiver_auxinfo_public.pk,
+            &sender_auxinfo_public.pk,
             &receiver_r1_private.K,
             &self.D,
             &self.F,
@@ -70,8 +70,8 @@ impl Public {
         let psi_hat_input = PiAffgInput::new(
             &receiver_auxinfo_public.params,
             &g,
-            receiver_auxinfo_public.pk.n(),
-            sender_auxinfo_public.pk.n(),
+            &receiver_auxinfo_public.pk,
+            &sender_auxinfo_public.pk,
             &receiver_r1_private.K,
             &self.D_hat,
             &self.F_hat,
@@ -83,7 +83,7 @@ impl Public {
         let psi_prime_input = PiLogInput::new(
             &receiver_auxinfo_public.params,
             &k256_order(),
-            sender_auxinfo_public.pk.n(),
+            &sender_auxinfo_public.pk,
             &sender_r1_public_broadcast.G,
             &self.Gamma,
             &g,
