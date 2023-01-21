@@ -49,6 +49,8 @@ pub enum InternalError {
     CouldNotInvertScalar,
     #[error("Reached the maximum allowed number of retries")]
     RetryFailed,
+    #[error("This Participant was given a message intended for somebody else")]
+    WrongMessageRecipient,
 }
 
 macro_rules! serialize {

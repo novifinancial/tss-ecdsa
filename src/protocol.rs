@@ -10,7 +10,7 @@
 
 use crate::{
     auxinfo::participant::AuxInfoParticipant,
-    errors::Result,
+    errors::{InternalError, Result},
     keygen::{keyshare::KeySharePublic, participant::KeygenParticipant},
     messages::{AuxinfoMessageType, KeygenMessageType, MessageType},
     presign::{participant::PresignParticipant, record::PresignRecord},
@@ -99,6 +99,9 @@ impl Participant {
         message: &Message,
         rng: &mut R,
     ) -> Result<Vec<Message>> {
+        if message.to() != self.id {
+            return Err(InternalError::WrongMessageRecipient);
+        }
         match message.message_type() {
             MessageType::Auxinfo(_) => {
                 self.auxinfo_participant
