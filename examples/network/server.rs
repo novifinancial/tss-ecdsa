@@ -97,7 +97,7 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
     for message in messages {
         let port = ids_to_ports.get(&message.to()).unwrap();
         let request = client
-            .post(format!("http://127.0.0.1:{}/process/", port))
+            .post(format!("http://127.0.0.1:{port}/process/"))
             .body(bincode::serialize(&message).unwrap())
             .send();
 

@@ -53,7 +53,7 @@ pub(crate) async fn client_main(args: Args) -> Result {
         let config_bytes = bincode::serialize(&init_config)?;
 
         let _res = client
-            .post(format!("http://127.0.0.1:{}/initialize/", port))
+            .post(format!("http://127.0.0.1:{port}/initialize/"))
             .body(config_bytes)
             .send()
             .await?;
@@ -73,7 +73,7 @@ pub(crate) async fn invoke_auxinfo(
         tasks.push(tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .post(format!("http://127.0.0.1:{}/auxinfo/", port))
+                .post(format!("http://127.0.0.1:{port}/auxinfo/"))
                 .json(&AuxInfoParameters { auxinfo_identifier })
                 .send();
             request.await
@@ -89,7 +89,7 @@ pub(crate) async fn invoke_auxinfo(
     }
     finish_progress_bar(
         pb,
-        format!("Generated AuxInfo with identifier: {}", auxinfo_identifier),
+        format!("Generated AuxInfo with identifier: {auxinfo_identifier}"),
     );
 
     Ok(())
@@ -106,7 +106,7 @@ pub(crate) async fn invoke_keygen(
         tasks.push(tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .post(format!("http://127.0.0.1:{}/keygen/", port))
+                .post(format!("http://127.0.0.1:{port}/keygen/"))
                 .json(&KeygenParameters {
                     auxinfo_identifier,
                     keygen_identifier,
@@ -155,7 +155,7 @@ pub(crate) async fn invoke_presign(
         tasks.push(tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .post(format!("http://127.0.0.1:{}/presign/", port))
+                .post(format!("http://127.0.0.1:{port}/presign/"))
                 .json(&PresignParameters {
                     auxinfo_identifier,
                     keygen_identifier,
@@ -175,10 +175,7 @@ pub(crate) async fn invoke_presign(
     }
     finish_progress_bar(
         pb,
-        format!(
-            "Generated presignature with identifier: {}",
-            presign_identifier
-        ),
+        format!("Generated presignature with identifier: {presign_identifier}"),
     );
 
     Ok(())
@@ -196,7 +193,7 @@ pub(crate) async fn invoke_sign_from_presign(
         tasks.push(tokio::spawn(async move {
             let client = reqwest::Client::new();
             let request = client
-                .post(format!("http://127.0.0.1:{}/sign_from_presign/", port))
+                .post(format!("http://127.0.0.1:{port}/sign_from_presign/"))
                 .json(&SignFromPresignParameters {
                     presign_identifier,
                     input: input_clone,
