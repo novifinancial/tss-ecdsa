@@ -52,7 +52,7 @@ pub(crate) struct PaillierNonce(BigNumber);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct MaskedNonce(pub(crate) BigNumber);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct PaillierCiphertext(pub(crate) BigNumber);
 
 impl PaillierCiphertext {
@@ -63,7 +63,7 @@ impl PaillierCiphertext {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct PaillierEncryptionKey(pub(crate) libpaillier::EncryptionKey);
+pub(crate) struct PaillierEncryptionKey(libpaillier::EncryptionKey);
 
 impl PaillierEncryptionKey {
     pub(crate) fn n(&self) -> &BigNumber {
@@ -118,6 +118,29 @@ impl PaillierEncryptionKey {
         e: &BigNumber,
     ) -> MaskedNonce {
         MaskedNonce(mask.0.modmul(&modpow(&nonce.0, e, self.n()), self.n()))
+    }
+
+    /// Computes `a ⊙ c1 ⊕ c2` homomorphically over [`PaillierCiphertext`]s `c1` and `c2.
+    pub(crate) fn multiply_and_add(
+        &self,
+        a: &BigNumber,
+        c1: &PaillierCiphertext,
+        c2: &PaillierCiphertext,
+    ) -> Result<PaillierCiphertext> {
+        // Ciphertext addition is modular multiplication, and ciphertext multiplication
+        // is modular exponentiation.
+        //
+        // Note: We do not use `libpaillier::EncryptionKey::mul`
+        // because it does a check that `0 < a < N`. However, the `a` passed in is usually
+        // in the range `-N/2 <= a <= N/2` so could fail that check. Instead, we do the
+        // operations directly and manually do the range check.
+        if &self.half_n() < a || a < &-self.half_n() {
+            Err(PaillierError::InvalidOperation)?
+        } else {
+            Ok(PaillierCiphertext(
+                modpow(&c1.0, a, self.0.nn()).modmul(&c2.0, self.0.nn()),
+            ))
+        }
     }
 }
 
