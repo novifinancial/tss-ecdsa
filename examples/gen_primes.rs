@@ -25,7 +25,7 @@ fn main() {
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
-        .open(format!("safe_primes_{}.txt", PRIME_BITS))
+        .open(format!("safe_primes_{PRIME_BITS}.txt"))
         .unwrap();
 
     let iterations = 1000;
@@ -35,10 +35,7 @@ fn main() {
     let mut prev = Instant::now();
     let mut total_seconds = Duration::new(0, 0);
 
-    println!(
-        "Generating {} {}-bit safe primes...",
-        iterations, PRIME_BITS
-    );
+    println!("Generating {iterations} {PRIME_BITS}-bit safe primes...");
     for i in 0..iterations {
         // Generate a safe prime
         let prime_result = ossl_safe_prime();
@@ -53,7 +50,7 @@ fn main() {
         let encoded_prime = match prime_result {
             Ok(prime) => prime,
             Err(e) => {
-                println!("error generating prime: {}", e);
+                println!("error generating prime: {e}");
                 failures += 1;
                 continue;
             }
@@ -61,7 +58,7 @@ fn main() {
 
         match check_prime(encoded_prime) {
             Some(prime_hex) => {
-                writeln!(file, "\"{}\",", prime_hex).unwrap();
+                writeln!(file, "\"{prime_hex}\",").unwrap();
                 file.flush().unwrap();
             }
             None => {
@@ -84,7 +81,7 @@ fn main() {
         "Total average prime generation time: {} seconds",
         total_seconds.as_secs() as f64 / (iterations as f64 + 1.0)
     );
-    println!("Failures: {} / {}", failures, iterations);
+    println!("Failures: {failures} / {iterations}");
 }
 
 /// Use the default BigNumber crate to generate a safe prime and encode as a hex string.

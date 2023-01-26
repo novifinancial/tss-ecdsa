@@ -340,6 +340,6 @@ use rand::{
 pub(crate) fn get_test_rng() -> StdRng {
     let mut seeder = OsRng;
     let seed = seeder.gen();
-    eprintln!("seed: {:?}", seed);
+    eprintln!("seed: {seed:?}");
     StdRng::from_seed(seed)
 }
