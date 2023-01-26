@@ -14,7 +14,7 @@
 use super::Proof;
 use crate::{
     errors::*,
-    paillier::{PaillierCiphertext, PaillierEncryptionKey, PaillierNonce},
+    paillier::{MaskedNonce, PaillierCiphertext, PaillierEncryptionKey, PaillierNonce},
     parameters::{ELL, EPSILON},
     utils::{
         k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus_by_size,
@@ -35,7 +35,7 @@ pub(crate) struct PiEncProof {
     C: BigNumber,
     e: BigNumber,
     z1: BigNumber,
-    z2: BigNumber,
+    z2: MaskedNonce,
     z3: BigNumber,
 }
 
@@ -95,8 +95,6 @@ impl Proof for PiEncProof {
         let mu = random_plusminus_scaled(rng, ELL, &input.setup_params.N);
         let gamma = random_plusminus_scaled(rng, ELL + EPSILON, &input.setup_params.N);
 
-        let N0 = input.pk.n();
-
         let S = {
             let a = modpow(&input.setup_params.s, &secret.k, &input.setup_params.N);
             let b = modpow(&input.setup_params.t, &mu, &input.setup_params.N);
@@ -125,7 +123,7 @@ impl Proof for PiEncProof {
         );
 
         let z1 = &alpha + &e * &secret.k;
-        let z2 = r.inner().modmul(&modpow(secret.rho.inner(), &e, N0), N0);
+        let z2 = input.pk.mask(&secret.rho, &r, &e);
         let z3 = gamma + &e * mu;
 
         let proof = Self {
@@ -169,7 +167,7 @@ impl Proof for PiEncProof {
 
         let eq_check_1 = {
             let a = modpow(&(&BigNumber::one() + N0), &self.z1, &N0_squared);
-            let b = modpow(&self.z2, N0, &N0_squared);
+            let b = modpow(&self.z2.0, N0, &N0_squared);
             let lhs = a.modmul(&b, &N0_squared);
             let rhs = self
                 .A
