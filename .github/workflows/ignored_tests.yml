@@ -18,8 +18,14 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          # Set Rust version here!
+          toolchain: 1.67.0
           override: true
 
+      # Caching for Rust files. Must be called after installing Rust toolchain.
+      # See https://github.com/Swatinem/rust-cache for more information.
+      - name: Set Up Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Run ignored tests (only!)
-        run: cargo test -- --ignored
+        run: cargo test --release -- --ignored

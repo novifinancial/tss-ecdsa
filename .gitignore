@@ -4,3 +4,4 @@ src/.DS_Store
 /target
 Cargo.lock
 **/*.rs.bk
+.idea

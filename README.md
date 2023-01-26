@@ -10,6 +10,9 @@ Specifically, we are targeting the three-round presigning protocol (with quadrat
 
 This codebase is generally intended to be network-agnostic. Programs take messages as input and potentially output some outgoing messages in response. The relaying of these messages is assumed to happen externally. However, a proof-of-concept example of such networking code can be found in examples/network.
 
+## Project Dependencies
+This project relies on the `libpaillier` Rust crate using the GMP backend. GMP should be available during build-time.  
+
 ##  What's Implemented
 
 ### Key Generation (Figure 5 of CGGMP20)
