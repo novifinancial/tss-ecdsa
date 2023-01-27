@@ -6,10 +6,24 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-//! Implements the ZKP from Figure 14 of <https://eprint.iacr.org/2021/060.pdf>
+//! Implements a zero-knowledge proof of knowledge that the plaintext of a Pailler ciphertext is
+//! in a given range.
 //!
-//! Proves that the plaintext of the Paillier ciphertext K_i lies within the
-//! range [1, 2^{ELL+EPSILON}]
+//! More precisely, this module includes methods to create and verify a non-interactive
+//! zero-knowledge proof of knowledge of the plaintext value of a Paillier ciphertext and that
+//! the value is in a desired range.
+//! The proof is defined in Figure 14 of CGGMP[^cite].
+//!
+//! In this application, the acceptable range for the plaintext is fixed according to our
+//! [parameters](crate::parameters). The plaintext value must be in the range `[-2^ℓ, 2^ℓ]`,
+//! where `ℓ` is [`parameters::ELL`](crate::parameters::ELL).
+//!
+//! This implementation uses a standard Fiat-Shamir transformation to make the proof
+//! non-interactive.
+//!
+//! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos Makriyannis, and Udi Peled.
+//! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
+//! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
 
 use super::Proof;
 use crate::{
@@ -27,51 +41,68 @@ use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 
+/// Proof of knowledge of the plaintext value of a ciphertext, where the value is within a desired
+/// range.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PiEncProof {
-    alpha: BigNumber,
-    S: BigNumber,
-    A: Ciphertext,
-    C: BigNumber,
-    e: BigNumber,
-    z1: BigNumber,
-    z2: MaskedNonce,
-    z3: BigNumber,
+    /// Mask for the plaintext value of the ciphertext (`alpha` in the paper).
+    plaintext_mask: BigNumber,
+    /// Commitment to the plaintext value of the ciphertext (`S` in the paper).
+    plaintext_commit: BigNumber,
+    /// Masking ciphertext (`A` in the paper).
+    /// This is the encryption of `plaintext_mask`.
+    ciphertext_mask: Ciphertext,
+    /// Commitment to the plaintext mask (`C` in the paper).
+    plaintext_mask_commit: BigNumber,
+    /// Fiat-Shamir challenge (`e` in the paper).
+    challenge: BigNumber,
+    /// Response binding the plaintext value of the ciphertext and its mask (`z1` in the paper).
+    plaintext_response: BigNumber,
+    /// Response binding the nonce from the original ciphertext and its mask (`z2` in the paper).
+    nonce_response: MaskedNonce,
+    /// Response binding the commitment randomness used in the two commitments (`z3` in the paper).
+    randomness_response: BigNumber,
 }
 
+/// Common input and setup parameters known to both the prover and verifier.
 #[derive(Serialize)]
 pub(crate) struct PiEncInput {
+    /// The verifier's commitment parameters (`(N^hat, s, t)` in the paper).
     setup_params: ZkSetupParameters,
-    /// This corresponds to `N_0` in the paper.
-    pk: EncryptionKey,
-    K: Ciphertext,
+    /// The prover's encryption key (`N_0` in the paper).
+    encryption_key: EncryptionKey,
+    /// Ciphertext about which we are proving properties (`K` in the paper).
+    ciphertext: Ciphertext,
 }
 
 impl PiEncInput {
+    /// Generate public input for proving or verifying a [`PiEncProof`] about `ciphertext`.
     pub(crate) fn new(
-        setup_params: &ZkSetupParameters,
-        pk: &EncryptionKey,
-        K: &Ciphertext,
+        verifer_setup_params: ZkSetupParameters,
+        prover_encryption_key: EncryptionKey,
+        ciphertext: Ciphertext,
     ) -> Self {
         Self {
-            setup_params: setup_params.clone(),
-            pk: pk.clone(),
-            K: K.clone(),
+            setup_params: verifer_setup_params,
+            encryption_key: prover_encryption_key,
+            ciphertext,
         }
     }
 }
 
+/// The prover's secret knowledge: the in-range plaintext value of the ciphertext and its
+/// corresponding nonce.
 pub(crate) struct PiEncSecret {
-    k: BigNumber,
-    rho: Nonce,
+    plaintext: BigNumber,
+    nonce: Nonce,
 }
 
 impl PiEncSecret {
-    pub(crate) fn new(k: &BigNumber, rho: &Nonce) -> Self {
-        Self {
-            k: k.clone(),
-            rho: rho.clone(),
-        }
+    /// Collect secret knowledge for proving a `PiEncProof`.
+    ///
+    /// The `(plaintext, nonce)` tuple here corresponds to the values `(k, rho)` in the paper.
+    pub(crate) fn new(plaintext: BigNumber, nonce: Nonce) -> Self {
+        Self { plaintext, nonce }
     }
 }
 
@@ -79,62 +110,71 @@ impl Proof for PiEncProof {
     type CommonInput = PiEncInput;
     type ProverSecret = PiEncSecret;
 
-    // FIXME: could benefit from a batch API since this is done multiple times where
-    // the only differing parameter is setup_params
-    //
-    // N0: modulus, K: Paillier ciphertext
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
     fn prove<R: RngCore + CryptoRng>(
         rng: &mut R,
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
     ) -> Result<Self> {
-        // Sample alpha from +- 2^{ELL + EPSILON}
-        let alpha = random_plusminus_by_size(rng, ELL + EPSILON);
+        let PiEncInput {
+            setup_params,
+            encryption_key,
+            ..
+        } = input;
 
-        let mu = random_plusminus_scaled(rng, ELL, &input.setup_params.N);
-        let gamma = random_plusminus_scaled(rng, ELL + EPSILON, &input.setup_params.N);
+        // Sample a mask for the plaintext (aka `alpha`)
+        let plaintext_mask = random_plusminus_by_size(rng, ELL + EPSILON);
 
-        let S = {
-            let a = modpow(&input.setup_params.s, &secret.k, &input.setup_params.N);
-            let b = modpow(&input.setup_params.t, &mu, &input.setup_params.N);
-            a.modmul(&b, &input.setup_params.N)
+        // Sample commitment randomness for plaintext and ciphertext mask, respectively
+        let mu = random_plusminus_scaled(rng, ELL, &setup_params.N);
+        let gamma = random_plusminus_scaled(rng, ELL + EPSILON, &setup_params.N);
+
+        // Commit to the plaintext! (aka `S`)
+        let plaintext_commit = {
+            let a = modpow(&setup_params.s, &secret.plaintext, &setup_params.N);
+            let b = modpow(&setup_params.t, &mu, &setup_params.N);
+            a.modmul(&b, &setup_params.N)
         };
-        let (A, r) = input.pk.encrypt(rng, &alpha)?;
-        let C = {
-            let a = modpow(&input.setup_params.s, &alpha, &input.setup_params.N);
-            let b = modpow(&input.setup_params.t, &gamma, &input.setup_params.N);
-            a.modmul(&b, &input.setup_params.N)
+
+        // Encrypt the mask for the plaintext (aka `A, r`)
+        let (ciphertext_mask, nonce_mask) = encryption_key.encrypt(rng, &plaintext_mask)?;
+
+        // Commit to the mask for the plaintext (aka `C`)
+        let plaintext_mask_commit = {
+            let a = modpow(&setup_params.s, &plaintext_mask, &setup_params.N);
+            let b = modpow(&setup_params.t, &gamma, &setup_params.N);
+            a.modmul(&b, &setup_params.N)
         };
 
+        // Fill out the transcript with our fresh commitments...
         let mut transcript = Transcript::new(b"PiEncProof");
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"alpha", &alpha.to_bytes());
-        transcript.append_message(
-            b"(S, A, C)",
-            &[S.to_bytes(), A.to_bytes(), C.to_bytes()].concat(),
-        );
-
-        // Verifier is supposed to sample from e in +- q (where q is the group order),
-        // we sample from [0, 2*q] instead
-        let e = plusminus_bn_random_from_transcript(
+        Self::fill_out_transcript(
             &mut transcript,
-            &(BigNumber::from(2) * &k256_order()),
-        );
+            input,
+            &plaintext_mask,
+            &plaintext_commit,
+            &ciphertext_mask,
+            &plaintext_mask_commit,
+        )?;
 
-        let z1 = &alpha + &e * &secret.k;
-        let z2 = input.pk.mask(&secret.rho, &r, &e);
-        let z3 = gamma + &e * mu;
+        // ...and generate a challenge from it (aka `e`)
+        let challenge = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
+
+        // Form proof responses. Each combines one secret value with its mask and the challenge
+        // (aka `z1`, `z2`, `z3` respectively)
+        let plaintext_response = &plaintext_mask + &challenge * &secret.plaintext;
+        let nonce_response = encryption_key.mask(&secret.nonce, &nonce_mask, &challenge);
+        let randomness_response = gamma + &challenge * mu;
 
         let proof = Self {
-            alpha,
-            S,
-            A,
-            C,
-            e,
-            z1,
-            z2,
-            z3,
+            plaintext_mask,
+            plaintext_commit,
+            ciphertext_mask,
+            plaintext_mask_commit,
+            challenge,
+            plaintext_response,
+            nonce_response,
+            randomness_response,
         };
 
         Ok(proof)
@@ -142,54 +182,95 @@ impl Proof for PiEncProof {
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
     fn verify(&self, input: &Self::CommonInput) -> Result<()> {
-        // First check Fiat-Shamir challenge consistency
-
+        // Check Fiat-Shamir challenge consistency: update the transcript with commitments...
         let mut transcript = Transcript::new(b"PiEncProof");
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"alpha", &self.alpha.to_bytes());
-        transcript.append_message(
-            b"(S, A, C)",
-            &[self.S.to_bytes(), self.A.to_bytes(), self.C.to_bytes()].concat(),
-        );
-
-        let e = plusminus_bn_random_from_transcript(
+        Self::fill_out_transcript(
             &mut transcript,
-            &(BigNumber::from(2u64) * &k256_order()),
-        );
-        if e != self.e {
+            input,
+            &self.plaintext_mask,
+            &self.plaintext_commit,
+            &self.ciphertext_mask,
+            &self.plaintext_mask_commit,
+        )?;
+
+        // ...generate a challenge, and make sure it matches the one the prover sent.
+        let e = plusminus_bn_random_from_transcript(&mut transcript, &k256_order());
+        if e != self.challenge {
             return verify_err!("Fiat-Shamir didn't verify");
         }
 
-        // Do equality checks
-        let eq_check_1 = {
-            let lhs = input.pk.encrypt_with_nonce(&self.z1, &self.z2)?;
-            let rhs = input.pk.multiply_and_add(&e, &input.K, &self.A)?;
+        // Check that the plaintext and nonce responses are well-formed (e.g. that the prover did
+        // not try to falsify the ciphertext mask)
+        let ciphertext_mask_is_well_formed = {
+            let lhs = input
+                .encryption_key
+                .encrypt_with_nonce(&self.plaintext_response, &self.nonce_response)?;
+            let rhs = input.encryption_key.multiply_and_add(
+                &e,
+                &input.ciphertext,
+                &self.ciphertext_mask,
+            )?;
             lhs == rhs
         };
-        if !eq_check_1 {
-            return verify_err!("eq_check_1 failed");
+        if !ciphertext_mask_is_well_formed {
+            return verify_err!("ciphertext mask check (first equality check) failed");
         }
 
-        let eq_check_2 = {
-            let a = modpow(&input.setup_params.s, &self.z1, &input.setup_params.N);
-            let b = modpow(&input.setup_params.t, &self.z3, &input.setup_params.N);
+        // Check that the plaintext and commitment randomness responses are well formed (e.g. that
+        // the prover did not try to falsify its commitments to the plaintext or plaintext mask)
+        let responses_match_commitments = {
+            let a = modpow(
+                &input.setup_params.s,
+                &self.plaintext_response,
+                &input.setup_params.N,
+            );
+            let b = modpow(
+                &input.setup_params.t,
+                &self.randomness_response,
+                &input.setup_params.N,
+            );
             let lhs = a.modmul(&b, &input.setup_params.N);
-            let rhs = self.C.modmul(
-                &modpow(&self.S, &e, &input.setup_params.N),
+            let rhs = self.plaintext_mask_commit.modmul(
+                &modpow(&self.plaintext_commit, &e, &input.setup_params.N),
                 &input.setup_params.N,
             );
             lhs == rhs
         };
-        if !eq_check_2 {
-            return verify_err!("eq_check_2 failed");
+        if !responses_match_commitments {
+            return verify_err!("response validation check (second equality check) failed");
         }
 
-        // Do range check
+        // Make sure the ciphertext response is in range
         let bound = BigNumber::one() << (ELL + EPSILON);
-        if self.z1 < -bound.clone() || self.z1 > bound {
-            return verify_err!("self.z1 > bound check failed");
+        if self.plaintext_response < -bound.clone() || self.plaintext_response > bound {
+            return verify_err!("bounds check on plaintext response failed");
         }
 
+        Ok(())
+    }
+}
+
+impl PiEncProof {
+    /// Update the [`Transcript`] with all the commitment values used in the proof.
+    fn fill_out_transcript(
+        transcript: &mut Transcript,
+        input: &PiEncInput,
+        plaintext_mask: &BigNumber,
+        plaintext_commit: &BigNumber,
+        ciphertext_mask: &Ciphertext,
+        plaintext_mask_commit: &BigNumber,
+    ) -> Result<()> {
+        transcript.append_message(b"PiEnc CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"alpha", &plaintext_mask.to_bytes());
+        transcript.append_message(
+            b"(S, A, C)",
+            &[
+                plaintext_commit.to_bytes(),
+                ciphertext_mask.to_bytes(),
+                plaintext_mask_commit.to_bytes(),
+            ]
+            .concat(),
+        );
         Ok(())
     }
 }
@@ -201,21 +282,21 @@ mod tests {
 
     fn random_paillier_encryption_in_range_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
-        k: &BigNumber,
+        plaintext: BigNumber,
     ) -> Result<()> {
         let (decryption_key, _, _) = DecryptionKey::new(rng)?;
-        let pk = decryption_key.encryption_key();
+        let encryption_key = decryption_key.encryption_key();
 
-        let (K, rho) = pk.encrypt(rng, k)?;
+        let (ciphertext, nonce) = encryption_key.encrypt(rng, &plaintext)?;
         let setup_params = ZkSetupParameters::gen(rng)?;
 
         let input = PiEncInput {
             setup_params,
-            pk,
-            K,
+            encryption_key,
+            ciphertext,
         };
 
-        let proof = PiEncProof::prove(rng, &input, &PiEncSecret { k: k.clone(), rho })?;
+        let proof = PiEncProof::prove(rng, &input, &PiEncSecret { plaintext, nonce })?;
 
         let proof_bytes = bincode::serialize(&proof).unwrap();
         let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
@@ -229,15 +310,15 @@ mod tests {
     fn test_paillier_encryption_in_range_proof() -> Result<()> {
         let mut rng = crate::utils::get_test_rng();
 
-        let k_small = random_plusminus_by_size(&mut rng, ELL);
-        let k_large =
+        let in_range = random_plusminus_by_size(&mut rng, ELL);
+        let too_large =
             random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
 
-        // Sampling k in the range 2^ELL should always succeed
-        random_paillier_encryption_in_range_proof(&mut rng, &k_small)?;
+        // A plaintext in the range 2^ELL should always succeed
+        assert!(random_paillier_encryption_in_range_proof(&mut rng, in_range).is_ok());
 
-        // Sampling k in the range (2^{ELL + EPSILON, 2^{ELL + EPSILON + 1}] should fail
-        assert!(random_paillier_encryption_in_range_proof(&mut rng, &k_large).is_err());
+        // A plaintext that's in range for encryption but larger than 2^ELL should fail
+        assert!(random_paillier_encryption_in_range_proof(&mut rng, too_large).is_err());
 
         Ok(())
     }

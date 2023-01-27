@@ -937,15 +937,13 @@ impl PresignKeyShareAndInfo {
             let proof = PiEncProof::prove(
                 rng,
                 &crate::zkp::pienc::PiEncInput::new(
-                    &aux_info_public.params,
-                    &self.aux_info_public.pk,
-                    &K.clone(),
+                    aux_info_public.params.clone(),
+                    self.aux_info_public.pk.clone(),
+                    K.clone(),
                 ),
-                &crate::zkp::pienc::PiEncSecret::new(&k, &rho),
+                &crate::zkp::pienc::PiEncSecret::new(k.clone(), rho.clone()),
             )?;
-            let r1_public = RoundOnePublic {
-                proof: proof.clone(),
-            };
+            let r1_public = RoundOnePublic { proof };
             let _ = r1_publics.insert(*id, r1_public);
         }
 

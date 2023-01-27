@@ -43,14 +43,10 @@ impl Public {
     fn verify(
         &self,
         receiver_setup_params: &ZkSetupParameters,
-        sender_pk: &EncryptionKey,
-        broadcasted_params: &PublicBroadcast,
+        sender_pk: EncryptionKey,
+        K: Ciphertext,
     ) -> Result<()> {
-        let input = crate::zkp::pienc::PiEncInput::new(
-            receiver_setup_params,
-            sender_pk,
-            &broadcasted_params.K,
-        );
+        let input = crate::zkp::pienc::PiEncInput::new(receiver_setup_params.clone(), sender_pk, K);
 
         self.proof.verify(&input)
     }
@@ -68,8 +64,8 @@ impl Public {
 
         match round_one_public.verify(
             &receiver_keygen_public.params,
-            &sender_keygen_public.pk,
-            broadcasted_params,
+            sender_keygen_public.pk.clone(),
+            broadcasted_params.K.clone(),
         ) {
             Ok(()) => Ok(round_one_public),
             Err(e) => bail!("Failed to verify round one public: {}", e),

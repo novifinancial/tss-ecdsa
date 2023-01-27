@@ -14,7 +14,7 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 
-/// The private key corresponding to a given Participant's [AuxInfoPublic].
+/// The private key corresponding to a given Participant's [`AuxInfoPublic`].
 #[derive(Serialize, Deserialize)]
 pub(crate) struct AuxInfoPrivate {
     pub(crate) sk: DecryptionKey,

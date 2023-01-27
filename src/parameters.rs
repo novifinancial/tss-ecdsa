@@ -43,12 +43,12 @@ pub(crate) const ELL_PRIME: usize = 5 * SECURITY_PARAM;
 
 /// The flex space of a range check.
 ///
-/// When a prover has a secret input `x` in the range `+/- 2^l`, the range check proofs
-/// guarantee to the verifier that `x` is in the range `+/- 2^(l + EPSILON)`.
+/// When a prover has a secret input `x` in the range `+/- 2^l`, the verifier can check that the
+/// masked proof response corresponding to `x` is in the range `+/- 2^(l + EPSILON)`.
 /// The same `EPSILON` value is used for all ranges -- those defined by both [`ELL`] and
 /// [`ELL_PRIME`].
 ///
-/// It is part of the completeness bound in the range check proofs
+/// It is part of the completeness bound in the range check proofs.
 /// ([Π-enc](crate::zkp::pienc), [Π-log*](crate::zkp::pilog), and [Π-aff-g](crate::zkp::piaffg)).
 pub(crate) const EPSILON: usize = 2 * SECURITY_PARAM;
 
