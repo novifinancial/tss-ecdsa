@@ -112,6 +112,11 @@ impl EncryptionKey {
                 n: self.n().clone(),
             })?
         }
+
+        // We implement encryption ourselves instead of using libpaillier's `encrypt` method
+        // because that method requires the plaintext to be in the canonical range `[0, N)` instead
+        // of in our range around 0. It seemed less confusing to implement encryption directly than
+        // to try to move the plaintext to the canonical range.
         let one = BigNumber::one();
         let base = one + self.n();
         let a = base.modpow(x, self.0.nn());
