@@ -14,20 +14,29 @@ jobs:
     name: ci
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install stable toolchain
+        id: install-rust
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          # Set Rust version here!
+          toolchain: 1.67.0
           override: true
           components: rustfmt, clippy
+
+      # Caching for Rust files. Must be called after installing Rust toolchain.
+      # See https://github.com/Swatinem/rust-cache for more information.
+      - name: Set Up Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install cargo-make
         uses: actions-rs/cargo@v1
         with:
           command: install
           args: --debug cargo-make
+
       - name: Run full CI (fmt, clippy, build, test, doctest, docs)
         run: cargo make ci
 
