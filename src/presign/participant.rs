@@ -6,15 +6,13 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::broadcast::participant::BroadcastTag;
-use crate::errors::InternalError::InternalInvariantFailed;
 use crate::{
     auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
-    broadcast::participant::{BroadcastOutput, BroadcastParticipant},
-    errors::Result,
+    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
+    errors::{InternalError::InternalInvariantFailed, Result},
     keygen::keyshare::{KeySharePrivate, KeySharePublic},
     messages::{Message, MessageType, PresignMessageType},
-    parameters::ELL,
+    parameters::ELL_PRIME,
     participant::{Broadcast, ProtocolParticipant},
     presign::{
         record::{PresignRecord, RecordPair},
@@ -975,12 +973,19 @@ impl PresignKeyShareAndInfo {
         sender_r1_priv: &RoundOnePrivate,
         receiver_r1_pub_broadcast: &RoundOnePublicBroadcast,
     ) -> Result<(RoundTwoPrivate, RoundTwoPublic)> {
-        // Picking betas as elements of [+- 2^384] here is like sampling them from the
-        // distribution [1, 2^256], which is akin to 2^{ell + epsilon} where ell
-        // = epsilon = 384. Note that we need q/2^epsilon to be negligible.
-        let beta = random_plusminus_by_size(rng, ELL);
-        let beta_hat = random_plusminus_by_size(rng, ELL);
+        let beta = random_plusminus_by_size(rng, ELL_PRIME);
+        let beta_hat = random_plusminus_by_size(rng, ELL_PRIME);
 
+        // Note: The implementation specifies that we should encrypt the negative betas here
+        // (see Figure 7, Round 2, #2, first two bullets) and add them when we decrypt (see
+        // Figure 7, Round 3, #2, first bullet -- computation of delta and chi)
+        // However, it doesn't explain how this squares with the `PiAffgProof`, which requires
+        // the plaintext of `beta_ciphertext` (used to compute `D`) to match the plaintext of `F`
+        // (below). If we make this negative, PiAffg fails to verify because the signs don't match.
+        //
+        // A quick look at the proof suggests that the important thing is that the values are equal.
+        // The betas are components of additive shares of secret values, so it shouldn't matter
+        // where the negation happens (Round 2 vs Round 3).
         let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(rng, &beta)?;
         let (beta_hat_ciphertext, s_hat) = receiver_aux_info.pk.encrypt(rng, &beta_hat)?;
 
@@ -1091,7 +1096,6 @@ impl PresignKeyShareAndInfo {
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
-
             Gamma = CurvePoint(Gamma.0 + r2_pub_j.Gamma.0);
         }
 
