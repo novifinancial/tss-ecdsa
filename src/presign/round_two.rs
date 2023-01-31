@@ -11,7 +11,7 @@ use crate::{
     errors::Result,
     keygen::keyshare::KeySharePublic,
     messages::{Message, MessageType, PresignMessageType},
-    paillier::PaillierCiphertext,
+    paillier::Ciphertext,
     presign::round_one::{Private as RoundOnePrivate, PublicBroadcast as RoundOnePublicBroadcast},
     utils::k256_order,
     zkp::{
@@ -32,10 +32,10 @@ pub(crate) struct Private {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Public {
-    pub D: PaillierCiphertext,
-    pub D_hat: PaillierCiphertext,
-    pub F: PaillierCiphertext,
-    pub F_hat: PaillierCiphertext,
+    pub D: Ciphertext,
+    pub D_hat: Ciphertext,
+    pub F: Ciphertext,
+    pub F_hat: Ciphertext,
     pub Gamma: CurvePoint,
     pub psi: PiAffgProof,
     pub psi_hat: PiAffgProof,

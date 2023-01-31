@@ -10,7 +10,7 @@
 use core::fmt::Debug;
 use thiserror::Error;
 
-use crate::paillier::PaillierError;
+use crate::paillier;
 
 /// The default Result type used in this crate
 pub type Result<T> = std::result::Result<T, InternalError>;
@@ -42,7 +42,7 @@ pub enum InternalError {
     #[error("Represents some code assumption that was checked at runtime but failed to be true")]
     InternalInvariantFailed,
     #[error("Paillier error: `{0}`")]
-    PaillierError(PaillierError),
+    PaillierError(paillier::Error),
     #[error("Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)")]
     CouldNotConvertToScalar,
     #[error("Could not invert a Scalar")]

@@ -14,8 +14,8 @@
 use super::Proof;
 use crate::{
     errors::*,
-    paillier::{MaskedNonce, PaillierNonce},
-    paillier::{PaillierCiphertext, PaillierEncryptionKey},
+    paillier::{Ciphertext, EncryptionKey},
+    paillier::{MaskedNonce, Nonce},
     parameters::{ELL, ELL_PRIME, EPSILON},
     utils::{
         self, k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus,
@@ -35,9 +35,9 @@ pub(crate) struct PiAffgProof {
     beta: BigNumber,
     S: BigNumber,
     T: BigNumber,
-    A: PaillierCiphertext,
+    A: Ciphertext,
     B_x: CurvePoint,
-    B_y: PaillierCiphertext,
+    B_y: Ciphertext,
     E: BigNumber,
     F: BigNumber,
     e: BigNumber,
@@ -54,12 +54,12 @@ pub(crate) struct PiAffgInput {
     setup_params: ZkSetupParameters,
     g: CurvePoint,
     /// This corresponds to `N_0` in the paper.
-    pk0: PaillierEncryptionKey,
+    pk0: EncryptionKey,
     /// This corresponds to `N_1` in the paper.
-    pk1: PaillierEncryptionKey,
-    C: PaillierCiphertext,
-    D: PaillierCiphertext,
-    Y: PaillierCiphertext,
+    pk1: EncryptionKey,
+    C: Ciphertext,
+    D: Ciphertext,
+    Y: Ciphertext,
     X: CurvePoint,
 }
 
@@ -68,11 +68,11 @@ impl PiAffgInput {
     pub(crate) fn new(
         setup_params: &ZkSetupParameters,
         g: &CurvePoint,
-        pk0: &PaillierEncryptionKey,
-        pk1: &PaillierEncryptionKey,
-        C: &PaillierCiphertext,
-        D: &PaillierCiphertext,
-        Y: &PaillierCiphertext,
+        pk0: &EncryptionKey,
+        pk1: &EncryptionKey,
+        C: &Ciphertext,
+        D: &Ciphertext,
+        Y: &Ciphertext,
         X: &CurvePoint,
     ) -> Self {
         Self {
@@ -91,17 +91,12 @@ impl PiAffgInput {
 pub(crate) struct PiAffgSecret {
     x: BigNumber,
     y: BigNumber,
-    rho: PaillierNonce,
-    rho_y: PaillierNonce,
+    rho: Nonce,
+    rho_y: Nonce,
 }
 
 impl PiAffgSecret {
-    pub(crate) fn new(
-        x: &BigNumber,
-        y: &BigNumber,
-        rho: &PaillierNonce,
-        rho_y: &PaillierNonce,
-    ) -> Self {
+    pub(crate) fn new(x: &BigNumber, y: &BigNumber, rho: &Nonce, rho_y: &Nonce) -> Self {
         Self {
             x: x.clone(),
             y: y.clone(),
@@ -265,6 +260,7 @@ impl Proof for PiAffgProof {
 
         let eq_check_3 = {
             let lhs = input.pk1.encrypt_with_nonce(&self.z2, &self.w_y)?;
+
             let rhs = input.pk1.multiply_and_add(&self.e, &input.Y, &self.B_y)?;
             lhs == rhs
         };
@@ -318,17 +314,17 @@ impl Proof for PiAffgProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
+    use crate::{paillier::DecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         x: &BigNumber,
         y: &BigNumber,
     ) -> Result<()> {
-        let (decryption_key_0, _, _) = PaillierDecryptionKey::new(rng)?;
+        let (decryption_key_0, _, _) = DecryptionKey::new(rng)?;
         let pk0 = decryption_key_0.encryption_key();
 
-        let (decryption_key_1, _, _) = PaillierDecryptionKey::new(rng)?;
+        let (decryption_key_1, _, _) = DecryptionKey::new(rng)?;
         let pk1 = decryption_key_1.encryption_key();
 
         let g = k256::ProjectivePoint::GENERATOR;

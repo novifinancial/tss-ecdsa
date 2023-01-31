@@ -10,7 +10,7 @@ use crate::{
     auxinfo::info::AuxInfoPublic,
     errors::Result,
     messages::{Message, MessageType, PresignMessageType},
-    paillier::{PaillierCiphertext, PaillierEncryptionKey, PaillierNonce},
+    paillier::{Ciphertext, EncryptionKey, Nonce},
     zkp::{pienc::PiEncProof, setup::ZkSetupParameters, Proof},
 };
 use libpaillier::unknown_order::BigNumber;
@@ -19,11 +19,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Private {
     pub k: BigNumber,
-    pub rho: PaillierNonce,
+    pub rho: Nonce,
     pub gamma: BigNumber,
-    pub nu: PaillierNonce,
-    pub G: PaillierCiphertext, // Technically can be public but is only one per party
-    pub K: PaillierCiphertext, // Technically can be public but is only one per party
+    pub nu: Nonce,
+    pub G: Ciphertext, // Technically can be public but is only one per party
+    pub K: Ciphertext, // Technically can be public but is only one per party
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Public {
@@ -32,8 +32,8 @@ pub(crate) struct Public {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PublicBroadcast {
-    pub K: PaillierCiphertext,
-    pub G: PaillierCiphertext,
+    pub K: Ciphertext,
+    pub G: Ciphertext,
 }
 
 impl Public {
@@ -43,7 +43,7 @@ impl Public {
     fn verify(
         &self,
         receiver_setup_params: &ZkSetupParameters,
-        sender_pk: &PaillierEncryptionKey,
+        sender_pk: &EncryptionKey,
         broadcasted_params: &PublicBroadcast,
     ) -> Result<()> {
         let input = crate::zkp::pienc::PiEncInput::new(

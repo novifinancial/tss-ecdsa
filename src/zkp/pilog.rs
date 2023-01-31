@@ -11,8 +11,8 @@
 use super::Proof;
 use crate::{
     errors::*,
-    paillier::{MaskedNonce, PaillierNonce},
-    paillier::{PaillierCiphertext, PaillierEncryptionKey},
+    paillier::{Ciphertext, EncryptionKey},
+    paillier::{MaskedNonce, Nonce},
     parameters::{ELL, EPSILON},
     utils::{
         self, modpow, plusminus_bn_random_from_transcript, random_plusminus_by_size,
@@ -30,7 +30,7 @@ use utils::CurvePoint;
 pub(crate) struct PiLogProof {
     alpha: BigNumber,
     S: BigNumber,
-    A: PaillierCiphertext,
+    A: Ciphertext,
     Y: CurvePoint,
     D: BigNumber,
     e: BigNumber,
@@ -44,8 +44,8 @@ pub(crate) struct PiLogInput {
     setup_params: ZkSetupParameters,
     q: BigNumber,
     /// This corresponds to `N_0` in the paper.
-    pk: PaillierEncryptionKey,
-    C: PaillierCiphertext,
+    pk: EncryptionKey,
+    C: Ciphertext,
     X: CurvePoint,
     g: CurvePoint,
 }
@@ -54,8 +54,8 @@ impl PiLogInput {
     pub(crate) fn new(
         setup_params: &ZkSetupParameters,
         q: &BigNumber,
-        pk: &PaillierEncryptionKey,
-        C: &PaillierCiphertext,
+        pk: &EncryptionKey,
+        C: &Ciphertext,
         X: &CurvePoint,
         g: &CurvePoint,
     ) -> Self {
@@ -72,11 +72,11 @@ impl PiLogInput {
 
 pub(crate) struct PiLogSecret {
     x: BigNumber,
-    rho: PaillierNonce,
+    rho: Nonce,
 }
 
 impl PiLogSecret {
-    pub(crate) fn new(x: &BigNumber, rho: &PaillierNonce) -> Self {
+    pub(crate) fn new(x: &BigNumber, rho: &Nonce) -> Self {
         Self {
             x: x.clone(),
             rho: rho.clone(),
@@ -172,7 +172,6 @@ impl Proof for PiLogProof {
         }
 
         // Do equality checks
-
         let eq_check_1 = {
             let lhs = input.pk.encrypt_with_nonce(&self.z1, &self.z2)?;
             let rhs = input.pk.multiply_and_add(&self.e, &input.C, &self.A)?;
@@ -219,10 +218,10 @@ impl Proof for PiLogProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
+    use crate::{paillier::DecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_log_proof<R: RngCore + CryptoRng>(rng: &mut R, x: &BigNumber) -> Result<()> {
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(rng)?;
+        let (decryption_key, _, _) = DecryptionKey::new(rng)?;
         let pk = decryption_key.encryption_key();
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);

@@ -29,9 +29,9 @@ pub(crate) struct ZkSetupParameters {
 impl ZkSetupParameters {
     #[cfg(test)]
     pub(crate) fn gen<R: RngCore + CryptoRng>(rng: &mut R) -> Result<Self> {
-        use crate::paillier::PaillierDecryptionKey;
+        use crate::paillier::DecryptionKey;
 
-        let (_, p, q) = PaillierDecryptionKey::new(rng)?;
+        let (_, p, q) = DecryptionKey::new(rng)?;
         let N = &p * &q;
         Self::gen_from_primes(rng, &N, &p, &q)
     }

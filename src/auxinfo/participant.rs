@@ -15,7 +15,7 @@ use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant},
     errors::Result,
     messages::{AuxinfoMessageType, Message, MessageType},
-    paillier::PaillierDecryptionKey,
+    paillier::DecryptionKey,
     participant::{Broadcast, ProtocolParticipant},
     protocol::ParticipantIdentifier,
     run_only_once,
@@ -507,7 +507,7 @@ impl AuxInfoParticipant {
 fn new_auxinfo<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
-    let (decryption_key, p, q) = PaillierDecryptionKey::new(rng)?;
+    let (decryption_key, p, q) = DecryptionKey::new(rng)?;
     let encryption_key = decryption_key.encryption_key();
     let params = ZkSetupParameters::gen_from_primes(rng, &(&p * &q), &p, &q)?;
 

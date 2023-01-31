@@ -8,22 +8,22 @@
 
 use crate::{
     errors::Result,
-    paillier::{PaillierDecryptionKey, PaillierEncryptionKey},
+    paillier::{DecryptionKey, EncryptionKey},
     zkp::setup::ZkSetupParameters,
 };
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 
-/// The private key corresponding to a given Participant's [AuxInfoPublic]
+/// The private key corresponding to a given Participant's [AuxInfoPublic].
 #[derive(Serialize, Deserialize)]
 pub(crate) struct AuxInfoPrivate {
-    pub(crate) sk: PaillierDecryptionKey,
+    pub(crate) sk: DecryptionKey,
 }
 
-/// The public Auxilary Information corresponding to a given Participant
+/// The public Auxilary Information corresponding to a given Participant.
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AuxInfoPublic {
-    pub(crate) pk: PaillierEncryptionKey,
+    pub(crate) pk: EncryptionKey,
     pub(crate) params: ZkSetupParameters,
 }
 

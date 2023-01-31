@@ -14,7 +14,7 @@
 use super::Proof;
 use crate::{
     errors::*,
-    paillier::{MaskedNonce, PaillierCiphertext, PaillierEncryptionKey, PaillierNonce},
+    paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
     parameters::{ELL, EPSILON},
     utils::{
         k256_order, modpow, plusminus_bn_random_from_transcript, random_plusminus_by_size,
@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct PiEncProof {
     alpha: BigNumber,
     S: BigNumber,
-    A: PaillierCiphertext,
+    A: Ciphertext,
     C: BigNumber,
     e: BigNumber,
     z1: BigNumber,
@@ -43,15 +43,15 @@ pub(crate) struct PiEncProof {
 pub(crate) struct PiEncInput {
     setup_params: ZkSetupParameters,
     /// This corresponds to `N_0` in the paper.
-    pk: PaillierEncryptionKey,
-    K: PaillierCiphertext,
+    pk: EncryptionKey,
+    K: Ciphertext,
 }
 
 impl PiEncInput {
     pub(crate) fn new(
         setup_params: &ZkSetupParameters,
-        pk: &PaillierEncryptionKey,
-        K: &PaillierCiphertext,
+        pk: &EncryptionKey,
+        K: &Ciphertext,
     ) -> Self {
         Self {
             setup_params: setup_params.clone(),
@@ -63,11 +63,11 @@ impl PiEncInput {
 
 pub(crate) struct PiEncSecret {
     k: BigNumber,
-    rho: PaillierNonce,
+    rho: Nonce,
 }
 
 impl PiEncSecret {
-    pub(crate) fn new(k: &BigNumber, rho: &PaillierNonce) -> Self {
+    pub(crate) fn new(k: &BigNumber, rho: &Nonce) -> Self {
         Self {
             k: k.clone(),
             rho: rho.clone(),
@@ -161,7 +161,6 @@ impl Proof for PiEncProof {
         }
 
         // Do equality checks
-
         let eq_check_1 = {
             let lhs = input.pk.encrypt_with_nonce(&self.z1, &self.z2)?;
             let rhs = input.pk.multiply_and_add(&e, &input.K, &self.A)?;
@@ -198,13 +197,13 @@ impl Proof for PiEncProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::PaillierDecryptionKey, utils::random_plusminus_by_size_with_minimum};
+    use crate::{paillier::DecryptionKey, utils::random_plusminus_by_size_with_minimum};
 
     fn random_paillier_encryption_in_range_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         k: &BigNumber,
     ) -> Result<()> {
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(rng)?;
+        let (decryption_key, _, _) = DecryptionKey::new(rng)?;
         let pk = decryption_key.encryption_key();
 
         let (K, rho) = pk.encrypt(rng, k)?;

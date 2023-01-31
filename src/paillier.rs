@@ -16,9 +16,9 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Paillier-specific errors
+/// Paillier-specific errors.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum PaillierError {
+pub enum Error {
     #[error("Failed to create a Paillier decryption key from inputs")]
     CouldNotCreateKey,
     #[error("The inputs to a homomorphic operation on a Paillier ciphertext were malformed")]
@@ -36,36 +36,36 @@ pub enum PaillierError {
 }
 
 /// TODO: Remove this once `InternalError` is instantiated with thiserror.
-impl From<PaillierError> for InternalError {
-    fn from(err: PaillierError) -> Self {
+impl From<Error> for InternalError {
+    fn from(err: Error) -> Self {
         InternalError::PaillierError(err)
     }
 }
 
-/// A nonce generated as part of [`PaillierEncryptionKey::encrypt()`].
+/// A nonce generated as part of [`EncryptionKey::encrypt()`].
 /// A nonce is drawn from the multiplicative group of integers modulo `n`, where `n`
-/// is the modulus from the associated [`PaillierEncryptionKey`].
+/// is the modulus from the associated [`EncryptionKey`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub(crate) struct PaillierNonce(BigNumber);
+pub(crate) struct Nonce(BigNumber);
 
-/// A masked version of [`PaillierNonce`] produced by [`PaillierEncryptionKey::mask()`].
+/// A masked version of [`Nonce`] produced by [`EncryptionKey::mask()`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct MaskedNonce(BigNumber);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub(crate) struct PaillierCiphertext(BigNumber);
+pub(crate) struct Ciphertext(BigNumber);
 
-impl PaillierCiphertext {
-    /// Converts a [`PaillierCiphertext`] into its big-endian byte representation.
+impl Ciphertext {
+    /// Converts a [`Ciphertext`] into its big-endian byte representation.
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
         self.0.to_bytes()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct PaillierEncryptionKey(libpaillier::EncryptionKey);
+pub(crate) struct EncryptionKey(libpaillier::EncryptionKey);
 
-impl PaillierEncryptionKey {
+impl EncryptionKey {
     pub(crate) fn n(&self) -> &BigNumber {
         self.0.n()
     }
@@ -79,35 +79,35 @@ impl PaillierEncryptionKey {
         (self.0.n() - 1) / 2
     }
 
-    /// Encrypt plaintext `x` under the encryption key, returning the resulting [`PaillierCiphertext`]
-    /// and [`PaillierNonce`].
+    /// Encrypt plaintext `x` under the encryption key, returning the resulting [`Ciphertext`]
+    /// and [`Nonce`].
     ///
     /// The plaintext must be an element of the integers mod `N`, where `N` is the modulus defined by
-    /// the [`PaillierEncryptionKey`]. The expected format for these is the range
+    /// the [`EncryptionKey`]. The expected format for these is the range
     /// `[-N/2, N/2]`. Encryption will fail if `x` is outside this range.
     pub(crate) fn encrypt<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
         x: &BigNumber,
-    ) -> Result<(PaillierCiphertext, PaillierNonce)> {
+    ) -> Result<(Ciphertext, Nonce)> {
         // Note: the check that `x` is in the proper range happens in `encrypt_with_nonce`.
         let nonce = random_bn_in_z_star(rng, self.n())?;
         let c = self.encrypt_with_nonce(x, &MaskedNonce(nonce.clone()))?;
-        Ok((c, PaillierNonce(nonce)))
+        Ok((c, Nonce(nonce)))
     }
 
-    /// Encrypt plaintext `x` using the provided [`MaskedNonce`], producing a [`PaillierCiphertext`].
+    /// Encrypt plaintext `x` using the provided [`MaskedNonce`], producing a [`Ciphertext`].
     ///
     /// The plaintext must be an element of the integers mod `N`, where `N` is the modulus defined by
-    /// the [`PaillierEncryptionKey`]. The expected format for these is the range
+    /// the [`EncryptionKey`]. The expected format for these is the range
     /// `[-N/2, N/2]`. Encryption will fail if `x` is outside this range.
     pub(crate) fn encrypt_with_nonce(
         &self,
         x: &BigNumber,
         nonce: &MaskedNonce,
-    ) -> Result<PaillierCiphertext> {
+    ) -> Result<Ciphertext> {
         if &self.half_n() < x || x < &-self.half_n() {
-            Err(PaillierError::EncryptionFailed {
+            Err(Error::EncryptionFailed {
                 x: x.clone(),
                 n: self.n().clone(),
             })?
@@ -117,42 +117,34 @@ impl PaillierEncryptionKey {
         let a = base.modpow(x, self.0.nn());
         let b = nonce.0.modpow(self.n(), self.0.nn());
         let c = a.modmul(&b, self.0.nn());
-        Ok(PaillierCiphertext(c))
+        Ok(Ciphertext(c))
     }
 
     #[cfg(test)]
     /// Generate a random ciphertext for testing purposes.
-    pub(crate) fn random_ciphertext(
-        &self,
-        rng: &mut (impl RngCore + CryptoRng),
-    ) -> PaillierCiphertext {
+    pub(crate) fn random_ciphertext(&self, rng: &mut (impl RngCore + CryptoRng)) -> Ciphertext {
         use crate::utils::random_positive_bn;
 
-        PaillierCiphertext(random_positive_bn(rng, self.0.nn()))
+        Ciphertext(random_positive_bn(rng, self.0.nn()))
     }
 
-    /// Masks a [`PaillierNonce`] `nonce` with another [`PaillierNonce`] `mask` and exponent `e`
+    /// Masks a [`Nonce`] `nonce` with another [`Nonce`] `mask` and exponent `e`
     /// for use in proving properties of `nonce`'s corresponding ciphertext. Both `nonce` and
-    /// `mask` MUST have been generated by the given [`PaillierEncryptionKey`].
+    /// `mask` MUST have been generated by the given [`EncryptionKey`].
     ///
     /// The resulting [`MaskedNonce`] is computed as `mask * nonce^e mod N`, where `N`
-    /// is the modulus of [`PaillierEncryptionKey`].
-    pub(crate) fn mask(
-        &self,
-        nonce: &PaillierNonce,
-        mask: &PaillierNonce,
-        e: &BigNumber,
-    ) -> MaskedNonce {
+    /// is the modulus of [`EncryptionKey`].
+    pub(crate) fn mask(&self, nonce: &Nonce, mask: &Nonce, e: &BigNumber) -> MaskedNonce {
         MaskedNonce(mask.0.modmul(&modpow(&nonce.0, e, self.n()), self.n()))
     }
 
-    /// Computes `a ⊙ c1 ⊕ c2` homomorphically over [`PaillierCiphertext`]s `c1` and `c2.
+    /// Computes `a ⊙ c1 ⊕ c2` homomorphically over [`Ciphertext`]s `c1` and `c2`.
     pub(crate) fn multiply_and_add(
         &self,
         a: &BigNumber,
-        c1: &PaillierCiphertext,
-        c2: &PaillierCiphertext,
-    ) -> Result<PaillierCiphertext> {
+        c1: &Ciphertext,
+        c2: &Ciphertext,
+    ) -> Result<Ciphertext> {
         // Ciphertext addition is modular multiplication, and ciphertext multiplication
         // is modular exponentiation.
         //
@@ -161,9 +153,9 @@ impl PaillierEncryptionKey {
         // in the range `-N/2 <= a <= N/2` so could fail that check. Instead, we do the
         // operations directly and manually do the range check.
         if &self.half_n() < a || a < &-self.half_n() {
-            Err(PaillierError::InvalidOperation)?
+            Err(Error::InvalidOperation)?
         } else {
-            Ok(PaillierCiphertext(
+            Ok(Ciphertext(
                 modpow(&c1.0, a, self.0.nn()).modmul(&c2.0, self.0.nn()),
             ))
         }
@@ -171,9 +163,9 @@ impl PaillierEncryptionKey {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct PaillierDecryptionKey(libpaillier::DecryptionKey);
+pub(crate) struct DecryptionKey(libpaillier::DecryptionKey);
 
-impl PaillierDecryptionKey {
+impl DecryptionKey {
     /// Compute the floor of `n/2` for the modulus `n`.
     ///
     /// Since `n` is the product of two primes, it'll be odd, so we
@@ -183,11 +175,11 @@ impl PaillierDecryptionKey {
         (self.0.n() - 1) / 2
     }
 
-    pub(crate) fn decrypt(&self, c: &PaillierCiphertext) -> Result<BigNumber> {
+    pub(crate) fn decrypt(&self, c: &Ciphertext) -> Result<BigNumber> {
         let mut x = self
             .0
             .decrypt(&c.0)
-            .ok_or(PaillierError::DecryptionFailed)
+            .ok_or(Error::DecryptionFailed)
             .map(BigNumber::from_slice)?;
 
         // Switch representation into `[-N/2, N/2]`. libpaillier (and indeed, `BigNumber`s
@@ -200,7 +192,7 @@ impl PaillierDecryptionKey {
         Ok(x)
     }
 
-    /// Generate a new [`PaillierDecryptionKey`] and its factors.
+    /// Generate a new [`DecryptionKey`] and its factors.
     ///
     /// The factors `p` and `q` are `PRIME_BITS`-long safe primes, and the resulting
     /// modulus is `2 * PRIME_BITS` long.
@@ -226,7 +218,7 @@ impl PaillierDecryptionKey {
             {
                 Ok((p, q))
             } else {
-                Err(PaillierError::CouldNotCreateKey)?
+                Err(Error::CouldNotCreateKey)?
             }
         };
 
@@ -240,23 +232,22 @@ impl PaillierDecryptionKey {
             // We should never hit the second `?` unless `find` breaks.
             .ok_or(InternalError::RetryFailed)??;
 
-        let decryption_key = PaillierDecryptionKey(
-            libpaillier::DecryptionKey::with_primes(&p, &q)
-                .ok_or(PaillierError::CouldNotCreateKey)?,
+        let decryption_key = DecryptionKey(
+            libpaillier::DecryptionKey::with_primes(&p, &q).ok_or(Error::CouldNotCreateKey)?,
         );
 
         // Double check that the modulus is the correct size.
         if decryption_key.0.n().bit_length() == 2 * PRIME_BITS {
             Ok((decryption_key, p, q))
         } else {
-            Err(PaillierError::CouldNotCreateKey)?
+            Err(Error::CouldNotCreateKey)?
         }
     }
 
-    /// Retrieve the public [`PaillierEncryptionKey`] corresponding to this secret
-    /// [`PaillierDecryptionKey`].
-    pub fn encryption_key(&self) -> PaillierEncryptionKey {
-        PaillierEncryptionKey(libpaillier::EncryptionKey::from(&self.0))
+    /// Retrieve the public [`EncryptionKey`] corresponding to this secret
+    /// [`DecryptionKey`].
+    pub fn encryption_key(&self) -> EncryptionKey {
+        EncryptionKey(libpaillier::EncryptionKey::from(&self.0))
     }
 }
 
@@ -308,12 +299,12 @@ pub(crate) mod prime_gen {
         rng: &mut R,
     ) -> Result<BigNumber> {
         if POOL_OF_PRIMES.len() == 0 {
-            Err(PaillierError::NoPregeneratedPrimes(PRIME_BITS))?;
+            Err(Error::NoPregeneratedPrimes(PRIME_BITS))?;
         }
         Ok(POOL_OF_PRIMES
             .get(rng.gen_range(0..POOL_OF_PRIMES.len()))
             .cloned()
-            .ok_or(PaillierError::NoPregeneratedPrimes(PRIME_BITS))?)
+            .ok_or(Error::NoPregeneratedPrimes(PRIME_BITS))?)
     }
 
     /// Sample a pair of independent, non-matching safe primes from a precompiled list.
@@ -338,12 +329,12 @@ mod test {
     use rand::{CryptoRng, Rng, RngCore};
 
     use crate::{
-        paillier::PaillierCiphertext,
+        paillier::Ciphertext,
         parameters::PRIME_BITS,
         utils::{get_test_rng, random_plusminus},
     };
 
-    use super::{prime_gen, PaillierDecryptionKey, PaillierEncryptionKey};
+    use super::{prime_gen, DecryptionKey, EncryptionKey};
 
     #[test]
     #[ignore = "sometimes slow in debug mode"]
@@ -359,7 +350,7 @@ mod test {
     fn paillier_keygen_produces_good_primes() {
         let mut rng = get_test_rng();
 
-        let (decryption_key, p, q) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, p, q) = DecryptionKey::new(&mut rng).unwrap();
 
         assert!(p.is_prime());
         assert!(q.is_prime());
@@ -388,7 +379,7 @@ mod test {
     /// Draw a random message from the expected range [-N/2, N/2].
     fn random_message(
         rng: &mut (impl CryptoRng + RngCore),
-        encryption_key: &PaillierEncryptionKey,
+        encryption_key: &EncryptionKey,
     ) -> BigNumber {
         random_plusminus(rng, &encryption_key.half_n())
     }
@@ -396,7 +387,7 @@ mod test {
     #[test]
     fn paillier_encryption_works() {
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         for _ in 0..100 {
@@ -420,13 +411,13 @@ mod test {
     #[test]
     fn pailler_decryption_requires_correct_key() {
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         let msg = random_message(&mut rng, &encryption_key);
         let (ciphertext, _) = encryption_key.encrypt(&mut rng, &msg).unwrap();
 
-        let (wrong_decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (wrong_decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let decryption_result = wrong_decryption_key.decrypt(&ciphertext);
         assert!(decryption_result.is_err() || decryption_result.unwrap() != msg);
 
@@ -438,7 +429,7 @@ mod test {
         // Specifically, the integers mod N must be in the interval around 0.
         // So, inputs in the range [-N/2, N/2] are acceptable, but not [0, N).
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         // In the acceptable range, 0 is allowed
@@ -467,7 +458,7 @@ mod test {
     #[test]
     fn paillier_encryption_generates_unique_nonces() {
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         let nonces = std::iter::repeat_with(|| {
@@ -488,7 +479,7 @@ mod test {
     #[test]
     fn paillier_ciphertext_bits_matter() {
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         let msg = random_message(&mut rng, &encryption_key);
@@ -508,7 +499,7 @@ mod test {
             }
 
             // Re-serialize the ciphertext
-            let mangled_ciphertext = PaillierCiphertext(BigNumber::from_slice(&bytes));
+            let mangled_ciphertext = Ciphertext(BigNumber::from_slice(&bytes));
 
             // Decryption should fail.
             let decryption_result = decryption_key.decrypt(&mangled_ciphertext);
@@ -519,14 +510,14 @@ mod test {
         }
 
         // When it's all reconstructed, decryption should work
-        let correct_ciphertext = PaillierCiphertext(BigNumber::from_slice(&bytes));
+        let correct_ciphertext = Ciphertext(BigNumber::from_slice(&bytes));
         assert_eq!(decryption_key.decrypt(&correct_ciphertext).unwrap(), msg);
     }
 
     #[test]
     fn half_ns_match() {
         let mut rng = get_test_rng();
-        let (decryption_key, _, _) = PaillierDecryptionKey::new(&mut rng).unwrap();
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
         let encryption_key = decryption_key.encryption_key();
 
         assert_eq!(encryption_key.half_n(), decryption_key.half_n());
