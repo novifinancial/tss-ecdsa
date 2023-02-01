@@ -5,16 +5,18 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::parameters::PRIME_BITS;
-use crate::utils::{random_bn_in_z_star, CRYPTOGRAPHIC_RETRY_MAX};
 use crate::{
     errors::{InternalError, Result},
-    utils::modpow,
+    parameters::PRIME_BITS,
+    utils::{modpow, random_bn_in_z_star, CRYPTOGRAPHIC_RETRY_MAX},
 };
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[cfg(test)]
+use crate::utils::random_positive_bn;
 
 /// Paillier-specific errors.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -42,8 +44,16 @@ pub enum Error {
 pub(crate) struct Nonce(BigNumber);
 
 /// A masked version of [`Nonce`] produced by [`EncryptionKey::mask()`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct MaskedNonce(BigNumber);
+
+#[cfg(test)]
+impl MaskedNonce {
+    /// Generate a random `MaskedNonce` for testing only!
+    pub(crate) fn random<R: CryptoRng + RngCore>(rng: &mut R, modulus: &BigNumber) -> Self {
+        MaskedNonce(random_positive_bn(rng, modulus))
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub(crate) struct Ciphertext(BigNumber);
@@ -122,8 +132,6 @@ impl EncryptionKey {
     #[cfg(test)]
     /// Generate a random ciphertext for testing purposes.
     pub(crate) fn random_ciphertext(&self, rng: &mut (impl RngCore + CryptoRng)) -> Ciphertext {
-        use crate::utils::random_positive_bn;
-
         Ciphertext(random_positive_bn(rng, self.0.nn()))
     }
 

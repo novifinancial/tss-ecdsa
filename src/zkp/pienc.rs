@@ -42,8 +42,6 @@ use serde::{Deserialize, Serialize};
 /// range.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PiEncProof {
-    /// Mask for the plaintext value of the ciphertext (`alpha` in the paper).
-    plaintext_mask: BigNumber,
     /// Commitment to the plaintext value of the ciphertext (`S` in the paper).
     plaintext_commit: Commitment,
     /// Masking ciphertext (`A` in the paper).
@@ -136,7 +134,6 @@ impl Proof for PiEncProof {
         Self::fill_out_transcript(
             &mut transcript,
             input,
-            &plaintext_mask,
             &plaintext_commit,
             &ciphertext_mask,
             &plaintext_mask_commit,
@@ -154,7 +151,6 @@ impl Proof for PiEncProof {
         let randomness_response = mu.mask(&gamma, &challenge);
 
         let proof = Self {
-            plaintext_mask,
             plaintext_commit,
             ciphertext_mask,
             plaintext_mask_commit,
@@ -174,7 +170,6 @@ impl Proof for PiEncProof {
         Self::fill_out_transcript(
             &mut transcript,
             input,
-            &self.plaintext_mask,
             &self.plaintext_commit,
             &self.ciphertext_mask,
             &self.plaintext_mask_commit,
@@ -236,13 +231,11 @@ impl PiEncProof {
     fn fill_out_transcript(
         transcript: &mut Transcript,
         input: &PiEncInput,
-        plaintext_mask: &BigNumber,
         plaintext_commit: &Commitment,
         ciphertext_mask: &Ciphertext,
         plaintext_mask_commit: &Commitment,
     ) -> Result<()> {
         transcript.append_message(b"PiEnc CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"alpha", &plaintext_mask.to_bytes());
         transcript.append_message(
             b"(S, A, C)",
             &[
@@ -259,12 +252,15 @@ impl PiEncProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::DecryptionKey, utils::random_plusminus_by_size_with_minimum};
+    use crate::{
+        paillier::DecryptionKey,
+        utils::{random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn},
+    };
 
-    fn random_paillier_encryption_in_range_proof<R: RngCore + CryptoRng>(
+    fn build_random_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         plaintext: BigNumber,
-    ) -> Result<()> {
+    ) -> Result<(PiEncProof, PiEncInput)> {
         let (decryption_key, _, _) = DecryptionKey::new(rng)?;
         let encryption_key = decryption_key.encryption_key();
 
@@ -279,27 +275,233 @@ mod tests {
 
         let proof = PiEncProof::prove(rng, &input, &PiEncSecret { plaintext, nonce })?;
 
-        let proof_bytes = bincode::serialize(&proof).unwrap();
-        let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
-        let roundtrip_proof_bytes = bincode::serialize(&roundtrip_proof).unwrap();
-        assert_eq!(proof_bytes, roundtrip_proof_bytes);
-
-        proof.verify(&input)
+        Ok((proof, input))
     }
 
     #[test]
-    fn test_paillier_encryption_in_range_proof() -> Result<()> {
+    fn proof_serializes_correctly() -> Result<()> {
         let mut rng = crate::utils::get_test_rng();
 
-        let in_range = random_plusminus_by_size(&mut rng, ELL);
-        let too_large =
-            random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let plaintext = random_plusminus_by_size(&mut rng, ELL);
+        let (proof, input) = build_random_proof(&mut rng, plaintext)?;
+
+        let proof_bytes = bincode::serialize(&proof).unwrap();
+        let roundtrip_proof: PiEncProof = bincode::deserialize(&proof_bytes).unwrap();
+        let roundtrip_proof_bytes = bincode::serialize(&roundtrip_proof).unwrap();
+
+        assert_eq!(proof_bytes, roundtrip_proof_bytes);
+        assert!(proof.verify(&input).is_ok());
+        assert!(roundtrip_proof.verify(&input).is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn plaintext_must_be_in_range() -> Result<()> {
+        let mut rng = crate::utils::get_test_rng();
 
         // A plaintext in the range 2^ELL should always succeed
-        assert!(random_paillier_encryption_in_range_proof(&mut rng, in_range).is_ok());
+        let in_range = random_plusminus_by_size(&mut rng, ELL);
+        let (proof, input) = build_random_proof(&mut rng, in_range)?;
+        assert!(proof.verify(&input).is_ok());
 
-        // A plaintext that's in range for encryption but larger than 2^ELL should fail
-        assert!(random_paillier_encryption_in_range_proof(&mut rng, too_large).is_err());
+        // A plaintext in range for encryption but larger (absolute value) than 2^ELL should fail
+        let too_large =
+            random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
+        let (proof, input) = build_random_proof(&mut rng, too_large.clone())?;
+        assert!(proof.verify(&input).is_err());
+
+        // Ditto with the opposite sign for the too-large plaintext
+        let too_small = -too_large;
+        let (proof, input) = build_random_proof(&mut rng, too_small)?;
+        assert!(proof.verify(&input).is_err());
+
+        // PiEnc expects an input in the range ±2^ELL. The proof can guarantee this range up to
+        // the slackness parameter -- that is, that the input is in the range ±2^(ELL + EPSILON)
+        // Values in between are only caught sometimes, so they're hard to test.
+
+        // The lower edge case works (2^ELL))
+        let lower_bound = BigNumber::one() << ELL;
+        let (proof, input) = build_random_proof(&mut rng, lower_bound.clone())?;
+        assert!(proof.verify(&input).is_ok());
+        let (proof, input) = build_random_proof(&mut rng, -lower_bound)?;
+        assert!(proof.verify(&input).is_ok());
+
+        // The higher edge case fails (2^ELL+EPSILON)
+        let upper_bound = BigNumber::one() << (ELL + EPSILON);
+        let (proof, input) = build_random_proof(&mut rng, upper_bound.clone())?;
+        assert!(proof.verify(&input).is_err());
+        let (proof, input) = build_random_proof(&mut rng, -upper_bound)?;
+        assert!(proof.verify(&input).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn every_proof_field_matters() {
+        let rng = &mut crate::utils::get_test_rng();
+        let plaintext = random_plusminus_by_size(rng, ELL);
+
+        let (proof, input) = build_random_proof(rng, plaintext.clone()).unwrap();
+
+        // Shorthand for input commitment parameters
+        let scheme = input.setup_params.scheme();
+
+        // Generate some random elements to use as replacements
+        let random_mask = random_plusminus_by_size(rng, ELL + EPSILON);
+        let (bad_plaintext_mask, bad_randomness) = scheme.commit(&random_mask, ELL, rng);
+
+        // Bad plaintext commitment (same value, wrong commitment randomness) fails
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.plaintext_commit = scheme.commit(&plaintext, ELL, rng).0;
+            assert_ne!(&bad_proof.plaintext_commit, &proof.plaintext_commit);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad ciphertext mask (encryption of wrong value with wrong nonce)
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.ciphertext_mask = input.encryption_key.encrypt(rng, &random_mask).unwrap().0;
+            assert_ne!(bad_proof.ciphertext_mask, proof.ciphertext_mask);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad plaintext mask commitment (commitment to wrong value with wrong randomness) fails
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.plaintext_mask_commit = bad_plaintext_mask;
+            assert_ne!(bad_proof.plaintext_mask_commit, proof.plaintext_mask_commit);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad challenge fails
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.challenge = random_plusminus(rng, &k256_order());
+            assert_ne!(bad_proof.challenge, proof.challenge);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad plaintext response fails (this can be an arbitrary integer, using commitment
+        // modulus for convenience of generating it)
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.plaintext_response = random_positive_bn(rng, scheme.modulus());
+            assert_ne!(bad_proof.plaintext_response, proof.plaintext_response);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad nonce response fails
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.nonce_response = MaskedNonce::random(rng, input.encryption_key.modulus());
+            assert_ne!(bad_proof.nonce_response, proof.nonce_response);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // Bad randomness response fails (ditto on arbitrary integer)
+        {
+            let mut bad_proof = proof.clone();
+            bad_proof.randomness_response = bad_randomness.as_masked().to_owned();
+            assert_ne!(bad_proof.randomness_response, proof.randomness_response);
+            assert!(bad_proof.verify(&input).is_err());
+        }
+
+        // The original proof itself verifies correctly, though!
+        assert!(proof.verify(&input).is_ok());
+    }
+
+    #[test]
+    fn proof_must_be_constructed_with_knowledge_of_secrets() -> Result<()> {
+        let rng = &mut crate::utils::get_test_rng();
+
+        // Form common inputs
+        let (decryption_key, _, _) = DecryptionKey::new(rng)?;
+        let encryption_key = decryption_key.encryption_key();
+
+        // Form secret input
+        let plaintext = random_plusminus_by_size(rng, ELL);
+        let (ciphertext, nonce) = encryption_key.encrypt(rng, &plaintext)?;
+        let setup_params = VerifiedRingPedersen::extract(&decryption_key, rng)?;
+
+        let input = PiEncInput {
+            setup_params,
+            encryption_key: encryption_key.clone(),
+            ciphertext,
+        };
+
+        // Correctly formed proof verifies correctly
+        let proof = PiEncProof::prove(
+            rng,
+            &input,
+            &PiEncSecret {
+                plaintext: plaintext.clone(),
+                nonce: nonce.clone(),
+            },
+        )?;
+        assert!(proof.verify(&input).is_ok());
+
+        // Forming with the wrong plaintext fails
+        let wrong_plaintext = random_plusminus_by_size(rng, ELL);
+        assert_ne!(wrong_plaintext, plaintext);
+        let proof = PiEncProof::prove(
+            rng,
+            &input,
+            &PiEncSecret {
+                plaintext: wrong_plaintext,
+                nonce: nonce.clone(),
+            },
+        )?;
+        assert!(proof.verify(&input).is_err());
+
+        // Forming with the wrong nonce fails
+        let (_, wrong_nonce) = encryption_key.encrypt(rng, &plaintext)?;
+        assert_ne!(wrong_nonce, nonce);
+        let proof = PiEncProof::prove(
+            rng,
+            &input,
+            &PiEncSecret {
+                plaintext,
+                nonce: wrong_nonce,
+            },
+        )?;
+        assert!(proof.verify(&input).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn verification_requires_correct_common_input() -> Result<()> {
+        // Replace each field of `CommonInput` with something else to verify
+        let mut rng = crate::utils::get_test_rng();
+
+        // Form inputs
+        let plaintext = random_plusminus_by_size(&mut rng, ELL);
+        let (proof, mut input) = build_random_proof(&mut rng, plaintext.clone())?;
+
+        // Verification works on the original input
+        assert!(proof.verify(&input).is_ok());
+
+        // Verification fails with the wrong setup params
+        let (bad_decryption_key, _, _) = DecryptionKey::new(&mut rng)?;
+        let bad_setup_params = VerifiedRingPedersen::extract(&bad_decryption_key, &mut rng)?;
+        let setup_params = input.setup_params;
+        input.setup_params = bad_setup_params;
+        assert!(proof.verify(&input).is_err());
+        input.setup_params = setup_params;
+
+        // Verification fails with the wrong encryption key
+        let bad_encryption_key = DecryptionKey::new(&mut rng)?.0.encryption_key();
+        let encryption_key = input.encryption_key;
+        input.encryption_key = bad_encryption_key;
+        assert!(proof.verify(&input).is_err());
+        input.encryption_key = encryption_key;
+
+        // Verification fails with the wrong ciphertext
+        let (bad_ciphertext, _) = input.encryption_key.encrypt(&mut rng, &plaintext)?;
+        input.ciphertext = bad_ciphertext;
+        assert!(proof.verify(&input).is_err());
 
         Ok(())
     }
