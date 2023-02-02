@@ -63,6 +63,7 @@ mod protocol;
 mod storage;
 mod utils;
 mod zkp;
+mod zkstar;
 
 pub use messages::Message;
 pub use protocol::{

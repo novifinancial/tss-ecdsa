@@ -29,6 +29,12 @@ pub enum InternalError {
     NoSquareRoots,
     #[error("Elements are not coprime")]
     NotCoprime,
+    #[error("Elements of the multiplicative group ZK*_N cannot be larger than the RSA modulus")]
+    LargerThanModulus,
+    #[error("Elements of the multiplicative group ZK*_N cannot be negative")]
+    NegativeElement,
+    #[error("Elements of the multiplicative group  ZK*_N cannot be zero")]
+    IsZero,
     #[error("One or more of the integer inputs to the Chinese remainder theorem were outside the expected range")]
     InvalidIntegers,
     #[error(
