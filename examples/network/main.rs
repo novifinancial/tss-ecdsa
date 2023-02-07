@@ -30,9 +30,26 @@ use clap::Parser;
 use client::client_main;
 use common::{Args, Result, RoleType};
 use server::server_main;
+use tracing_subscriber::{
+    filter::Targets, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+};
 
 #[rocket::main]
 async fn main() -> Result {
+    let logging_level = EnvFilter::from_default_env()
+        .max_level_hint()
+        .unwrap()
+        .into_level()
+        .unwrap();
+
+    // Only capture logging events from lock_keeper crates.
+    let targets = Targets::new().with_target("tss_ecdsa", logging_level);
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .pretty()
+        .with_filter(targets);
+
+    tracing_subscriber::registry().with(stdout_layer).init();
+
     let args = Args::parse();
 
     match args.role {

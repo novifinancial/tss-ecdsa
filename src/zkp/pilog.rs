@@ -324,6 +324,7 @@ mod tests {
         paillier::DecryptionKey, ring_pedersen::VerifiedRingPedersen,
         utils::random_plusminus_by_size_with_minimum,
     };
+    use test_log::test;
 
     fn random_paillier_log_proof<R: RngCore + CryptoRng>(rng: &mut R, x: &BigNumber) -> Result<()> {
         let (decryption_key, _, _) = DecryptionKey::new(rng)?;

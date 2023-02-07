@@ -24,6 +24,7 @@ use crate::{
 };
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, instrument};
 
 use super::info::{AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses};
 
@@ -74,12 +75,15 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Processing auxinfo message.");
+
         match message.message_type() {
             MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
                 let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
@@ -107,11 +111,14 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Handling auxinfo ready message.");
+
         let (mut messages, is_ready) = process_ready_message(
             self.id,
             &self.other_participant_ids,
@@ -129,11 +136,14 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round one auxinfo messages.");
+
         let (auxinfo_private, auxinfo_public, auxinfo_witnesses) = new_auxinfo(rng)?;
         self.storage.store(
             StorableType::AuxInfoPrivate,
@@ -182,12 +192,15 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         broadcast_message: &BroadcastOutput,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round one auxinfo message.");
+
         if broadcast_message.tag != BroadcastTag::AuxinfoR1CommitHash {
             return Err(InternalError::IncorrectBroadcastMessageTag);
         }
@@ -227,11 +240,14 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round two auxinfo messages.");
+
         // check that we've generated our public info before trying to retrieve it
         let fetch = vec![(StorableType::AuxInfoPublic, message.id(), self.id)];
         let public_keyshare_generated = self.storage.contains_batch(&fetch)?;
@@ -242,7 +258,7 @@ impl AuxInfoParticipant {
             messages.extend_from_slice(&more_messages);
         }
 
-        // retreive your decom from storage
+        // retrieve your decom from storage
         let decom_bytes =
             self.storage
                 .retrieve(StorableType::AuxInfoDecommit, message.id(), self.id)?;
@@ -264,12 +280,15 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round two auxinfo message.");
+
         // We must receive all commitments in round 1 before we start processing
         // decommits in round 2.
         let r1_done = self.storage.contains_for_all_ids(
@@ -323,11 +342,14 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round three auxinfo messages.");
+
         let rids: Vec<[u8; 32]> = self
             .other_participant_ids
             .iter()
@@ -400,12 +422,15 @@ impl AuxInfoParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round three auxinfo message.");
+
         // We can't handle this message unless we already calculated the global_rid
         if self
             .storage
@@ -487,9 +512,12 @@ impl AuxInfoParticipant {
 }
 
 #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+#[instrument(skip_all, err(Debug))]
 fn new_auxinfo<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
+    debug!("Creating new auxinfo.");
+
     let (decryption_key, p, q) = DecryptionKey::new(rng)?;
     let params = VerifiedRingPedersen::extract(&decryption_key, rng)?;
     let encryption_key = decryption_key.encryption_key();
@@ -510,6 +538,7 @@ mod tests {
     use crate::Identifier;
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::HashMap;
+    use test_log::test;
 
     impl AuxInfoParticipant {
         pub fn new_quorum<R: RngCore + CryptoRng>(
@@ -604,7 +633,7 @@ mod tests {
 
         let index = rng.gen_range(0..inbox.len());
         let message = inbox.remove(index);
-        println!(
+        debug!(
             "processing participant: {}, with message type: {:?} from {}",
             &participant.id,
             &message.message_type(),

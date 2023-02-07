@@ -45,6 +45,7 @@ use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::{error, info, instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct PresignParticipant {
@@ -99,12 +100,15 @@ impl PresignParticipant {
     /// participant (containing auxinfo and keygen artifacts). Optionally
     /// produces a [PresignRecord] once presigning is complete.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Processing presign message.");
+
         match message.message_type() {
             MessageType::Presign(PresignMessageType::Ready) => {
                 Ok(self.handle_ready_msg(rng, message, main_storage)?)
@@ -134,12 +138,15 @@ impl PresignParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Handling ready presign message.");
+
         let (mut messages, is_ready) = process_ready_message(
             self.id,
             &self.other_participant_ids,
@@ -157,12 +164,15 @@ impl PresignParticipant {
         }
     }
 
+    #[instrument(skip_all, err(Debug))]
     pub(crate) fn initialize_presign_message(
         &mut self,
         auxinfo_identifier: Identifier,
         keyshare_identifier: Identifier,
         identifier: Identifier,
     ) -> Result<Message> {
+        info!("Initializing presign message.");
+
         if self.presign_map.contains_key(&identifier) {
             return Err(InternalError::IdentifierInUse);
         }
@@ -190,12 +200,15 @@ impl PresignParticipant {
     /// This can only be run after all participants have finished with key
     /// generation.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Generating round one presign messages.");
+
         let (auxinfo_identifier, keyshare_identifier) =
             self.get_associated_identifiers_for_presign(&message.id())?;
 
@@ -257,13 +270,16 @@ impl PresignParticipant {
             let (pr, mut r2_msg) = self.handle_round_one_msg(rng, &msg, main_storage)?;
             out_messages.append(&mut r2_msg);
 
-            // Check that pr is only ever assigned to at most once.
+            // Check that `presign_record` is only ever assigned to at most once.
             match (pr, &presign_record) {
                 // Found some _pr_ and presign_record has never been assigned to. Assign to it.
                 (Some(pr), None) => presign_record = Some(pr),
                 // We have already assigned to presign_record once! This should not happen again!
                 // TODO: Add logging message here once we have logging set up.
-                (Some(_), Some(_)) => return Err(InternalInvariantFailed),
+                (Some(_), Some(_)) => {
+                    error!("`presign_record` has already been assigned to once.");
+                    return Err(InternalInvariantFailed);
+                }
                 (None, _) => { /* Nothing to do */ }
             }
         }
@@ -271,6 +287,7 @@ impl PresignParticipant {
         Ok((presign_record, out_messages))
     }
 
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_one_broadcast_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
@@ -278,6 +295,7 @@ impl PresignParticipant {
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
         if broadcast_message.tag != BroadcastTag::PresignR1Ciphertexts {
+            error!("Incorrect tag for Presign R1 Broadcast!");
             return Err(InternalError::IncorrectBroadcastMessageTag);
         }
         let message = &broadcast_message.msg;
@@ -305,12 +323,15 @@ impl PresignParticipant {
     /// Processes a single request from round one to create public keyshares for
     /// that participant, to be sent in round two.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Handling round one presign message.");
+
         // Check if we have both have received the broadcasted ciphertexts that we need
         // in order to respond and have started round one
         let search_keys = [
@@ -344,12 +365,15 @@ impl PresignParticipant {
     /// has been published. These round two messages are returned in
     /// response to the sender, without having to rely on any other round
     /// one messages from other participants aside from the sender.
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Generating round two presign messages.");
+
         let (auxinfo_identifier, keyshare_identifier) =
             self.get_associated_identifiers_for_presign(&message.id())?;
 
@@ -439,12 +463,15 @@ impl PresignParticipant {
 
     /// Process a single request from round two
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Handling round two presign message.");
+
         // First, check that the sender's Round One messages have been processed
         let search_key = [(
             StorableType::PresignRoundOnePublic,
@@ -515,12 +542,15 @@ impl PresignParticipant {
     ///
     /// Each participant is only going to run round three once.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Generating round three presign messages.");
+
         let (auxinfo_identifier, keyshare_identifier) =
             self.get_associated_identifiers_for_presign(&message.id())?;
 
@@ -592,12 +622,15 @@ impl PresignParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
+        info!("Handling round three presign message.");
+
         // If we have not yet started round three, stash the message for later
         let r3_started = self
             .storage
@@ -636,7 +669,9 @@ impl PresignParticipant {
     /// In this step, the participant simply collects all r3 public values and
     /// its r3 private value, and assembles them into a PresignRecord.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
     fn do_presign_finish(&mut self, message: &Message) -> Result<PresignRecord> {
+        info!("Doing presign finish. Creating presign record.");
         let r3_pubs = self.get_other_participants_round_three_publics(message.id())?;
 
         // Get this participant's round 3 private value

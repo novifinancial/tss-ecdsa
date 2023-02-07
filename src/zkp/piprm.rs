@@ -165,6 +165,7 @@ mod tests {
     use super::*;
     use crate::paillier::DecryptionKey;
     use rand::Rng;
+    use test_log::test;
 
     fn random_ring_pedersen_proof<R: RngCore + CryptoRng>(
         rng: &mut R,

@@ -12,6 +12,8 @@
 use crate::protocol::{Identifier, ParticipantIdentifier};
 use displaydoc::Display;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Formatter};
+use tracing::{instrument, trace};
 
 /////////////////
 // Message API //
@@ -86,7 +88,7 @@ pub enum BroadcastMessageType {
 }
 
 /// A message that can be posted to (and read from) the broadcast channel
-#[derive(Debug, Clone, Display, Serialize, Deserialize)]
+#[derive(Clone, Display, Serialize, Deserialize)]
 pub struct Message {
     /// The type of the message
     pub(crate) message_type: MessageType,
@@ -103,8 +105,21 @@ pub struct Message {
     pub(crate) unverified_bytes: Vec<u8>,
 }
 
+/// Manually implement Debug instance to avoid printing unverified bytes.
+impl Debug for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Message")
+            .field("message_type", &self.message_type)
+            .field("identifier", &self.identifier)
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .finish()
+    }
+}
+
 impl Message {
     /// Creates a new instance of [Message]
+    #[instrument(skip_all)]
     pub fn new(
         message_type: MessageType,
         identifier: Identifier,
@@ -112,6 +127,7 @@ impl Message {
         to: ParticipantIdentifier,
         unverified_bytes: &[u8],
     ) -> Self {
+        trace!("New message created.");
         Self {
             message_type,
             identifier,
