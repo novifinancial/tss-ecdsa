@@ -9,7 +9,10 @@
 use crate::{
     auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
-    errors::{InternalError::InternalInvariantFailed, Result},
+    errors::{
+        InternalError::{self, InternalInvariantFailed},
+        Result,
+    },
     keygen::keyshare::{KeySharePrivate, KeySharePublic},
     messages::{Message, MessageType, PresignMessageType},
     parameters::ELL_PRIME,
@@ -125,7 +128,7 @@ impl PresignParticipant {
             MessageType::Presign(PresignMessageType::RoundThree) => {
                 Ok(self.handle_round_three_msg(rng, message, main_storage)?)
             }
-            _ => bail!("Attempting to process a non-presign message with a presign participant"),
+            _ => Err(InternalError::MisroutedMessage),
         }
     }
 
@@ -160,7 +163,7 @@ impl PresignParticipant {
         identifier: Identifier,
     ) -> Result<Message> {
         if self.presign_map.contains_key(&identifier) {
-            return bail!("This identifier is already being used for a Presign instance");
+            return Err(InternalError::IdentifierInUse);
         }
         // Set the presign map internally
         let _ = self
@@ -274,7 +277,7 @@ impl PresignParticipant {
         main_storage: &Storage,
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
         if broadcast_message.tag != BroadcastTag::PresignR1Ciphertexts {
-            return bail!("Incorrect tag for Presign R1 Broadcast!");
+            return Err(InternalError::IncorrectBroadcastMessageTag);
         }
         let message = &broadcast_message.msg;
         self.storage.store(
@@ -321,7 +324,7 @@ impl PresignParticipant {
                 message.to(),
             ),
         ];
-        if self.storage.contains_batch(&search_keys).is_err() {
+        if !self.storage.contains_batch(&search_keys)? {
             self.stash_message(message)?;
             return Ok((None, vec![]));
         }
@@ -364,9 +367,9 @@ impl PresignParticipant {
         )?;
 
         // Find the keyshare corresponding to the "from" participant
-        let keyshare_from = other_public_keyshares.get(&message.from()).ok_or_else(|| {
-            bail_context!("Could not find corresponding public keyshare for participant in round 2")
-        })?;
+        let keyshare_from = other_public_keyshares
+            .get(&message.from())
+            .ok_or(InternalInvariantFailed)?;
 
         // Get this participant's round 1 private value
         let r1_priv: RoundOnePrivate = deserialize!(&self.storage.retrieve(
@@ -447,7 +450,7 @@ impl PresignParticipant {
             message.id(),
             message.from(),
         )];
-        if self.storage.contains_batch(&search_key).is_err() {
+        if !self.storage.contains_batch(&search_key)? {
             self.stash_message(message)?;
             return Ok((None, vec![]));
         }
@@ -472,7 +475,7 @@ impl PresignParticipant {
             StorableType::AuxInfoPublic,
             auxinfo_identifier,
         )? {
-            return Err(InternalInvariantFailed);
+            return Err(InternalError::StorageItemNotFound);
         }
 
         // Check if storage has all of the other participants' round 2 values (both
@@ -645,7 +648,7 @@ impl PresignParticipant {
         // Check consistency across all Gamma values
         for r3_pub in r3_pubs.iter() {
             if r3_pub.Gamma != r3_private.Gamma {
-                return bail!("Inconsistency in presign finish -- Gamma mismatch");
+                return Err(InternalInvariantFailed);
             }
         }
 
@@ -662,9 +665,10 @@ impl PresignParticipant {
         &self,
         presign_identifier: &Identifier,
     ) -> Result<(Identifier, Identifier)> {
-        let (id1, id2) = self.presign_map.get(presign_identifier).ok_or_else(
-            || bail_context!("Could not find associated auxinfo and keyshare identifiers for this presign identifier")
-        )?;
+        let (id1, id2) = self
+            .presign_map
+            .get(presign_identifier)
+            .ok_or(InternalInvariantFailed)?;
 
         Ok((*id1, *id2))
     }
@@ -776,6 +780,7 @@ impl PresignParticipant {
         auxinfo_identifier: Identifier,
         main_storage: &Storage,
     ) -> Result<HashMap<ParticipantIdentifier, RoundThreeInput>> {
+        // begin by checking Storage contents to ensure we're ready for round three
         if !has_collected_all_of_others(
             &self.other_participant_ids,
             main_storage,
@@ -792,7 +797,7 @@ impl PresignParticipant {
             StorableType::PresignRoundTwoPublic,
             identifier,
         )? {
-            return bail!("Not ready to get other participants round three values just yet!");
+            return Err(InternalError::StorageItemNotFound);
         }
 
         let mut hm = HashMap::new();
@@ -838,18 +843,20 @@ impl PresignParticipant {
             StorableType::PresignRoundThreePublic,
             identifier,
         )? {
-            return bail!("Not ready to get other participants round three publics just yet!");
+            return Err(InternalError::StorageItemNotFound);
         }
-
-        let mut ret_vec = vec![];
-        for other_participant_id in self.other_participant_ids.clone() {
-            let val = self.storage.retrieve(
-                StorableType::PresignRoundThreePublic,
-                identifier,
-                other_participant_id,
-            )?;
-            ret_vec.push(deserialize!(&val)?);
-        }
+        let ret_vec = self
+            .other_participant_ids
+            .iter()
+            .map(|other_participant_id| {
+                let r3pub = deserialize!(&self.storage.retrieve(
+                    StorableType::PresignRoundThreePublic,
+                    identifier,
+                    *other_participant_id,
+                )?)?;
+                Ok(r3pub)
+            })
+            .collect::<Result<Vec<crate::round_three::Public>>>()?;
         Ok(ret_vec)
     }
 }

@@ -7,7 +7,7 @@
 // of this source tree.
 
 use crate::{
-    errors::Result,
+    errors::{InternalError, Result},
     protocol::{Identifier, ParticipantIdentifier},
 };
 use serde::{Deserialize, Serialize};
@@ -113,7 +113,7 @@ impl Storage {
     pub(crate) fn contains_batch(
         &self,
         type_and_id: &[(StorableType, Identifier, ParticipantIdentifier)],
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let storable_indices: Vec<StorableIndex> = type_and_id
             .iter()
             .map(|(t, identifier, participant)| StorableIndex {
@@ -132,11 +132,11 @@ impl Storage {
         s_type: StorableType,
         sid: Identifier,
         participants: &[ParticipantIdentifier],
-    ) -> Result<()> {
-        let mut fetch = vec![];
-        for participant in participants {
-            fetch.push((s_type, sid, *participant));
-        }
+    ) -> Result<bool> {
+        let fetch: Vec<(StorableType, Identifier, ParticipantIdentifier)> = participants
+            .iter()
+            .map(|participant| (s_type, sid, *participant))
+            .collect();
         self.contains_batch(&fetch)
     }
 
@@ -153,12 +153,7 @@ impl Storage {
         let ret = self
             .0
             .get(&key)
-            .ok_or_else(|| {
-                bail_context!(
-                    "Could not find {:?} when getting from storage",
-                    storable_index
-                )
-            })?
+            .ok_or_else(|| InternalError::StorageItemNotFound)?
             .clone();
 
         Ok(ret)
@@ -166,22 +161,19 @@ impl Storage {
 
     fn delete_index<I: Storable>(&mut self, storable_index: I) -> Result<Vec<u8>> {
         let key = serialize!(&storable_index)?;
-        self.0.remove(&key).ok_or_else(|| {
-            bail_context!(
-                "Could not find {:?} when getting from storage",
-                storable_index
-            )
-        })
+        self.0
+            .remove(&key)
+            .ok_or_else(|| InternalError::StorageItemNotFound)
     }
 
-    fn contains_index_batch<I: Storable>(&self, storable_indices: &[I]) -> Result<()> {
+    fn contains_index_batch<I: Storable>(&self, storable_indices: &[I]) -> Result<bool> {
         for storable_index in storable_indices {
             let key = serialize!(&storable_index)?;
             let ret = self.0.contains_key(&key);
             if !ret {
-                return bail!("Could not find key in hashmap");
+                return Ok(false);
             }
         }
-        Ok(())
+        Ok(true)
     }
 }

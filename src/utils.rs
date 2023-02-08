@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use crate::{
     auxinfo::info::AuxInfoPublic,
     errors::{
-        InternalError::{CouldNotConvertToScalar, RetryFailed},
+        InternalError::{self, CouldNotConvertToScalar, RetryFailed},
         Result,
     },
     storage::{StorableType, Storage},
@@ -115,7 +115,7 @@ pub(crate) fn random_plusminus_by_size_with_minimum<R: RngCore + CryptoRng>(
     min: usize,
 ) -> crate::errors::Result<BigNumber> {
     if min >= max {
-        return bail!("min_bound needs to be less than n");
+        return arg_err!("min needs to be less than max");
     }
     // Sample from [0, 2^max - 2^min], then add 2^min to bump into correct range.
     let min_bound_bn = (BigNumber::one() << max) - (BigNumber::one() << min);
@@ -248,8 +248,7 @@ mod tests {
 // Protocol Utility Functions //
 ////////////////////////////////
 
-/// Returns true if in storage, there is one storable_type for each other
-/// participant in the quorum.
+/// Errors unless there is one storable_type for each other participant in the quorum.
 pub(crate) fn has_collected_all_of_others(
     other_ids: &[ParticipantIdentifier],
     storage: &Storage,
@@ -260,7 +259,7 @@ pub(crate) fn has_collected_all_of_others(
         .iter()
         .map(|participant_id| (storable_type, identifier, *participant_id))
         .collect();
-    Ok(storage.contains_batch(&indices).is_ok())
+    storage.contains_batch(&indices)
 }
 
 /// Aggregate the other participants' public keyshares from storage. But don't
@@ -274,7 +273,7 @@ pub(crate) fn get_other_participants_public_auxinfo(
     identifier: Identifier,
 ) -> Result<HashMap<ParticipantIdentifier, AuxInfoPublic>> {
     if !has_collected_all_of_others(other_ids, storage, StorableType::AuxInfoPublic, identifier)? {
-        return bail!("Not ready to get other participants public auxinfo just yet!");
+        return Err(InternalError::StorageItemNotFound);
     }
 
     let mut hm = HashMap::new();
@@ -320,7 +319,7 @@ pub(crate) fn process_ready_message(
         fetch.push((storable_type, message.id(), participant));
     }
     fetch.push((storable_type, message.id(), self_id));
-    let is_ready = storage.contains_batch(&fetch).is_ok();
+    let is_ready = storage.contains_batch(&fetch)?;
 
     Ok((messages, is_ready))
 }

@@ -8,7 +8,7 @@
 
 use crate::{
     auxinfo::info::AuxInfoPublic,
-    errors::Result,
+    errors::{InternalError, Result},
     messages::{AuxinfoMessageType, Message, MessageType},
     protocol::{Identifier, ParticipantIdentifier},
 };
@@ -23,7 +23,7 @@ pub(crate) struct AuxInfoCommit {
 impl AuxInfoCommit {
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) {
-            return bail!("Wrong message type, expected MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash)");
+            return Err(InternalError::MisroutedMessage);
         }
         let auxinfo_commit: AuxInfoCommit = deserialize!(&message.unverified_bytes)?;
         Ok(auxinfo_commit)
@@ -61,9 +61,7 @@ impl AuxInfoDecommit {
 
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) {
-            return bail!(
-                "Wrong message type, expected MessageType::Auxinfo(AuxinfoMessageType::R2Decommit)"
-            );
+            return Err(InternalError::MisroutedMessage);
         }
         let auxinfo_decommit: AuxInfoDecommit = deserialize!(&message.unverified_bytes)?;
         Ok(auxinfo_decommit)
@@ -86,7 +84,7 @@ impl AuxInfoDecommit {
         sid: &Identifier,
         sender: &ParticipantIdentifier,
         com: &AuxInfoCommit,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         let mut transcript = Transcript::new(b"AuxinfoR1");
         let mut decom = &mut self.clone();
         decom.sid = *sid;
@@ -95,6 +93,11 @@ impl AuxInfoDecommit {
         let mut hash = [0u8; 32];
         transcript.challenge_bytes(b"hashing r1", &mut hash);
         let rebuilt_com = AuxInfoCommit { hash };
-        Ok(rebuilt_com == *com)
+
+        if rebuilt_com == *com {
+            Ok(())
+        } else {
+            verify_err!("decommitment does not match original commitment")
+        }
     }
 }

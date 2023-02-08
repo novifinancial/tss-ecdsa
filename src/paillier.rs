@@ -35,13 +35,6 @@ pub enum Error {
     NoPregeneratedPrimes(usize),
 }
 
-/// TODO: Remove this once `InternalError` is instantiated with thiserror.
-impl From<Error> for InternalError {
-    fn from(err: Error) -> Self {
-        InternalError::PaillierError(err)
-    }
-}
-
 /// A nonce generated as part of [`EncryptionKey::encrypt()`].
 /// A nonce is drawn from the multiplicative group of integers modulo `n`, where `n`
 /// is the modulus from the associated [`EncryptionKey`].
