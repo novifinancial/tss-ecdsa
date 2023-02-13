@@ -21,7 +21,8 @@ use crate::{
 use k256::elliptic_curve::{Field, IsHigh};
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
+use tracing::{info, instrument, trace};
 
 /////////////////////
 // Participant API //
@@ -49,7 +50,10 @@ pub struct Participant {
 
 impl Participant {
     /// Initialized the participant from a [ParticipantConfig]
+    #[instrument(err(Debug))]
     pub fn from_config(config: ParticipantConfig) -> Result<Self> {
+        info!("Initializing participant from config.");
+
         Ok(Participant {
             id: config.id,
             other_participant_ids: config.other_ids.clone(),
@@ -62,10 +66,13 @@ impl Participant {
 
     /// Instantiate a new quorum of participants of a specified size. Random
     /// identifiers are selected
+    #[instrument(skip_all, err(Debug))]
     pub fn new_quorum<R: RngCore + CryptoRng>(
         quorum_size: usize,
         rng: &mut R,
     ) -> Result<Vec<Self>> {
+        info!("Instantiating new quorum of size {quorum_size}");
+
         let mut participant_ids = vec![];
         for _ in 0..quorum_size {
             participant_ids.push(ParticipantIdentifier::random(rng));
@@ -94,11 +101,14 @@ impl Participant {
     /// potentially outputs a bunch of messages that need to be delivered to
     /// other participants' inboxes.
     #[cfg_attr(feature = "flame_it", flame)]
+    #[instrument(skip_all, err(Debug))]
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
         message: &Message,
         rng: &mut R,
     ) -> Result<Vec<Message>> {
+        info!("Processing single message.");
+
         if message.to() != self.id {
             return Err(InternalError::WrongMessageRecipient);
         }
@@ -135,7 +145,9 @@ impl Participant {
 
     /// Produces a message to signal to this participant that auxinfo generation
     /// is ready for the specified identifier
+    #[instrument(skip_all)]
     pub fn initialize_auxinfo_message(&self, auxinfo_identifier: Identifier) -> Message {
+        info!("Auxinfo generation is ready.");
         Message::new(
             MessageType::Auxinfo(AuxinfoMessageType::Ready),
             auxinfo_identifier,
@@ -147,7 +159,9 @@ impl Participant {
 
     /// Produces a message to signal to this participant that keyshare
     /// generation is ready for the specified identifier
+    #[instrument(skip_all)]
     pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Message {
+        info!("Keyshare generation is ready.");
         Message::new(
             MessageType::Keygen(KeygenMessageType::Ready),
             keygen_identifier,
@@ -160,12 +174,14 @@ impl Participant {
     /// Produces a message to signal to this participant that presignature
     /// generation is ready for the specified identifier. This also requires
     /// supplying the associated auxinfo identifier and keyshare identifier.
+    #[instrument(skip_all)]
     pub fn initialize_presign_message(
         &mut self,
         auxinfo_identifier: Identifier,
         keyshare_identifier: Identifier,
         identifier: Identifier,
     ) -> Result<Message> {
+        info!("Presignature generation is ready.");
         self.presign_participant.initialize_presign_message(
             auxinfo_identifier,
             keyshare_identifier,
@@ -174,6 +190,7 @@ impl Participant {
     }
 
     /// Returns true if auxinfo generation has completed for this identifier
+    #[instrument(skip_all)]
     pub fn is_auxinfo_done(&self, auxinfo_identifier: Identifier) -> Result<bool> {
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
@@ -186,6 +203,7 @@ impl Participant {
     }
 
     /// Returns true if keyshare generation has completed for this identifier
+    #[instrument(skip_all)]
     pub fn is_keygen_done(&self, keygen_identifier: Identifier) -> Result<bool> {
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
@@ -199,6 +217,7 @@ impl Participant {
 
     /// Returns true if presignature generation has completed for this
     /// identifier
+    #[instrument(skip_all)]
     pub fn is_presigning_done(&self, presign_identifier: Identifier) -> Result<bool> {
         self.main_storage.contains_batch(&[(
             StorableType::PresignRecord,
@@ -209,7 +228,9 @@ impl Participant {
 
     /// Retrieves this participant's associated public keyshare for this
     /// identifier
+    #[instrument(skip_all, err(Debug))]
     pub fn get_public_keyshare(&self, identifier: Identifier) -> Result<CurvePoint> {
+        info!("Retrieving our associated public keyshare.");
         let keyshare_public: KeySharePublic = deserialize!(&self.main_storage.retrieve(
             StorableType::PublicKeyshare,
             identifier,
@@ -220,11 +241,14 @@ impl Participant {
 
     /// If presign record is populated, then this participant is ready to issue
     /// a signature
+    #[instrument(skip_all, err(Debug))]
     pub fn sign(
         &mut self,
         presign_identifier: Identifier,
         digest: sha2::Sha256,
     ) -> Result<SignatureShare> {
+        info!("Issuing signature with presign record.");
+
         let pr_bytes =
             self.main_storage
                 .retrieve(StorableType::PresignRecord, presign_identifier, self.id)?;
@@ -284,7 +308,9 @@ impl SignatureShare {
     }
 
     /// Converts the [SignatureShare] into a signature
+    #[instrument(skip_all err(Debug))]
     pub fn finish(&self) -> Result<k256::ecdsa::Signature> {
+        info!("Converting signature share into a signature.");
         let mut s = self.s;
         if bool::from(s.is_high()) {
             s = s.negate();
@@ -328,20 +354,28 @@ impl std::fmt::Display for ParticipantIdentifier {
 }
 
 /// A generic identifier
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Identifier(u128);
+
+impl Debug for Identifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Id({})", hex::encode(&self.0.to_le_bytes()[..4]))
+    }
+}
 
 impl Identifier {
     /// Produces a random [Identifier]
+    #[instrument(skip_all)]
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         // Sample random 32 bytes and convert to hex
         let random_bytes = rng.gen::<u128>();
+        trace!("Created new Identifier({random_bytes})");
         Self(random_bytes)
     }
 }
 
 impl std::fmt::Display for Identifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "Id({})", hex::encode(&self.0.to_be_bytes()[..4]))
     }
 }
@@ -353,6 +387,8 @@ mod tests {
     use rand::seq::IteratorRandom;
     use sha2::{Digest, Sha256};
     use std::collections::HashMap;
+    use test_log::test;
+    use tracing::debug;
 
     /// Delivers all messages into their respective participant's inboxes   
     fn deliver_all(
@@ -415,7 +451,7 @@ mod tests {
         // This is done to simulate arbitrary message arrival ordering
         let index = rng.gen_range(0..inbox.len());
         let message = inbox.remove(index);
-        println!(
+        debug!(
             "processing participant: {}, with message type: {:?}",
             &participant.id,
             &message.message_type(),

@@ -190,6 +190,7 @@ impl PiSchProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_log::test;
 
     fn random_schnorr_proof<R: RngCore + CryptoRng>(
         rng: &mut R,

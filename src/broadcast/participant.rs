@@ -19,6 +19,7 @@ use crate::{
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::{info, instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct BroadcastParticipant {
@@ -77,11 +78,14 @@ impl BroadcastParticipant {
         }
     }
 
+    #[instrument(skip_all, err(Debug))]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+        info!("Processing broadcast message.");
+
         match message.message_type() {
             MessageType::Broadcast(BroadcastMessageType::Disperse) => {
                 let (output_option, messages) = self.handle_round_one_msg(rng, message)?;
@@ -95,6 +99,7 @@ impl BroadcastParticipant {
         }
     }
 
+    #[instrument(skip_all, err(Debug))]
     pub(crate) fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
@@ -103,6 +108,11 @@ impl BroadcastParticipant {
         sid: Identifier,
         tag: BroadcastTag,
     ) -> Result<Vec<Message>> {
+        info!(
+            "Generating round one broadcast messages of type: {:?}.",
+            message_type
+        );
+
         let b_data = BroadcastData {
             leader: self.id,
             tag,
@@ -126,11 +136,14 @@ impl BroadcastParticipant {
         Ok(messages)
     }
 
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+        info!("Handling round one broadcast message.");
+
         // [ [data, votes], [data, votes], ...]
         // for a given tag and sid, only run once
         let data = BroadcastData::from_message(message)?;
@@ -146,12 +159,15 @@ impl BroadcastParticipant {
         Ok((output_option, messages))
     }
 
+    #[instrument(skip_all, err(Debug))]
     fn process_vote(
         &mut self,
         data: BroadcastData,
         sid: Identifier,
         voter: ParticipantIdentifier,
     ) -> Result<Option<BroadcastOutput>> {
+        info!("Processing broadcast vote.");
+
         let mut message_votes: HashMap<BroadcastIndex, Vec<u8>> =
             match self
                 .storage
@@ -213,12 +229,15 @@ impl BroadcastParticipant {
         ))
     }
 
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
         leader: ParticipantIdentifier,
     ) -> Result<Vec<Message>> {
+        info!("Generating round two broadcast messages.");
+
         let data = BroadcastData::from_message(message)?;
         let data_bytes = serialize!(&data)?;
         // todo: handle this more memory-efficiently
@@ -239,11 +258,14 @@ impl BroadcastParticipant {
         Ok(messages)
     }
 
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
     ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+        info!("Handling round two broadcast message.");
+
         let data = BroadcastData::from_message(message)?;
         if data.leader == self.id() {
             return Ok((None, vec![]));

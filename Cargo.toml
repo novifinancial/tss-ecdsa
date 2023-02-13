@@ -31,18 +31,23 @@ rand = "0.8"
 serde = "1"
 sha2 = "0.9"
 thiserror = "1"
+tracing = "0.1.37"
 
 [dev-dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 criterion = "0.3"
 dialoguer = "0.10"
+env_logger = "0.10.0"
 glass_pumpkin = "1"
 indicatif = "0.16"
 openssl = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
 rocket = { version = "0.5.0-rc", default-features = false, features = ["json"] }
 rug = { version = "1.16", default-features = false, features = ["integer", "rand"] }
+test-log = { version = "0.2.11", features = ["trace"]}
+tracing = {version = "0.1", default-features = false}
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
 
 [[bench]]

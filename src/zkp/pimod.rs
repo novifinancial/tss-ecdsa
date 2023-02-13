@@ -374,6 +374,7 @@ mod tests {
         paillier::{prime_gen, DecryptionKey},
         parameters::SOUNDNESS_PARAMETER,
     };
+    use test_log::test;
 
     #[test]
     fn test_jacobi() {

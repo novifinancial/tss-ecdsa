@@ -360,6 +360,7 @@ pub(crate) mod prime_gen {
 mod test {
     use libpaillier::unknown_order::BigNumber;
     use rand::{CryptoRng, Rng, RngCore};
+    use test_log::test;
 
     use crate::{
         paillier::Ciphertext,

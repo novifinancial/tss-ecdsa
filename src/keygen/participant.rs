@@ -26,6 +26,7 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::{info, instrument};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct KeygenParticipant {
@@ -79,12 +80,15 @@ impl KeygenParticipant {
     /// [`KeySharePublic`](super::keyshare::KeySharePublic) once keygen is
     /// complete.
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all)]
     pub(crate) fn process_message<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Processing keygen message.");
+
         match message.message_type() {
             MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
                 let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
@@ -112,11 +116,14 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Handling ready keygen message.");
+
         let (mut messages, is_ready) = process_ready_message(
             self.id,
             &self.other_participant_ids,
@@ -134,11 +141,14 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round one keygen messages.");
+
         let (keyshare_private, keyshare_public) = new_keyshare(rng)?;
         self.storage.store(
             StorableType::PrivateKeyshare,
@@ -191,12 +201,15 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         broadcast_message: &BroadcastOutput,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round one keygen message.");
+
         if broadcast_message.tag != BroadcastTag::KeyGenR1CommitHash {
             return Err(InternalError::IncorrectBroadcastMessageTag);
         }
@@ -236,11 +249,14 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_two_msgs<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round two keygen messages.");
+
         // check that we've generated our keyshare before trying to retrieve it
         let fetch = vec![(StorableType::PublicKeyshare, message.id(), self.id)];
         let public_keyshare_generated = self.storage.contains_batch(&fetch)?;
@@ -273,12 +289,14 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_two_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round two keygen message.");
         // We must receive all commitments in round 1 before we start processing
         // decommits in round 2.
         let r1_done = self.storage.contains_for_all_ids(
@@ -330,11 +348,14 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn gen_round_three_msgs<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
     ) -> Result<Vec<Message>> {
+        info!("Generating round three keygen messages.");
+
         let rids: Vec<[u8; 32]> = self
             .other_participant_ids
             .iter()
@@ -415,12 +436,15 @@ impl KeygenParticipant {
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all, err(Debug))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<Vec<Message>> {
+        info!("Handling round three keygen message.");
+
         // We can't handle this message unless we already calculated the global_rid
         if self
             .storage
@@ -516,6 +540,8 @@ mod tests {
     use crate::Identifier;
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::HashMap;
+    use test_log::test;
+    use tracing::debug;
 
     impl KeygenParticipant {
         pub fn new_quorum<R: RngCore + CryptoRng>(
@@ -605,7 +631,7 @@ mod tests {
 
         let index = rng.gen_range(0..inbox.len());
         let message = inbox.remove(index);
-        println!(
+        debug!(
             "processing participant: {}, with message type: {:?} from {}",
             &participant.id,
             &message.message_type(),

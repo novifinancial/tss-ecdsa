@@ -264,6 +264,7 @@ mod tests {
         paillier::DecryptionKey,
         utils::{random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn},
     };
+    use test_log::test;
 
     fn build_random_proof<R: RngCore + CryptoRng>(
         rng: &mut R,

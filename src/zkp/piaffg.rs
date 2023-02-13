@@ -286,7 +286,7 @@ impl Proof for PiAffgProof {
 mod tests {
     use super::*;
     use crate::{paillier::DecryptionKey, utils::random_plusminus_by_size_with_minimum};
-
+    use test_log::test;
     fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         x: &BigNumber,

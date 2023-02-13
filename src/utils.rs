@@ -242,6 +242,7 @@ pub(crate) fn k256_order() -> BigNumber {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_log::test;
 
     #[test]
     fn test_random_bn_in_range() {

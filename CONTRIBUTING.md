@@ -87,3 +87,115 @@ An issue is done after:
 1. The developer rebases their branch with `main` again to catch any changes that may have happened during the review period.
 
 1. The developer merges their PR branch into `main` (or whichever branch they initially branched from). This should also close any relevant issues from the PR and delete the PR branch.
+
+## Logging
+This library supports logging using the [`tracing`](https://docs.rs/tracing/latest/tracing/)
+crate.
+
+### Main `tracing` Concepts.
+We utilize the following concept from `tracing`:
+- **Events**: These are the individual logging events that are called as our program executes. Events have an info level attached to them. You may create a new event by using the appropriate event macro from `tracing`, e.g:
+```
+info!("This is a logging event!");
+```
+You may add runtime values to our events as well:
+```
+debug!(
+    "processing participant: {}, with message type: {:?} from {}",
+     &participant.id,
+     &message.message_type(),
+    &message.from(),
+    );
+```
+This uses the same syntax as Rust string formatting.
+
+- **Spans** represent logical regions of code, usually a function. All _event_s within a span will have additional span data attached to the event. This allows us to add context-relevant data to an event without having to explicitly add this data
+  to our event. For example an event like `info!("Processing auxinfo message!")` within our spans will look like:
+```
+  2023-02-07T06:17:56.549284Z  INFO tss_ecdsa::auxinfo::participant: Handling auxinfo ready message.
+    at src/auxinfo/participant.rs:124
+    in tss_ecdsa::auxinfo::participant::handle_ready_msg with Message { message_type: Auxinfo(Ready), identifier: Id(69c21b05), from: ParticipantIdentifier(Id(95b1d9de)), to: ParticipantIdentifier(Id(2470af1b)) }
+    in tss_ecdsa::auxinfo::participant::process_message with Message { message_type: Auxinfo(Ready), identifier: Id(69c21b05), from: ParticipantIdentifier(Id(95b1d9de)), to: ParticipantIdentifier(Id(2470af1b)) }
+    in tss_ecdsa::protocol::process_single_message with Message { message_type: Auxinfo(Ready), identifier: Id(69c21b05), from: ParticipantIdentifier(Id(95b1d9de)), to: ParticipantIdentifier(Id(2470af1b)) }
+```
+This event has multiple spans attached. Such as: `handle_ready_msg`, `process_message`, and `process_single_message`. These spans allow us to understand the function call chain at a high-level. Additionally, spans
+may contain _fields_. These fields attached relevant data to all events within our span. In the log message above, we see our span has a single field `Message`. So `tracing` attached the `Debug` output of `Message` to the event.
+
+#### Adding your Own Span.
+The best way to create your own span is using the
+[`instrument`](https://docs.rs/tracing/0.1.37/tracing/attr.instrument.html) macro. This macro
+will automatically create a new span when the instrumented function is
+called. This span will have the name of the function and the module path as
+the `target` (this can be used for filtering by certain targets).
+
+Please follow the following template for instrumenting your function with
+spans:
+```text
+#[instrument(skip(sensitive_arg), err(Debug))]
+fn foo(arg1: _, arg2: _, sensitive_arg: SuperSecret) -> _ {}
+```
+By default, `instrument` will create a new span where every argument to a
+function is a span field. *This is not desirable for this library as we
+want to avoid logging sensitive data!* Make sure to skip sensitive arguments
+with the `skip(sensitive_arg_1, sensitive_arg_2, ...)` option. You can also use
+the `skip_all` option if none of the function arguments need to be logged.
+
+Finally, the `err(Debug)` option tells `tracing` that any `Result::Err(_)`
+returned from this function should be logged as events (with the default
+level of `error`). This is useful for logging where errors originated from in
+our code. The `Debug` part tells tracing to use the `Debug` implementation
+of this type for formatting, instead of the default `Display`.
+
+Note that by default, return values of functions are not recorded. You can
+add the `ret` option to `instrument` if you wish to record the Ok(_) return
+value as a field.
+
+`tracing` relies on the `Debug` implementation of types for printing values.
+Your type must implement `Debug` if you wish to include it as a field.
+
+#### Which Arguments Should be Recorded as Fields?
+In general, we should only include fields for our span that provide
+important information that should be attached to every event that happens
+within that span.
+
+Fields are useful for attaching data to every event without having to
+explicitly pass that data as arguments to functions.
+
+Note: *We should be careful to avoid recording any sensitive data as
+fields!*
+
+#### Which Function Should be `instrument`ed?
+We want to instrument functions which either:
+1) Logically represent an important step in our library.
+2) Record useful fields to be attached to event within that span.
+3) Have return values which are useful to log.
+
+Instrumenting multiple functions which call each other will create a useful
+"backtrace-like" context which allows us to understand the calling context
+of an event. For example:
+```text
+  2022-12-06T18:57:39.669808Z  INFO
+lock_keeper_key_server::operations::authenticate: Starting authentication protocol.
+    at lock-keeper-key-server/src/operations/authenticate.rs:38
+    in lock_keeper_key_server::operations::authenticate::operation
+    in lock_keeper_key_server::server::operation::handle_request with request_id: "52ad8008-1eb9-4ad5-8bce-0344a958fd1e", action: "Authenticate"
+```
+We want to avoid instrumenting uninteresting functions, e.g. functions which
+represent an implementation detail instead of a logical step in our library's
+execution.
+
+### Logging Levels
+So far our logging documentation has focused on the default tracing level of
+`INFO`. Events may be added for the following tracing levels: `error`,
+`warn`, `info`, `debug`, and `trace`. Here we give a brief overview of what
+falls under every level:
+- **error**: Report unexpected errors or failures in the system.
+- **warn**: Warn of unexpected errors, unforeseen program states, or
+  possible issues that are not necessarily fatal, but should be logged so
+  they may be debugged later.
+- **info**: For high-level, relevant, events to the execution of the code.
+  This is our default
+  logging level and should produce useful messages for developers.
+- **debug**: More verbose, good to have information for debugging purposes.
+- **trace**: Very verbose information that allows you to trace the execution
+  of a program at fine granularity, e.g. program control flow.
