@@ -21,7 +21,6 @@ use crate::{
     ring_pedersen::VerifiedRingPedersen,
     run_only_once,
     storage::{Storable, Storage},
-    utils::process_ready_message,
 };
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -56,10 +55,9 @@ pub(crate) struct AuxInfoParticipant {
 }
 
 impl ProtocolParticipant for AuxInfoParticipant {
-    // Currently, AuxInfo puts output directly into persistent storage instead of
-    // returning it to the calling Participant.
-    // TODO #193: Update this type to actually define the output.
-    type Output = ();
+    // The output type includes `AuxInfoPublic` material for all participants
+    // (including ourselves) and `AuxInfoPrivate` for ourselves.
+    type Output = (Vec<AuxInfoPublic>, AuxInfoPrivate);
 
     fn storage(&self) -> &Storage {
         &self.storage
@@ -73,6 +71,10 @@ impl ProtocolParticipant for AuxInfoParticipant {
         self.id
     }
 
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
+    }
+
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
@@ -83,30 +85,36 @@ impl ProtocolParticipant for AuxInfoParticipant {
     ) -> Result<ProcessOutcome<Self::Output>> {
         info!("Processing auxinfo message.");
 
-        let messages = match message.message_type() {
+        match message.message_type() {
             MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
-                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
-                if let Some(bmsg) = broadcast_option {
-                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                    messages.extend_from_slice(&more_messages);
-                };
-                messages
+                let (broadcast_option, messages) = self.handle_broadcast(rng, message)?;
+
+                // This is kind of a bastardization of the outcome type, but this is basically a
+                // conversion from the broadcast outcome type (with a
+                // BroadcastOutput) to the aux-info outcome type (with a ()).
+                let broadcast_outcome = ProcessOutcome::from(None, messages);
+
+                match broadcast_option {
+                    // If the round one broadcast worked, process the round one message.
+                    Some(bmsg) => {
+                        let round_one_outcome =
+                            self.handle_round_one_msg(rng, &bmsg, main_storage)?;
+                        broadcast_outcome.consolidate(vec![round_one_outcome])
+                    }
+                    // Otherwise, finish the broadcast.
+                    None => Ok(broadcast_outcome),
+                }
             }
-            MessageType::Auxinfo(AuxinfoMessageType::Ready) => {
-                self.handle_ready_msg(rng, message)?
-            }
+            MessageType::Auxinfo(AuxinfoMessageType::Ready) => self.handle_ready_msg(rng, message),
             MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) => {
-                self.handle_round_two_msg(rng, message, main_storage)?
+                self.handle_round_two_msg(rng, message, main_storage)
             }
             MessageType::Auxinfo(AuxinfoMessageType::R3Proof) => {
-                self.handle_round_three_msg(rng, message, main_storage)?
+                self.handle_round_three_msg(rng, message, main_storage)
             }
-            MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted)?,
-            _ => Err(InternalError::MisroutedMessage)?,
-        };
-
-        // TODO #193: This is wrong; at some point the protocol will be done.
-        Ok(ProcessOutcome::Processed(messages))
+            MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted),
+            _ => Err(InternalError::MisroutedMessage),
+        }
     }
 }
 
@@ -135,23 +143,21 @@ impl AuxInfoParticipant {
         &mut self,
         rng: &mut R,
         message: &Message,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling auxinfo ready message.");
 
-        let (mut messages, is_ready) = process_ready_message(
-            self.id,
-            &self.other_participant_ids,
-            &mut self.storage,
-            message,
-            StorageType::Ready,
-        )?;
+        let (ready_outcome, is_ready) = self.process_ready_message(message, StorageType::Ready)?;
 
         if is_ready {
-            let more_messages =
-                run_only_once!(self.gen_round_one_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
+            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_one_msgs(rng, message),
+                message.id()
+            )?);
+
+            ready_outcome.consolidate(vec![round_one_outcome])
+        } else {
+            Ok(ready_outcome)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
@@ -163,7 +169,7 @@ impl AuxInfoParticipant {
     ) -> Result<Vec<Message>> {
         info!("Generating round one auxinfo messages.");
 
-        let (auxinfo_private, auxinfo_public, auxinfo_witnesses) = new_auxinfo(rng)?;
+        let (auxinfo_private, auxinfo_public, auxinfo_witnesses) = new_auxinfo(self.id(), rng)?;
         self.storage.store(
             StorageType::Private,
             message.id(),
@@ -179,9 +185,8 @@ impl AuxInfoParticipant {
             &auxinfo_witnesses,
         )?;
 
-        let decom = AuxInfoDecommit::new(rng, &message.id(), &self.id, &auxinfo_public);
+        let decom = AuxInfoDecommit::new(rng, &message.id(), &self.id, auxinfo_public)?;
         let com = decom.commit()?;
-        let com_bytes = &serialize!(&com)?;
 
         self.storage
             .store(StorageType::Commit, message.id(), self.id, &com)?;
@@ -191,7 +196,7 @@ impl AuxInfoParticipant {
         let messages = self.broadcast(
             rng,
             &MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash),
-            com_bytes.clone(),
+            serialize!(&com)?,
             message.id(),
             BroadcastTag::AuxinfoR1CommitHash,
         )?;
@@ -205,7 +210,7 @@ impl AuxInfoParticipant {
         rng: &mut R,
         broadcast_message: &BroadcastOutput,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round one auxinfo message.");
 
         if broadcast_message.tag != BroadcastTag::AuxinfoR1CommitHash {
@@ -225,24 +230,29 @@ impl AuxInfoParticipant {
             message.id(),
             &self.other_participant_ids.clone(),
         )?;
-        let mut messages = vec![];
 
         if r1_done {
-            let more_messages =
-                run_only_once!(self.gen_round_two_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
-            // process any round 2 messages we may have received early
-            for msg in self
+            // Generate messages for round two...
+            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_two_msgs(rng, message),
+                message.id()
+            )?);
+
+            // ...and process any round two messages we may have received early.
+            let round_two_outcomes = self
                 .fetch_messages(
                     MessageType::Auxinfo(AuxinfoMessageType::R2Decommit),
                     message.id(),
                 )?
                 .iter()
-            {
-                messages.extend_from_slice(&self.handle_round_two_msg(rng, msg, main_storage)?);
-            }
+                .map(|msg| self.handle_round_two_msg(rng, msg, main_storage))
+                .collect::<Result<Vec<_>>>()?;
+
+            round_one_outcome.consolidate(round_two_outcomes)
+        } else {
+            // Round 1 isn't done, so we have neither outputs nor new messages to send.
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
@@ -293,7 +303,7 @@ impl AuxInfoParticipant {
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round two auxinfo message.");
 
         // We must receive all commitments in round 1 before we start processing
@@ -306,11 +316,9 @@ impl AuxInfoParticipant {
         if !r1_done {
             // store any early round2 messages
             self.stash_message(message)?;
-            return Ok(vec![]);
+            return Ok(ProcessOutcome::Incomplete);
         }
         let decom = AuxInfoDecommit::from_message(message)?;
-        decom.pk.verify()?;
-
         let com: AuxInfoCommit =
             self.storage
                 .retrieve(StorageType::Commit, message.id(), message.from())?;
@@ -324,23 +332,28 @@ impl AuxInfoParticipant {
             message.id(),
             &self.other_participant_ids.clone(),
         )?;
-        let mut messages = vec![];
 
         if r2_done {
-            let more_messages =
-                run_only_once!(self.gen_round_three_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
-            for msg in self
+            // Generate messages for round 3...
+            let round_two_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_three_msgs(rng, message),
+                message.id()
+            )?);
+
+            // ...and handle any messages that other participants have sent for round 3.
+            let round_three_outcomes = self
                 .fetch_messages(
                     MessageType::Auxinfo(AuxinfoMessageType::R3Proof),
                     message.id(),
                 )?
                 .iter()
-            {
-                messages.extend_from_slice(&self.handle_round_three_msg(rng, msg, main_storage)?);
-            }
+                .map(|msg| self.handle_round_three_msg(rng, msg, main_storage))
+                .collect::<Result<Vec<_>>>()?;
+
+            round_two_outcome.consolidate(round_three_outcomes)
+        } else {
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
@@ -361,7 +374,7 @@ impl AuxInfoParticipant {
                     message.id(),
                     other_participant_id,
                 )?;
-                Ok(decom.rid)
+                Ok(decom.rid())
             })
             .collect::<Result<Vec<[u8; 32]>>>()?;
         let my_decom: AuxInfoDecommit =
@@ -371,7 +384,7 @@ impl AuxInfoParticipant {
             self.storage
                 .retrieve(StorageType::Public, message.id(), self.id)?;
 
-        let mut global_rid = my_decom.rid;
+        let mut global_rid = my_decom.rid();
         // xor all the rids together. In principle, many different options for combining
         // these should be okay
         for rid in rids.iter() {
@@ -390,14 +403,14 @@ impl AuxInfoParticipant {
             rng,
             message.id(),
             global_rid,
-            &my_public.params,
+            my_public.params(),
             &(&witness.p * &witness.q),
             &witness.p,
             &witness.q,
         )?;
         let proof_bytes = serialize!(&proof)?;
 
-        let more_messages: Vec<Message> = self
+        let round_three_messages: Vec<Message> = self
             .other_participant_ids
             .iter()
             .map(|&other_participant_id| {
@@ -410,9 +423,11 @@ impl AuxInfoParticipant {
                 )
             })
             .collect();
-        Ok(more_messages)
+        Ok(round_three_messages)
     }
 
+    /// Handle a message from round three. Since round 3 is the last round, this
+    /// method never returns additional messages.
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     #[instrument(skip_all, err(Debug))]
     fn handle_round_three_msg<R: RngCore + CryptoRng>(
@@ -420,7 +435,7 @@ impl AuxInfoParticipant {
         _rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round three auxinfo message.");
 
         // We can't handle this message unless we already calculated the global_rid
@@ -430,7 +445,7 @@ impl AuxInfoParticipant {
             .is_err()
         {
             self.stash_message(message)?;
-            return Ok(vec![]);
+            return Ok(ProcessOutcome::Incomplete);
         }
 
         let global_rid: [u8; 32] =
@@ -440,14 +455,14 @@ impl AuxInfoParticipant {
             self.storage
                 .retrieve(StorageType::Decommit, message.id(), message.from())?;
 
-        let auxinfo_pub = decom.get_pk();
+        let auxinfo_pub = decom.into_public();
 
         let proof = AuxInfoProof::from_message(message)?;
         proof.verify(
             message.id(),
             global_rid,
-            &auxinfo_pub.params,
-            auxinfo_pub.pk.modulus(),
+            auxinfo_pub.params(),
+            auxinfo_pub.pk().modulus(),
         )?;
 
         self.storage.store(
@@ -457,13 +472,14 @@ impl AuxInfoParticipant {
             &auxinfo_pub,
         )?;
 
-        //check if we've stored all the public auxinfo_pubs
+        // Check if we've stored all the public auxinfo_pubs
         let keyshare_done = self.storage.contains_for_all_ids(
             StorageType::Public,
             message.id(),
             &[self.other_participant_ids.clone(), vec![self.id]].concat(),
         )?;
 
+        // If so, we completed the protocol! Return the outputs.
         if keyshare_done {
             for oid in self.other_participant_ids.iter() {
                 self.storage.transfer::<StorageType, AuxInfoPublic>(
@@ -485,14 +501,34 @@ impl AuxInfoParticipant {
                 message.id(),
                 self.id,
             )?;
+
+            let auxinfo_public = self
+                .all_participants()
+                .iter()
+                .map(|pid| {
+                    self.storage
+                        .retrieve(StorageType::Public, message.id(), *pid)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let auxinfo_private =
+                self.storage
+                    .retrieve(StorageType::Private, message.id(), self.id)?;
+
+            Ok(ProcessOutcome::Terminated((
+                auxinfo_public,
+                auxinfo_private,
+            )))
+        } else {
+            // Otherwise, we'll have to wait for more round three messages.
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(vec![])
     }
 }
 
 #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
 #[instrument(skip_all, err(Debug))]
 fn new_auxinfo<R: RngCore + CryptoRng>(
+    participant: ParticipantIdentifier,
     rng: &mut R,
 ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
     debug!("Creating new auxinfo.");
@@ -502,11 +538,8 @@ fn new_auxinfo<R: RngCore + CryptoRng>(
     let encryption_key = decryption_key.encryption_key();
 
     Ok((
-        AuxInfoPrivate { sk: decryption_key },
-        AuxInfoPublic {
-            pk: encryption_key,
-            params,
-        },
+        decryption_key.into(),
+        AuxInfoPublic::new(participant, encryption_key, params)?,
         AuxInfoWitnesses { p, q },
     ))
 }
@@ -593,12 +626,17 @@ mod tests {
         Ok(true)
     }
 
+    /// Pick a random participant and process one of the messages in their
+    /// inbox.
+    ///
+    /// Returns None if there are no messages for the selected participant.
+    #[allow(clippy::type_complexity)]
     fn process_messages<R: RngCore + CryptoRng>(
         quorum: &mut Vec<AuxInfoParticipant>,
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
         rng: &mut R,
         main_storages: &mut [Storage],
-    ) -> Result<()> {
+    ) -> Option<(usize, ProcessOutcome<(Vec<AuxInfoPublic>, AuxInfoPrivate)>)> {
         // Pick a random participant to process
         let index = rng.gen_range(0..quorum.len());
         let participant = quorum.get_mut(index).unwrap();
@@ -606,22 +644,24 @@ mod tests {
         let inbox = inboxes.get_mut(&participant.id).unwrap();
         if inbox.is_empty() {
             // No messages to process for this participant, so pick another participant
-            return Ok(());
+            return None;
         }
         let main_storage = main_storages.get_mut(index).unwrap();
 
-        let index = rng.gen_range(0..inbox.len());
-        let message = inbox.remove(index);
+        // Pick a random message to process
+        let message = inbox.remove(rng.gen_range(0..inbox.len()));
         debug!(
             "processing participant: {}, with message type: {:?} from {}",
             &participant.id,
             &message.message_type(),
             &message.from(),
         );
-        let outcome = participant.process_message(rng, &message, main_storage)?;
-        deliver_all(&outcome.into_messages(), inboxes)?;
-
-        Ok(())
+        Some((
+            index,
+            participant
+                .process_message(rng, &message, main_storage)
+                .unwrap(),
+        ))
     }
 
     #[cfg_attr(feature = "flame_it", flame)]
@@ -637,14 +677,18 @@ mod tests {
     }
     #[test]
     fn test_run_auxinfo_protocol() -> Result<()> {
+        let QUORUM_SIZE = 3;
         let mut rng = crate::utils::get_test_rng();
-        let mut quorum = AuxInfoParticipant::new_quorum(3, &mut rng)?;
+        let mut quorum = AuxInfoParticipant::new_quorum(QUORUM_SIZE, &mut rng)?;
         let mut inboxes = HashMap::new();
         let mut main_storages: Vec<Storage> = vec![];
         for participant in &quorum {
             let _ = inboxes.insert(participant.id, vec![]);
             main_storages.append(&mut vec![Storage::new()]);
         }
+        let mut outputs = std::iter::repeat_with(|| None)
+            .take(QUORUM_SIZE)
+            .collect::<Vec<_>>();
 
         let keyshare_identifier = Identifier::random(&mut rng);
 
@@ -653,12 +697,65 @@ mod tests {
             inbox.push(participant.initialize_auxinfo_message(keyshare_identifier));
         }
         while !is_auxinfo_done(&quorum, keyshare_identifier)? {
-            process_messages(&mut quorum, &mut inboxes, &mut rng, &mut main_storages)?;
+            // Try processing a message
+            let (index, outcome) =
+                match process_messages(&mut quorum, &mut inboxes, &mut rng, &mut main_storages) {
+                    None => continue,
+                    Some(x) => x,
+                };
+
+            // Deliver messages and save outputs
+            match outcome {
+                ProcessOutcome::Incomplete => {}
+                ProcessOutcome::Processed(messages) => deliver_all(&messages, &mut inboxes)?,
+                ProcessOutcome::Terminated(output) => outputs[index] = Some(output),
+                ProcessOutcome::TerminatedForThisParticipant(output, messages) => {
+                    deliver_all(&messages, &mut inboxes)?;
+                    outputs[index] = Some(output);
+                }
+            }
         }
 
-        // check that all players have a PublicKeyshare stored for every player and that
+        // Make sure every player got an output
+        let outputs: Vec<_> = outputs.into_iter().flatten().collect();
+        assert!(outputs.len() == QUORUM_SIZE);
+
+        // 1. Check returned outputs
+        // Every participant should have a public output from every other participant
+        // and, for a given participant, they should be the same in every output
+        for party in &quorum {
+            let pid = party.id;
+
+            // Collect the AuxInfoPublic associated with pid from every output
+            let mut publics_for_pid = vec![];
+            for (publics, _) in &outputs {
+                let public_key = publics
+                    .iter()
+                    .find(|public_key| *public_key.participant() == pid);
+                assert!(public_key.is_some());
+                // Check that it's valid while we're here.
+                assert!(public_key.unwrap().verify().is_ok());
+                publics_for_pid.push(public_key.unwrap());
+            }
+
+            // Make sure they're all equal
+            assert!(publics_for_pid.windows(2).all(|pks| pks[0] == pks[1]));
+        }
+
+        // Check that private outputs are consistent
+        for ((publics, private), pid) in outputs.iter().zip(quorum.iter().map(|p| p.id())) {
+            let public_key = publics
+                .iter()
+                .find(|public_key| *public_key.participant() == pid);
+            assert!(public_key.is_some());
+            assert_eq!(*public_key.unwrap().pk(), private.encryption_key());
+        }
+
+        // 2. Do the same checks on stored outputs
+
+        // Check that all players have a PublicKeyshare stored for every player and that
         // these values all match
-        for player in quorum.iter() {
+        for player in &quorum {
             let player_id = player.id;
             let mut stored_values = vec![];
             for main_storage in main_storages.iter() {
@@ -672,7 +769,7 @@ mod tests {
             }
         }
 
-        // check that each player's own AuxInfoPublic corresponds to their
+        // Check that each player's own AuxInfoPublic corresponds to their
         // AuxInfoPrivate
         for index in 0..quorum.len() {
             let player = quorum.get(index).unwrap();
@@ -682,8 +779,8 @@ mod tests {
                 main_storage.retrieve(StorageType::Public, keyshare_identifier, player_id)?;
             let sk: AuxInfoPrivate =
                 main_storage.retrieve(StorageType::Private, keyshare_identifier, player_id)?;
-            let pk2 = sk.sk.encryption_key();
-            assert!(serialize!(&pk2) == serialize!(&pk.pk));
+            let pk2 = sk.encryption_key();
+            assert_eq!(&pk2, pk.pk());
         }
 
         Ok(())

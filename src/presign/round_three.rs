@@ -54,8 +54,8 @@ impl Public {
         let psi_double_prime_input = CommonInput::new(
             sender_r1_public_broadcast.K.clone(),
             self.Delta,
-            receiver_keygen_public.params.scheme().clone(),
-            sender_keygen_public.pk.clone(),
+            receiver_keygen_public.params().scheme().clone(),
+            sender_keygen_public.pk().clone(),
             self.Gamma,
         );
         self.psi_double_prime

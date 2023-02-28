@@ -13,7 +13,7 @@ use crate::{
         Result,
     },
     storage::{Storable, Storage},
-    Identifier, Message, ParticipantIdentifier,
+    Identifier, ParticipantIdentifier,
 };
 use generic_array::GenericArray;
 use k256::{
@@ -24,7 +24,7 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 pub(crate) const CRYPTOGRAPHIC_RETRY_MAX: usize = 500usize;
 
@@ -310,42 +310,6 @@ pub(crate) fn get_other_participants_public_auxinfo(
         let _ = hm.insert(other_participant_id, val);
     }
     Ok(hm)
-}
-
-pub(crate) fn process_ready_message<T: Storable>(
-    self_id: ParticipantIdentifier,
-    other_ids: &[ParticipantIdentifier],
-    storage: &mut Storage,
-    message: &Message,
-    storable_type: T,
-) -> Result<(Vec<Message>, bool)> {
-    storage.store::<T, [u8; 0]>(storable_type, message.id(), message.from(), &[])?;
-
-    let mut messages = vec![];
-
-    // If message is coming from self, then tell the other participants that we are
-    // ready
-    if message.from() == self_id {
-        for &other_id in other_ids {
-            messages.push(Message::new(
-                message.message_type(),
-                message.id(),
-                self_id,
-                other_id,
-                &[],
-            ));
-        }
-    }
-
-    // Make sure that all parties are ready before proceeding
-    let mut fetch = vec![];
-    for &participant in other_ids {
-        fetch.push((storable_type, message.id(), participant));
-    }
-    fetch.push((storable_type, message.id(), self_id));
-    let is_ready = storage.contains_batch(&fetch)?;
-
-    Ok((messages, is_ready))
 }
 
 ////////////////////////////

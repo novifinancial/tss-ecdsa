@@ -6,6 +6,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use std::fmt::Debug;
+
 use crate::{
     auxinfo::info::AuxInfoPublic,
     errors::{InternalError, Result},
@@ -15,8 +17,9 @@ use crate::{
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub(crate) struct AuxInfoCommit {
     hash: [u8; 32],
 }
@@ -32,11 +35,25 @@ impl AuxInfoCommit {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AuxInfoDecommit {
-    pub sid: Identifier,
-    pub sender: ParticipantIdentifier,
-    pub rid: [u8; 32],
-    pub u_i: [u8; 32],
-    pub pk: AuxInfoPublic,
+    sid: Identifier,
+    sender: ParticipantIdentifier,
+    rid: [u8; 32],
+    u_i: [u8; 32],
+    public_keys: AuxInfoPublic,
+}
+
+impl Debug for AuxInfoDecommit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redacting rid and u_i because I'm not sure how sensitive they are. If later
+        // analysis suggests they're fine to print, please udpate accordingly.
+        f.debug_struct("AuxInfoDecommit")
+            .field("sid", &self.sid)
+            .field("sender", &self.sender)
+            .field("rid", &"[redacted]")
+            .field("u_i", &"[redacted]")
+            .field("public keys", &self.public_keys)
+            .finish()
+    }
 }
 
 impl AuxInfoDecommit {
@@ -44,19 +61,26 @@ impl AuxInfoDecommit {
         rng: &mut R,
         sid: &Identifier,
         sender: &ParticipantIdentifier,
-        pk: &AuxInfoPublic,
-    ) -> Self {
+        public_keys: AuxInfoPublic,
+    ) -> Result<Self> {
         let mut rid = [0u8; 32];
         let mut u_i = [0u8; 32];
         rng.fill_bytes(rid.as_mut_slice());
         rng.fill_bytes(u_i.as_mut_slice());
-        Self {
+
+        public_keys.verify()?;
+        if sender != public_keys.participant() {
+            error!("Created AuxInfoDecommit with different participant IDs in the sender and public_keys fields");
+            return Err(InternalError::InternalInvariantFailed);
+        }
+
+        Ok(Self {
             sid: *sid,
             sender: *sender,
             rid,
             u_i,
-            pk: pk.clone(),
-        }
+            public_keys,
+        })
     }
 
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
@@ -64,11 +88,47 @@ impl AuxInfoDecommit {
             return Err(InternalError::MisroutedMessage);
         }
         let auxinfo_decommit: AuxInfoDecommit = deserialize!(&message.unverified_bytes)?;
+
+        // Public parameters in this decommit must be consistent with each other
+        auxinfo_decommit.public_keys.verify()?;
+
+        // Owner must be consistent across message, public keys, and decommit
+        if *auxinfo_decommit.public_keys.participant() != auxinfo_decommit.sender {
+            error!(
+                "Deserialized AuxInfoDecommit has different participant IDs in the sender ({}) and public_keys ({}) fields",
+                auxinfo_decommit.sender,
+                auxinfo_decommit.public_keys.participant(),
+            );
+            return Err(InternalError::ProtocolError);
+        }
+        if auxinfo_decommit.sender != message.from() {
+            error!(
+                "Deserialized AuxInfoDecommit claiming to be from a different sender ({}) than the message was from ({})",
+                auxinfo_decommit.sender,
+                message.from()
+            );
+            return Err(InternalError::ProtocolError);
+        }
+
+        // Session ID must be correct
+        if auxinfo_decommit.sid != message.id() {
+            error!(
+                "Deserialized AuxInfoDecommit has different session ID ({}) than the message it came with ({})",
+                auxinfo_decommit.sid,
+                message.id()
+            );
+            return Err(InternalError::ProtocolError);
+        }
+
         Ok(auxinfo_decommit)
     }
 
-    pub(crate) fn get_pk(&self) -> &AuxInfoPublic {
-        &self.pk
+    pub(crate) fn rid(&self) -> [u8; 32] {
+        self.rid
+    }
+
+    pub(crate) fn into_public(self) -> AuxInfoPublic {
+        self.public_keys
     }
 
     pub(crate) fn commit(&self) -> Result<AuxInfoCommit> {
@@ -79,25 +139,36 @@ impl AuxInfoDecommit {
         Ok(AuxInfoCommit { hash })
     }
 
+    /// Verify that this [`AuxInfoDecommit`] corresponds to the given
+    /// [`AuxInfoCommit`].
     pub(crate) fn verify(
         &self,
         sid: &Identifier,
         sender: &ParticipantIdentifier,
         com: &AuxInfoCommit,
     ) -> Result<()> {
-        let mut transcript = Transcript::new(b"AuxinfoR1");
-        let mut decom = &mut self.clone();
-        decom.sid = *sid;
-        decom.sender = *sender;
-        transcript.append_message(b"decom", &serialize!(&decom)?);
-        let mut hash = [0u8; 32];
-        transcript.challenge_bytes(b"hashing r1", &mut hash);
-        let rebuilt_com = AuxInfoCommit { hash };
-
-        if rebuilt_com == *com {
-            Ok(())
-        } else {
-            verify_err!("decommitment does not match original commitment")
+        if *sid != self.sid {
+            error!(
+                "Decommitment has the wrong session ID. Got {}, expected {}.",
+                self.sid, sid
+            );
+            return Err(InternalError::ProtocolError);
         }
+        if *sender != self.sender {
+            error!(
+                "Decommitment has the wrong sender ID. Got {}, expected {}.",
+                self.sender, sender
+            );
+            return Err(InternalError::ProtocolError);
+        }
+
+        let rebuilt_com = self.commit()?;
+
+        if rebuilt_com != *com {
+            error!("Commitment verification failed; does not match commitment. Decommitment: {:?}. Commitment: {:?}", self, com);
+            return Err(InternalError::ProtocolError);
+        }
+
+        Ok(())
     }
 }

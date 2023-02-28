@@ -65,8 +65,8 @@ impl Public {
         let round_one_public: Self = deserialize!(&message.unverified_bytes)?;
 
         round_one_public.verify(
-            &receiver_keygen_public.params,
-            sender_keygen_public.pk.clone(),
+            receiver_keygen_public.params(),
+            sender_keygen_public.pk().clone(),
             broadcasted_params.K.clone(),
         )?;
         Ok(round_one_public)

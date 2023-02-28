@@ -46,7 +46,7 @@ pub(crate) struct BroadcastIndex {
     other_id: ParticipantIdentifier,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BroadcastOutput {
     pub(crate) tag: BroadcastTag,
     pub(crate) msg: Message,
@@ -65,6 +65,10 @@ impl ProtocolParticipant for BroadcastParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
     }
 
     #[instrument(skip_all, err(Debug))]

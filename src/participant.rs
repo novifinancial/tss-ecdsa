@@ -8,16 +8,17 @@
 
 use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
-    errors::Result,
+    errors::{InternalError, Result},
     message_queue::MessageQueue,
     messages::{Message, MessageType},
     protocol::ParticipantIdentifier,
-    storage::{PersistentStorageType, Storage},
+    storage::{PersistentStorageType, Storable, Storage},
     Identifier,
 };
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
+use tracing::error;
 
 #[derive(Serialize, Deserialize)]
 struct ProgressIndex {
@@ -45,7 +46,22 @@ pub(crate) enum ProcessOutcome<O> {
     Terminated(O),
 }
 
-impl<O> ProcessOutcome<O> {
+impl<O> Debug for ProcessOutcome<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let descriptor = match self {
+            ProcessOutcome::Incomplete => "Incomplete",
+            ProcessOutcome::Processed(_) => "Processed",
+            ProcessOutcome::Terminated(_) => "Terminated",
+            ProcessOutcome::TerminatedForThisParticipant(_, _) => "Terminated for this participant",
+        };
+        write!(f, "ProcessOutcome::{descriptor}")
+    }
+}
+
+impl<O> ProcessOutcome<O>
+where
+    O: std::fmt::Debug,
+{
     /// Create a [`ProcessOutcome`] from an optional output and a set of
     /// outgoing messages.
     pub(crate) fn from(output: Option<O>, messages: Vec<Message>) -> Self {
@@ -78,6 +94,34 @@ impl<O> ProcessOutcome<O> {
             Self::Terminated(output) => (Some(output), Vec::new()),
         }
     }
+
+    /// Consolidate a set of `ProcessOutcome`s, including `self`, into a single
+    /// outcome.
+    ///
+    /// This collects all of the messages into a single set, and makes sure that
+    /// there's no more than one output specified among all the outcomes.
+    pub(crate) fn consolidate(self, outcomes: Vec<Self>) -> Result<Self> {
+        let (outputs, messages): (Vec<_>, Vec<_>) = std::iter::once(self)
+            .chain(outcomes)
+            .map(Self::into_parts)
+            .unzip();
+
+        // Get the first output, if it exists.
+        let mut actual_outputs = outputs.into_iter().flatten();
+        let output = actual_outputs.next();
+        // Throw an error if there's more than one
+        if actual_outputs.next().is_some() {
+            error!(
+                "Produced more than one output in a single session. {:?}",
+                actual_outputs
+            );
+            Err(InternalError::InternalInvariantFailed)?
+        }
+
+        let messages = messages.into_iter().flatten().collect();
+
+        Ok(ProcessOutcome::from(output, messages))
+    }
 }
 
 pub(crate) trait ProtocolParticipant {
@@ -87,6 +131,7 @@ pub(crate) trait ProtocolParticipant {
     fn storage(&self) -> &Storage;
     fn storage_mut(&mut self) -> &mut Storage;
     fn id(&self) -> ParticipantIdentifier;
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier>;
 
     /// Process an incoming message.
     ///
@@ -109,6 +154,55 @@ pub(crate) trait ProtocolParticipant {
         message: &Message,
         main_storage: &mut Storage,
     ) -> Result<ProcessOutcome<Self::Output>>;
+
+    /// Returns a list of all participant IDs, including `self`'s.
+    fn all_participants(&self) -> Vec<ParticipantIdentifier> {
+        let mut participant = self.other_ids().clone();
+        participant.push(self.id());
+        participant
+    }
+
+    /// Process a `ready` message: tell other participants that we're ready and
+    /// see if all others have also reported that they are ready.
+    fn process_ready_message<T: Storable>(
+        &mut self,
+        message: &Message,
+        storable_type: T,
+    ) -> Result<(ProcessOutcome<Self::Output>, bool)> {
+        // Save the message to local storage so we know the sending party is ready
+        self.storage_mut()
+            .store::<T, [u8; 0]>(storable_type, message.id(), message.from(), &[])?;
+
+        // If message came from self, then tell the other participants that we are ready
+        let self_initiated_outcome = if message.from() == self.id() {
+            let messages = self
+                .other_ids()
+                .iter()
+                .map(|other_id| {
+                    Message::new(
+                        message.message_type(),
+                        message.id(),
+                        self.id(),
+                        *other_id,
+                        &[],
+                    )
+                })
+                .collect();
+            ProcessOutcome::Processed(messages)
+        } else {
+            ProcessOutcome::Incomplete
+        };
+
+        // Make sure that all parties are ready before proceeding
+        let fetch: Vec<_> = self
+            .all_participants()
+            .iter()
+            .map(|pid| (storable_type, message.id(), *pid))
+            .collect();
+        let is_ready = self.storage().contains_batch(&fetch)?;
+
+        Ok((self_initiated_outcome, is_ready))
+    }
 
     fn stash_message(&mut self, message: &Message) -> Result<()> {
         let mut message_storage: MessageQueue = self

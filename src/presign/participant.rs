@@ -34,7 +34,7 @@ use crate::{
     storage::{PersistentStorageType, Storable, Storage},
     utils::{
         bn_to_scalar, get_other_participants_public_auxinfo, has_collected_all_of_others,
-        k256_order, process_ready_message, random_plusminus_by_size, random_positive_bn,
+        k256_order, random_plusminus_by_size, random_positive_bn,
     },
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
@@ -96,6 +96,10 @@ impl ProtocolParticipant for PresignParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
     }
 
     /// Processes the incoming message given the storage from the protocol
@@ -172,13 +176,8 @@ impl PresignParticipant {
     ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
         info!("Handling ready presign message.");
 
-        let (mut messages, is_ready) = process_ready_message(
-            self.id,
-            &self.other_participant_ids,
-            &mut self.storage,
-            message,
-            StorageType::Ready,
-        )?;
+        let (ready_outcome, is_ready) = self.process_ready_message(message, StorageType::Ready)?;
+        let mut messages = ready_outcome.into_messages();
 
         if is_ready {
             let (pr, more_messages) = self.gen_round_one_msgs(rng, message, main_storage)?;
@@ -972,9 +971,9 @@ impl PresignKeyShareAndInfo {
         let gamma = random_positive_bn(rng, &order);
 
         // Sample rho <- Z_N^* and set K = enc(k; rho)
-        let (K, rho) = self.aux_info_public.pk.encrypt(rng, &k)?;
+        let (K, rho) = self.aux_info_public.pk().encrypt(rng, &k)?;
         // Sample nu <- Z_N^* and set G = enc(gamma; nu)
-        let (G, nu) = self.aux_info_public.pk.encrypt(rng, &gamma)?;
+        let (G, nu) = self.aux_info_public.pk().encrypt(rng, &gamma)?;
 
         let mut r1_publics = HashMap::new();
         for (id, aux_info_public) in public_keys {
@@ -982,8 +981,8 @@ impl PresignKeyShareAndInfo {
             let mut transcript = Transcript::new(b"PiEncProof");
             let proof = PiEncProof::prove(
                 &crate::zkp::pienc::PiEncInput::new(
-                    aux_info_public.params.clone(),
-                    self.aux_info_public.pk.clone(),
+                    aux_info_public.params().clone(),
+                    self.aux_info_public.pk().clone(),
                     K.clone(),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(k.clone(), rho.clone()),
@@ -1037,21 +1036,21 @@ impl PresignKeyShareAndInfo {
         // values are equal. The betas are components of additive shares of
         // secret values, so it shouldn't matter where the negation happens
         // (Round 2 vs Round 3).
-        let (beta_ciphertext, s) = receiver_aux_info.pk.encrypt(rng, &beta)?;
-        let (beta_hat_ciphertext, s_hat) = receiver_aux_info.pk.encrypt(rng, &beta_hat)?;
+        let (beta_ciphertext, s) = receiver_aux_info.pk().encrypt(rng, &beta)?;
+        let (beta_hat_ciphertext, s_hat) = receiver_aux_info.pk().encrypt(rng, &beta_hat)?;
 
-        let D = receiver_aux_info.pk.multiply_and_add(
+        let D = receiver_aux_info.pk().multiply_and_add(
             &sender_r1_priv.gamma,
             &receiver_r1_pub_broadcast.K,
             &beta_ciphertext,
         )?;
-        let D_hat = receiver_aux_info.pk.multiply_and_add(
+        let D_hat = receiver_aux_info.pk().multiply_and_add(
             &self.keyshare_private.x,
             &receiver_r1_pub_broadcast.K,
             &beta_hat_ciphertext,
         )?;
-        let (F, r) = self.aux_info_public.pk.encrypt(rng, &beta)?;
-        let (F_hat, r_hat) = self.aux_info_public.pk.encrypt(rng, &beta_hat)?;
+        let (F, r) = self.aux_info_public.pk().encrypt(rng, &beta)?;
+        let (F_hat, r_hat) = self.aux_info_public.pk().encrypt(rng, &beta_hat)?;
 
         let g = CurvePoint::GENERATOR;
         let Gamma = CurvePoint(g.0 * bn_to_scalar(&sender_r1_priv.gamma)?);
@@ -1060,10 +1059,10 @@ impl PresignKeyShareAndInfo {
         let mut transcript = Transcript::new(b"PiAffgProof");
         let psi = PiAffgProof::prove(
             &PiAffgInput::new(
-                &receiver_aux_info.params,
+                receiver_aux_info.params(),
                 &g,
-                &receiver_aux_info.pk,
-                &self.aux_info_public.pk,
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
                 &receiver_r1_pub_broadcast.K,
                 &D,
                 &F,
@@ -1076,10 +1075,10 @@ impl PresignKeyShareAndInfo {
         let mut transcript = Transcript::new(b"PiAffgProof");
         let psi_hat = PiAffgProof::prove(
             &PiAffgInput::new(
-                &receiver_aux_info.params,
+                receiver_aux_info.params(),
                 &g,
-                &receiver_aux_info.pk,
-                &self.aux_info_public.pk,
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
                 &receiver_r1_pub_broadcast.K,
                 &D_hat,
                 &F_hat,
@@ -1094,8 +1093,8 @@ impl PresignKeyShareAndInfo {
             &CommonInput::new(
                 sender_r1_priv.G.clone(),
                 Gamma,
-                receiver_aux_info.params.scheme().clone(),
-                self.aux_info_public.pk.clone(),
+                receiver_aux_info.params().scheme().clone(),
+                self.aux_info_public.pk().clone(),
                 g,
             ),
             &ProverSecret::new(sender_r1_priv.gamma.clone(), sender_r1_priv.nu.clone()),
@@ -1144,8 +1143,14 @@ impl PresignKeyShareAndInfo {
             let r2_pub_j = round_three_input.r2_public.clone();
             let r2_priv_j = round_three_input.r2_private.clone();
 
-            let alpha = self.aux_info_private.sk.decrypt(&r2_pub_j.D)?;
-            let alpha_hat = self.aux_info_private.sk.decrypt(&r2_pub_j.D_hat)?;
+            let alpha = self
+                .aux_info_private
+                .decryption_key()
+                .decrypt(&r2_pub_j.D)?;
+            let alpha_hat = self
+                .aux_info_private
+                .decryption_key()
+                .decrypt(&r2_pub_j.D_hat)?;
 
             delta = delta.modadd(&alpha.modsub(&r2_priv_j.beta, &order), &order);
             chi = chi.modadd(&alpha_hat.modsub(&r2_priv_j.beta_hat, &order), &order);
@@ -1164,8 +1169,8 @@ impl PresignKeyShareAndInfo {
                 &CommonInput::new(
                     sender_r1_priv.K.clone(),
                     Delta,
-                    round_three_input.auxinfo_public.params.scheme().clone(),
-                    self.aux_info_public.pk.clone(),
+                    round_three_input.auxinfo_public.params().scheme().clone(),
+                    self.aux_info_public.pk().clone(),
                     Gamma,
                 ),
                 &ProverSecret::new(sender_r1_priv.k.clone(), sender_r1_priv.rho.clone()),

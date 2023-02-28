@@ -18,7 +18,7 @@ use crate::{
     protocol::ParticipantIdentifier,
     run_only_once,
     storage::{PersistentStorageType, Storable, Storage},
-    utils::{k256_order, process_ready_message},
+    utils::k256_order,
     zkp::pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
     CurvePoint,
 };
@@ -70,6 +70,10 @@ impl ProtocolParticipant for KeygenParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
@@ -135,13 +139,8 @@ impl KeygenParticipant {
     ) -> Result<Vec<Message>> {
         info!("Handling ready keygen message.");
 
-        let (mut messages, is_ready) = process_ready_message(
-            self.id,
-            &self.other_participant_ids,
-            &mut self.storage,
-            message,
-            StorageType::Ready,
-        )?;
+        let (outcome, is_ready) = self.process_ready_message(message, StorageType::Ready)?;
+        let mut messages = outcome.into_messages();
 
         if is_ready {
             let more_messages =

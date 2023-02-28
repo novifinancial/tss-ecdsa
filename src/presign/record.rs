@@ -6,6 +6,8 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+use std::fmt::Debug;
+
 use crate::{
     errors::{
         InternalError::{CouldNotConvertToScalar, CouldNotInvertScalar, InternalInvariantFailed},
@@ -33,6 +35,19 @@ pub(crate) struct PresignRecord {
     R: CurvePoint,
     k: BigNumber,
     chi: k256::Scalar,
+}
+
+impl Debug for PresignRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redacting all the fields because I'm not sure how sensitive they are. If
+        // later analysis suggests they're fine to print, please udpate
+        // accordingly.
+        f.debug_struct("PresignRecord")
+            .field("R", &"[redacted]")
+            .field("k", &"[redacted]")
+            .field("chi", &"[redacted]")
+            .finish()
+    }
 }
 
 impl TryFrom<RecordPair> for PresignRecord {

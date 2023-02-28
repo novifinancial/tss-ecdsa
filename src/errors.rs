@@ -21,6 +21,8 @@ pub type Result<T> = std::result::Result<T, InternalError>;
 pub enum InternalError {
     #[error("Serialization Error")]
     Serialization,
+    #[error("Protocol error")]
+    ProtocolError,
     #[error("Could not successfully generate proof")]
     CouldNotGenerateProof,
     #[error("Failed to verify proof: `{0}`")]

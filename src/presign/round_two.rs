@@ -55,10 +55,10 @@ impl Public {
 
         // Verify the psi proof
         let psi_input = PiAffgInput::new(
-            &receiver_auxinfo_public.params,
+            receiver_auxinfo_public.params(),
             &g,
-            &receiver_auxinfo_public.pk,
-            &sender_auxinfo_public.pk,
+            receiver_auxinfo_public.pk(),
+            sender_auxinfo_public.pk(),
             &receiver_r1_private.K,
             &self.D,
             &self.F,
@@ -69,10 +69,10 @@ impl Public {
 
         // Verify the psi_hat proof
         let psi_hat_input = PiAffgInput::new(
-            &receiver_auxinfo_public.params,
+            receiver_auxinfo_public.params(),
             &g,
-            &receiver_auxinfo_public.pk,
-            &sender_auxinfo_public.pk,
+            receiver_auxinfo_public.pk(),
+            sender_auxinfo_public.pk(),
             &receiver_r1_private.K,
             &self.D_hat,
             &self.F_hat,
@@ -85,8 +85,8 @@ impl Public {
         let psi_prime_input = CommonInput::new(
             sender_r1_public_broadcast.G.clone(),
             self.Gamma,
-            receiver_auxinfo_public.params.scheme().clone(),
-            sender_auxinfo_public.pk.clone(),
+            receiver_auxinfo_public.params().scheme().clone(),
+            sender_auxinfo_public.pk().clone(),
             g,
         );
         let mut transcript = Transcript::new(b"PiLogProof");

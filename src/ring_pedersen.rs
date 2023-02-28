@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 /// A commitment scheme based on a ring-variant of the Pedersen commitment
 /// scheme.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RingPedersen {
     /// The RSA modulus, corresponding to `N` in the paper.
     modulus: BigNumber,
@@ -49,6 +49,13 @@ pub(crate) struct VerifiedRingPedersen {
     /// [`VerifiedRingPedersen::scheme`].
     proof: PiPrmProof,
 }
+
+impl PartialEq for VerifiedRingPedersen {
+    fn eq(&self, other: &Self) -> bool {
+        self.scheme == other.scheme
+    }
+}
+impl Eq for VerifiedRingPedersen {}
 
 /// A commitment produced by [`RingPedersen::commit`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

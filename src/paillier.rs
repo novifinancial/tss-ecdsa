@@ -14,6 +14,7 @@ use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zeroize::ZeroizeOnDrop;
 
 #[cfg(test)]
 use crate::utils::random_positive_bn;
@@ -67,6 +68,14 @@ impl Ciphertext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EncryptionKey(libpaillier::EncryptionKey);
+
+// This is stupid and should have been derived by the underlying crate.
+impl PartialEq for EncryptionKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.n() == other.0.n() && self.0.nn() == other.0.nn()
+    }
+}
+impl Eq for EncryptionKey {}
 
 impl EncryptionKey {
     /// Return this [`EncryptionKey`]s modulus.
@@ -181,7 +190,7 @@ impl EncryptionKey {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub(crate) struct DecryptionKey(libpaillier::DecryptionKey);
 
 impl DecryptionKey {
