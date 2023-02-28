@@ -16,7 +16,7 @@ use crate::{
     keygen::keyshare::{KeySharePrivate, KeySharePublic},
     messages::{Message, MessageType, PresignMessageType},
     parameters::ELL_PRIME,
-    participant::{Broadcast, ProtocolParticipant},
+    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
     presign::{
         record::{PresignRecord, RecordPair},
         round_one::{
@@ -65,6 +65,8 @@ pub(crate) struct PresignParticipant {
 }
 
 impl ProtocolParticipant for PresignParticipant {
+    type Output = PresignRecord;
+
     fn storage(&self) -> &Storage {
         &self.storage
     }
@@ -75,6 +77,49 @@ impl ProtocolParticipant for PresignParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    /// Processes the incoming message given the storage from the protocol
+    /// participant (containing auxinfo and keygen artifacts). Optionally
+    /// produces a [PresignRecord] once presigning is complete.
+    #[cfg_attr(feature = "flame_it", flame("presign"))]
+    #[instrument(skip_all, err(Debug))]
+    fn process_message<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+        main_storage: &mut Storage,
+    ) -> Result<ProcessOutcome<Self::Output>> {
+        info!("Processing presign message.");
+
+        let (output, messages) = match message.message_type() {
+            MessageType::Presign(PresignMessageType::Ready) => {
+                self.handle_ready_msg(rng, message, main_storage)
+            }
+            MessageType::Presign(PresignMessageType::RoundOneBroadcast) => {
+                match self.handle_broadcast(rng, message)? {
+                    (Some(bmsg), mut messages) => {
+                        let (pr, more_messages) =
+                            self.handle_round_one_broadcast_msg(rng, &bmsg, main_storage)?;
+                        messages.extend_from_slice(&more_messages);
+                        Ok((pr, messages))
+                    }
+                    (None, messages) => Ok((None, messages)),
+                }
+            }
+            MessageType::Presign(PresignMessageType::RoundOne) => {
+                self.handle_round_one_msg(rng, message, main_storage)
+            }
+            MessageType::Presign(PresignMessageType::RoundTwo) => {
+                self.handle_round_two_msg(rng, message, main_storage)
+            }
+            MessageType::Presign(PresignMessageType::RoundThree) => {
+                self.handle_round_three_msg(rng, message, main_storage)
+            }
+
+            _ => Err(InternalError::MisroutedMessage),
+        }?;
+        Ok(ProcessOutcome::from(output, messages))
     }
 }
 
@@ -95,47 +140,6 @@ impl PresignParticipant {
             storage: Storage::new(),
             presign_map: HashMap::new(),
             broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
-    /// Processes the incoming message given the storage from the protocol
-    /// participant (containing auxinfo and keygen artifacts). Optionally
-    /// produces a [PresignRecord] once presigning is complete.
-    #[cfg_attr(feature = "flame_it", flame("presign"))]
-    #[instrument(skip_all, err(Debug))]
-    pub(crate) fn process_message<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-        main_storage: &Storage,
-    ) -> Result<(Option<PresignRecord>, Vec<Message>)> {
-        info!("Processing presign message.");
-
-        match message.message_type() {
-            MessageType::Presign(PresignMessageType::Ready) => {
-                Ok(self.handle_ready_msg(rng, message, main_storage)?)
-            }
-            MessageType::Presign(PresignMessageType::RoundOneBroadcast) => {
-                match self.handle_broadcast(rng, message)? {
-                    (Some(bmsg), mut messages) => {
-                        let (pr, more_messages) =
-                            self.handle_round_one_broadcast_msg(rng, &bmsg, main_storage)?;
-                        messages.extend_from_slice(&more_messages);
-                        Ok((pr, messages))
-                    }
-                    (None, messages) => Ok((None, messages)),
-                }
-            }
-            MessageType::Presign(PresignMessageType::RoundOne) => {
-                Ok(self.handle_round_one_msg(rng, message, main_storage)?)
-            }
-            MessageType::Presign(PresignMessageType::RoundTwo) => {
-                Ok(self.handle_round_two_msg(rng, message, main_storage)?)
-            }
-            MessageType::Presign(PresignMessageType::RoundThree) => {
-                Ok(self.handle_round_three_msg(rng, message, main_storage)?)
-            }
-            _ => Err(InternalError::MisroutedMessage),
         }
     }
 

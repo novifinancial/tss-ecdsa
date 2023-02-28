@@ -15,7 +15,7 @@ use crate::{
     errors::{InternalError, Result},
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
-    participant::{Broadcast, ProtocolParticipant},
+    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
     protocol::ParticipantIdentifier,
     ring_pedersen::VerifiedRingPedersen,
     run_only_once,
@@ -42,6 +42,11 @@ pub(crate) struct AuxInfoParticipant {
 }
 
 impl ProtocolParticipant for AuxInfoParticipant {
+    // Currently, AuxInfo puts output directly into persistent storage instead of
+    // returning it to the calling Participant.
+    // TODO #193: Update this type to actually define the output.
+    type Output = ();
+
     fn storage(&self) -> &Storage {
         &self.storage
     }
@@ -52,6 +57,42 @@ impl ProtocolParticipant for AuxInfoParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
+    fn process_message<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+        main_storage: &mut Storage,
+    ) -> Result<ProcessOutcome<Self::Output>> {
+        info!("Processing auxinfo message.");
+
+        let messages = match message.message_type() {
+            MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
+                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
+                if let Some(bmsg) = broadcast_option {
+                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
+                    messages.extend_from_slice(&more_messages);
+                };
+                messages
+            }
+            MessageType::Auxinfo(AuxinfoMessageType::Ready) => {
+                self.handle_ready_msg(rng, message)?
+            }
+            MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) => {
+                self.handle_round_two_msg(rng, message, main_storage)?
+            }
+            MessageType::Auxinfo(AuxinfoMessageType::R3Proof) => {
+                self.handle_round_three_msg(rng, message, main_storage)?
+            }
+            MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted)?,
+            _ => Err(InternalError::MisroutedMessage)?,
+        };
+
+        // TODO #193: This is wrong; at some point the protocol will be done.
+        Ok(ProcessOutcome::Processed(messages))
     }
 }
 
@@ -71,42 +112,6 @@ impl AuxInfoParticipant {
             other_participant_ids: other_participant_ids.clone(),
             storage: Storage::new(),
             broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
-    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
-    #[instrument(skip_all, err(Debug))]
-    pub(crate) fn process_message<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-        main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
-        info!("Processing auxinfo message.");
-
-        match message.message_type() {
-            MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
-                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
-                if let Some(bmsg) = broadcast_option {
-                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                    messages.extend_from_slice(&more_messages);
-                };
-                Ok(messages)
-            }
-            MessageType::Auxinfo(AuxinfoMessageType::Ready) => {
-                let messages = self.handle_ready_msg(rng, message)?;
-                Ok(messages)
-            }
-            MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) => {
-                let messages = self.handle_round_two_msg(rng, message, main_storage)?;
-                Ok(messages)
-            }
-            MessageType::Auxinfo(AuxinfoMessageType::R3Proof) => {
-                let messages = self.handle_round_three_msg(rng, message, main_storage)?;
-                Ok(messages)
-            }
-            MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted),
-            _ => Err(InternalError::MisroutedMessage),
         }
     }
 
@@ -615,8 +620,8 @@ mod tests {
             &message.message_type(),
             &message.from(),
         );
-        let messages = participant.process_message(rng, &message, main_storage)?;
-        deliver_all(&messages, inboxes)?;
+        let outcome = participant.process_message(rng, &message, main_storage)?;
+        deliver_all(&outcome.into_messages(), inboxes)?;
 
         Ok(())
     }

@@ -13,6 +13,7 @@ use crate::{
     errors::{InternalError, Result},
     keygen::{keyshare::KeySharePublic, participant::KeygenParticipant},
     messages::{AuxinfoMessageType, KeygenMessageType, MessageType},
+    participant::ProtocolParticipant,
     presign::{participant::PresignParticipant, record::PresignRecord},
     storage::{StorableType, Storage},
     utils::CurvePoint,
@@ -114,21 +115,33 @@ impl Participant {
         }
         match message.message_type() {
             MessageType::Auxinfo(_) => {
-                self.auxinfo_participant
-                    .process_message(rng, message, &mut self.main_storage)
+                let outcome = self.auxinfo_participant.process_message(
+                    rng,
+                    message,
+                    &mut self.main_storage,
+                )?;
+                Ok(outcome.into_messages())
             }
             MessageType::Keygen(_) => {
-                self.keygen_participant
-                    .process_message(rng, message, &mut self.main_storage)
+                let outcome = self.keygen_participant.process_message(
+                    rng,
+                    message,
+                    &mut self.main_storage,
+                )?;
+                Ok(outcome.into_messages())
             }
             MessageType::Presign(_) => {
                 // Send presign message and existing storage containing auxinfo and
                 // keyshare values that presign needs to operate
-                let (optional_presign_record, messages) = self
-                    .presign_participant
-                    .process_message(rng, message, &self.main_storage)?;
+                let outcome = self.presign_participant.process_message(
+                    rng,
+                    message,
+                    &mut self.main_storage,
+                )?;
 
-                if let Some(presign_record) = optional_presign_record {
+                let (output, messages) = outcome.into_parts();
+
+                if let Some(presign_record) = output {
                     self.main_storage.store(
                         StorableType::PresignRecord,
                         message.id(),

@@ -25,16 +25,96 @@ struct ProgressIndex {
     sid: Identifier,
 }
 
+/// Possible outcomes from processing one or more messages.
+///
+/// Processing an individual message causes various outcomes in a protocol
+/// execution. Depending on what other state a [`ProtocolParticipant`] has, a
+/// message might be be stored for later processing or partially processed
+/// without completing the protocol round. Alternately, it can trigger
+/// completion of a protocol round, which may produce messages to be sent to
+/// other participants, an output (if the round was the final round), or both.
+pub(crate) enum ProcessOutcome<O> {
+    // The message was not fully processed; we need more inputs to continue.
+    Incomplete,
+    // The message was processed successfully but the subprotocol isn't done.
+    Processed(Vec<Message>),
+    // The subprotocol is done for this participant but there are still messages to send to
+    // others.
+    TerminatedForThisParticipant(O, Vec<Message>),
+    // The entire subprotocol is done and there are no more messages to send.
+    Terminated(O),
+}
+
+impl<O> ProcessOutcome<O> {
+    /// Create a [`ProcessOutcome`] from an optional output and a set of
+    /// outgoing messages.
+    pub(crate) fn from(output: Option<O>, messages: Vec<Message>) -> Self {
+        match (output, messages.len()) {
+            (None, 0) => Self::Incomplete,
+            (None, _) => Self::Processed(messages),
+            (Some(o), 0) => Self::Terminated(o),
+            (Some(o), _) => Self::TerminatedForThisParticipant(o, messages),
+        }
+    }
+
+    /// Extract the outgoing messages from the [`ProcessOutcome`].
+    ///
+    /// This method drops the outcome, if it exists, so it's no longer
+    /// accessible.
+    pub(crate) fn into_messages(self) -> Vec<Message> {
+        match self {
+            Self::Incomplete | Self::Terminated(_) => Vec::new(),
+            Self::Processed(messages) => messages,
+            Self::TerminatedForThisParticipant(_, messages) => messages,
+        }
+    }
+
+    /// Convert the [`ProcessOutcome`] into its constituent parts.
+    pub(crate) fn into_parts(self) -> (Option<O>, Vec<Message>) {
+        match self {
+            Self::Incomplete => (None, Vec::new()),
+            Self::Processed(msgs) => (None, msgs),
+            Self::TerminatedForThisParticipant(output, msgs) => (Some(output), msgs),
+            Self::Terminated(output) => (Some(output), Vec::new()),
+        }
+    }
+}
+
 pub(crate) trait ProtocolParticipant {
+    /// Output type of a successful protocol execution.
+    type Output;
+
     fn storage(&self) -> &Storage;
     fn storage_mut(&mut self) -> &mut Storage;
     fn id(&self) -> ParticipantIdentifier;
+
+    /// Process an incoming message.
+    ///
+    /// This method should parse the message, do any immediate per-message
+    /// processing, and if all necessary messages have been received,
+    /// compute a round of the protocol.
+    /// In some cases, this method will process other stored messages that have
+    /// become usable by the processing of the given message. The
+    /// `ProcessOutcome` is the consolidated outputs of all processed
+    /// messages.
+    ///
+    /// Potential failure cases:
+    /// - `Storage` did not contain the necessary preliminary artifacts (TODO
+    ///   #180: pass inputs as parameters, instead)
+    /// - The message was not parseable
+    /// - The message contained invalid values and a protocol check failed
+    fn process_message<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+        main_storage: &mut Storage,
+    ) -> Result<ProcessOutcome<Self::Output>>;
 
     fn stash_message(&mut self, message: &Message) -> Result<()> {
         let mut message_storage: MessageQueue = self
             .storage()
             .retrieve(StorableType::MessageQueue, message.id(), self.id())
-            .unwrap_or(MessageQueue::new());
+            .unwrap_or_default();
         message_storage.store(message.message_type(), message.id(), message.clone())?;
         let my_id = self.id();
         self.storage_mut().store(
@@ -73,7 +153,7 @@ pub(crate) trait ProtocolParticipant {
         let message_storage: MessageQueue = self
             .storage()
             .retrieve(StorableType::MessageQueue, sid, self.id())
-            .unwrap_or(MessageQueue::new());
+            .unwrap_or_default();
         Ok(message_storage)
     }
 
@@ -87,7 +167,7 @@ pub(crate) trait ProtocolParticipant {
         let mut progress_storage: HashMap<Vec<u8>, bool> = self
             .storage()
             .retrieve(StorableType::ProgressStore, sid, self.id())
-            .unwrap_or(HashMap::new());
+            .unwrap_or_default();
         let key = serialize!(&ProgressIndex { func_name, sid })?;
         let _ = progress_storage.insert(key, true);
         let my_id = self.id();
@@ -100,7 +180,7 @@ pub(crate) trait ProtocolParticipant {
         let progress_storage: HashMap<Vec<u8>, bool> = self
             .storage()
             .retrieve(StorableType::ProgressStore, sid, self.id())
-            .unwrap_or(HashMap::new());
+            .unwrap_or_default();
         let key = serialize!(&ProgressIndex { func_name, sid })?;
         let result = match progress_storage.get(&key) {
             None => false,
@@ -138,14 +218,22 @@ pub(crate) trait Broadcast {
     ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
         let message_type = message.message_type;
         let broadcast_input: Message = deserialize!(&message.unverified_bytes)?;
-        let (broadcast_option, mut messages) = self
-            .broadcast_participant()
-            .process_message(rng, &broadcast_input)?;
+
+        // Make some empty storage to satisfy the trait. TODO #180: remove this.
+        let mut empty_storage = Storage::new();
+
+        let outcome = self.broadcast_participant().process_message(
+            rng,
+            &broadcast_input,
+            &mut empty_storage,
+        )?;
+
+        let (output, mut messages) = outcome.into_parts();
         for msg in messages.iter_mut() {
             msg.unverified_bytes = serialize!(msg)?;
             msg.message_type = message_type;
         }
-        Ok((broadcast_option, messages))
+        Ok((output, messages))
     }
 }
 

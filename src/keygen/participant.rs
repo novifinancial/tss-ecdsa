@@ -14,7 +14,7 @@ use crate::{
         keyshare::{KeySharePrivate, KeySharePublic},
     },
     messages::{KeygenMessageType, Message, MessageType},
-    participant::{Broadcast, ProtocolParticipant},
+    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
     protocol::ParticipantIdentifier,
     run_only_once,
     storage::{Storable, StorableType, Storage},
@@ -54,6 +54,11 @@ pub(crate) struct KeygenParticipant {
 }
 
 impl ProtocolParticipant for KeygenParticipant {
+    // Currently, KeyGen puts output directly into persistent storage instead of
+    // returning it to the calling Participant.
+    // TODO #194: Update this type to actually define the output.
+    type Output = ();
+
     fn storage(&self) -> &Storage {
         &self.storage
     }
@@ -64,6 +69,40 @@ impl ProtocolParticipant for KeygenParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    #[cfg_attr(feature = "flame_it", flame("keygen"))]
+    #[instrument(skip_all)]
+    fn process_message<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+        main_storage: &mut Storage,
+    ) -> Result<ProcessOutcome<Self::Output>> {
+        info!("Processing keygen message.");
+
+        let messages = match message.message_type() {
+            MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
+                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
+                if let Some(bmsg) = broadcast_option {
+                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
+                    messages.extend_from_slice(&more_messages);
+                };
+                messages
+            }
+            MessageType::Keygen(KeygenMessageType::Ready) => self.handle_ready_msg(rng, message)?,
+            MessageType::Keygen(KeygenMessageType::R2Decommit) => {
+                self.handle_round_two_msg(rng, message, main_storage)?
+            }
+            MessageType::Keygen(KeygenMessageType::R3Proof) => {
+                self.handle_round_three_msg(rng, message, main_storage)?
+            }
+            MessageType::Keygen(_) => Err(InternalError::MessageMustBeBroadcasted)?,
+            _ => Err(InternalError::MisroutedMessage)?,
+        };
+
+        // TODO #194: This is wrong, the protocol will finish at some point.
+        Ok(ProcessOutcome::Processed(messages))
     }
 }
 
@@ -83,47 +122,6 @@ impl KeygenParticipant {
             other_participant_ids: other_participant_ids.clone(),
             storage: Storage::new(),
             broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
-    /// Processes the incoming message given the storage from the protocol
-    /// participant (containing auxinfo and keygen artifacts). Optionally
-    /// produces a [`KeysharePrivate`](super::keyshare::KeySharePrivate) and
-    /// [`KeySharePublic`](super::keyshare::KeySharePublic) once keygen is
-    /// complete.
-    #[cfg_attr(feature = "flame_it", flame("keygen"))]
-    #[instrument(skip_all)]
-    pub(crate) fn process_message<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-        main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
-        info!("Processing keygen message.");
-
-        match message.message_type() {
-            MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
-                if let Some(bmsg) = broadcast_option {
-                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                    messages.extend_from_slice(&more_messages);
-                };
-                Ok(messages)
-            }
-            MessageType::Keygen(KeygenMessageType::Ready) => {
-                let messages = self.handle_ready_msg(rng, message)?;
-                Ok(messages)
-            }
-            MessageType::Keygen(KeygenMessageType::R2Decommit) => {
-                let messages = self.handle_round_two_msg(rng, message, main_storage)?;
-                Ok(messages)
-            }
-            MessageType::Keygen(KeygenMessageType::R3Proof) => {
-                let messages = self.handle_round_three_msg(rng, message, main_storage)?;
-                Ok(messages)
-            }
-            MessageType::Keygen(_) => Err(InternalError::MessageMustBeBroadcasted),
-            _ => Err(InternalError::MisroutedMessage),
         }
     }
 
@@ -615,8 +613,8 @@ mod tests {
             &message.message_type(),
             &message.from(),
         );
-        let messages = participant.process_message(rng, &message, main_storage)?;
-        deliver_all(&messages, inboxes)?;
+        let outcome = participant.process_message(rng, &message, main_storage)?;
+        deliver_all(&outcome.into_messages(), inboxes)?;
 
         Ok(())
     }

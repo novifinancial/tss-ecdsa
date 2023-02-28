@@ -10,7 +10,7 @@ use crate::{
     broadcast::data::BroadcastData,
     errors::{InternalError, Result},
     messages::{BroadcastMessageType, Message, MessageType},
-    participant::ProtocolParticipant,
+    participant::{ProcessOutcome, ProtocolParticipant},
     protocol::ParticipantIdentifier,
     run_only_once_per_tag,
     storage::{StorableType, Storage},
@@ -46,13 +46,15 @@ pub(crate) struct BroadcastIndex {
     other_id: ParticipantIdentifier,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct BroadcastOutput {
     pub(crate) tag: BroadcastTag,
     pub(crate) msg: Message,
 }
 
 impl ProtocolParticipant for BroadcastParticipant {
+    type Output = BroadcastOutput;
+
     fn storage(&self) -> &Storage {
         &self.storage
     }
@@ -63,6 +65,28 @@ impl ProtocolParticipant for BroadcastParticipant {
 
     fn id(&self) -> ParticipantIdentifier {
         self.id
+    }
+
+    #[instrument(skip_all, err(Debug))]
+    fn process_message<R: RngCore + CryptoRng>(
+        &mut self,
+        rng: &mut R,
+        message: &Message,
+        _main_storage: &mut Storage,
+    ) -> Result<ProcessOutcome<Self::Output>> {
+        info!("Processing broadcast message.");
+
+        match message.message_type() {
+            MessageType::Broadcast(BroadcastMessageType::Disperse) => {
+                let (output_option, messages) = self.handle_round_one_msg(rng, message)?;
+                Ok(ProcessOutcome::from(output_option, messages))
+            }
+            MessageType::Broadcast(BroadcastMessageType::Redisperse) => {
+                let (output_option, messages) = self.handle_round_two_msg(rng, message)?;
+                Ok(ProcessOutcome::from(output_option, messages))
+            }
+            _ => Err(InternalError::MisroutedMessage),
+        }
     }
 }
 
@@ -75,27 +99,6 @@ impl BroadcastParticipant {
             id,
             other_participant_ids,
             storage: Storage::new(),
-        }
-    }
-
-    #[instrument(skip_all, err(Debug))]
-    pub(crate) fn process_message<R: RngCore + CryptoRng>(
-        &mut self,
-        rng: &mut R,
-        message: &Message,
-    ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
-        info!("Processing broadcast message.");
-
-        match message.message_type() {
-            MessageType::Broadcast(BroadcastMessageType::Disperse) => {
-                let (output_option, messages) = self.handle_round_one_msg(rng, message)?;
-                Ok((output_option, messages))
-            }
-            MessageType::Broadcast(BroadcastMessageType::Redisperse) => {
-                let (output_option, messages) = self.handle_round_two_msg(rng, message)?;
-                Ok((output_option, messages))
-            }
-            _ => Err(InternalError::MisroutedMessage),
         }
     }
 
@@ -171,7 +174,7 @@ impl BroadcastParticipant {
         let mut message_votes: HashMap<BroadcastIndex, Vec<u8>> = self
             .storage
             .retrieve(StorableType::BroadcastSet, sid, self.id())
-            .unwrap_or(HashMap::new());
+            .unwrap_or_default();
         // if not already in database, store. else, ignore
         let idx = BroadcastIndex {
             tag: data.tag.clone(),

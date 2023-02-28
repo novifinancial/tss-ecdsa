@@ -166,20 +166,17 @@ impl Storage {
 
     fn retrieve_index<I: Storable>(&self, storable_index: I) -> Result<Vec<u8>> {
         let key = serialize!(&storable_index)?;
-        let ret = self
-            .0
+        self.0
             .get(&key)
-            .ok_or_else(|| InternalError::StorageItemNotFound)?
-            .clone();
-
-        Ok(ret)
+            .ok_or(InternalError::StorageItemNotFound)
+            .cloned()
     }
 
     fn delete_index<I: Storable>(&mut self, storable_index: I) -> Result<Vec<u8>> {
         let key = serialize!(&storable_index)?;
         self.0
             .remove(&key)
-            .ok_or_else(|| InternalError::StorageItemNotFound)
+            .ok_or(InternalError::StorageItemNotFound)
     }
 
     fn contains_index_batch<I: Storable>(&self, storable_indices: &[I]) -> Result<bool> {

@@ -24,6 +24,12 @@ struct MessageIndex {
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct MessageQueue(HashMap<Vec<u8>, Vec<Message>>);
 
+impl Default for MessageQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageQueue {
     pub(crate) fn new() -> Self {
         Self(HashMap::new())
