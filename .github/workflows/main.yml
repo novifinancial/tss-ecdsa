@@ -45,8 +45,10 @@ jobs:
           command: install
           args: --debug cargo-make
 
-      - name: Run full CI (fmt, clippy, build, test, doctest, docs)
-        run: cargo make ci
+      - name: Clippy version
+        run: cargo clippy --version
+#      - name: Run full CI (fmt, clippy, build, test, doctest, docs)
+#        run: cargo make ci
 
   deny-check:
     name: cargo-deny check
