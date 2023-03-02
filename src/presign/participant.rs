@@ -7,7 +7,10 @@
 // of this source tree.
 
 use crate::{
-    auxinfo::info::{AuxInfoPrivate, AuxInfoPublic},
+    auxinfo::{
+        info::{AuxInfoPrivate, AuxInfoPublic},
+        participant::StorageType as AuxInfoStorageType,
+    },
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
     errors::{
         InternalError::{self, InternalInvariantFailed},
@@ -507,7 +510,7 @@ impl PresignParticipant {
         if !has_collected_all_of_others(
             &self.other_participant_ids,
             main_storage,
-            StorableType::AuxInfoPublic,
+            AuxInfoStorageType::Public,
             auxinfo_identifier,
         )? {
             return Err(InternalError::StorageItemNotFound);
@@ -722,13 +725,10 @@ impl PresignParticipant {
         auxinfo_identifier: Identifier,
         keyshare_identifier: Identifier,
     ) -> Result<()> {
-        let receiver_auxinfo_public = main_storage.retrieve(
-            StorableType::AuxInfoPublic,
-            auxinfo_identifier,
-            message.to(),
-        )?;
+        let receiver_auxinfo_public =
+            main_storage.retrieve(AuxInfoStorageType::Public, auxinfo_identifier, message.to())?;
         let sender_auxinfo_public = main_storage.retrieve(
-            StorableType::AuxInfoPublic,
+            AuxInfoStorageType::Public,
             auxinfo_identifier,
             message.from(),
         )?;
@@ -774,13 +774,10 @@ impl PresignParticipant {
         message: &Message,
         auxinfo_identifier: Identifier,
     ) -> Result<()> {
-        let receiver_auxinfo_public = main_storage.retrieve(
-            StorableType::AuxInfoPublic,
-            auxinfo_identifier,
-            message.to(),
-        )?;
+        let receiver_auxinfo_public =
+            main_storage.retrieve(AuxInfoStorageType::Public, auxinfo_identifier, message.to())?;
         let sender_auxinfo_public = main_storage.retrieve(
-            StorableType::AuxInfoPublic,
+            AuxInfoStorageType::Public,
             auxinfo_identifier,
             message.from(),
         )?;
@@ -825,7 +822,7 @@ impl PresignParticipant {
         if !has_collected_all_of_others(
             &self.other_participant_ids,
             main_storage,
-            StorableType::AuxInfoPublic,
+            AuxInfoStorageType::Public,
             auxinfo_identifier,
         )? || !has_collected_all_of_others(
             &self.other_participant_ids,
@@ -844,7 +841,7 @@ impl PresignParticipant {
         let mut hm = HashMap::new();
         for other_participant_id in self.other_participant_ids.clone() {
             let auxinfo_public: AuxInfoPublic = main_storage.retrieve(
-                StorableType::AuxInfoPublic,
+                AuxInfoStorageType::Public,
                 auxinfo_identifier,
                 other_participant_id,
             )?;
@@ -911,12 +908,12 @@ pub(crate) fn get_keyshare(
     // Reconstruct keyshare from local storage
     let keyshare_and_info = PresignKeyShareAndInfo {
         aux_info_private: storage.retrieve(
-            StorableType::AuxInfoPrivate,
+            AuxInfoStorageType::Private,
             auxinfo_identifier,
             self_id,
         )?,
         aux_info_public: storage.retrieve(
-            StorableType::AuxInfoPublic,
+            AuxInfoStorageType::Public,
             auxinfo_identifier,
             self_id,
         )?,
