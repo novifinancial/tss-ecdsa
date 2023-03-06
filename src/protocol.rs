@@ -14,8 +14,11 @@ use crate::{
     keygen::{keyshare::KeySharePublic, participant::KeygenParticipant},
     messages::{AuxinfoMessageType, KeygenMessageType, MessageType},
     participant::ProtocolParticipant,
-    presign::{participant::PresignParticipant, record::PresignRecord},
-    storage::{StorableType, Storage},
+    presign::{
+        participant::{PresignParticipant, StorageType as PresignStorageType},
+        record::PresignRecord,
+    },
+    storage::{PersistentStorageType, Storage},
     utils::CurvePoint,
     Message,
 };
@@ -143,7 +146,7 @@ impl Participant {
 
                 if let Some(presign_record) = output {
                     self.main_storage.store(
-                        StorableType::PresignRecord,
+                        PresignStorageType::Record,
                         message.id(),
                         self.id,
                         &presign_record,
@@ -220,10 +223,22 @@ impl Participant {
     pub fn is_keygen_done(&self, keygen_identifier: Identifier) -> Result<bool> {
         let mut fetch = vec![];
         for participant in self.other_participant_ids.clone() {
-            fetch.push((StorableType::PublicKeyshare, keygen_identifier, participant));
+            fetch.push((
+                PersistentStorageType::PublicKeyshare,
+                keygen_identifier,
+                participant,
+            ));
         }
-        fetch.push((StorableType::PublicKeyshare, keygen_identifier, self.id));
-        fetch.push((StorableType::PrivateKeyshare, keygen_identifier, self.id));
+        fetch.push((
+            PersistentStorageType::PublicKeyshare,
+            keygen_identifier,
+            self.id,
+        ));
+        fetch.push((
+            PersistentStorageType::PrivateKeyshare,
+            keygen_identifier,
+            self.id,
+        ));
 
         self.main_storage.contains_batch(&fetch)
     }
@@ -233,7 +248,7 @@ impl Participant {
     #[instrument(skip_all)]
     pub fn is_presigning_done(&self, presign_identifier: Identifier) -> Result<bool> {
         self.main_storage.contains_batch(&[(
-            StorableType::PresignRecord,
+            PresignStorageType::Record,
             presign_identifier,
             self.id,
         )])
@@ -244,9 +259,11 @@ impl Participant {
     #[instrument(skip_all, err(Debug))]
     pub fn get_public_keyshare(&self, identifier: Identifier) -> Result<CurvePoint> {
         info!("Retrieving our associated public keyshare.");
-        let keyshare_public: KeySharePublic =
-            self.main_storage
-                .retrieve(StorableType::PublicKeyshare, identifier, self.id)?;
+        let keyshare_public: KeySharePublic = self.main_storage.retrieve(
+            PersistentStorageType::PublicKeyshare,
+            identifier,
+            self.id,
+        )?;
         Ok(keyshare_public.X)
     }
 
@@ -262,14 +279,14 @@ impl Participant {
 
         let presign_record: PresignRecord =
             self.main_storage
-                .retrieve(StorableType::PresignRecord, presign_identifier, self.id)?;
+                .retrieve(PresignStorageType::Record, presign_identifier, self.id)?;
         let (r, s) = presign_record.sign(digest)?;
         let ret = SignatureShare { r: Some(r), s };
 
         // Clear the presign record after being used once
         let _ =
             self.main_storage
-                .delete(StorableType::PresignRecord, presign_identifier, self.id)?;
+                .delete(PresignStorageType::Record, presign_identifier, self.id)?;
         Ok(ret)
     }
 }
