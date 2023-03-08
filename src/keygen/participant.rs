@@ -72,10 +72,9 @@ pub(crate) struct KeygenParticipant {
 }
 
 impl ProtocolParticipant for KeygenParticipant {
-    // Currently, KeyGen puts output directly into persistent storage instead of
-    // returning it to the calling Participant.
-    // TODO #194: Update this type to actually define the output.
-    type Output = ();
+    // The output type includes public key shares `KeySharePublic` for all
+    // participants (including ourselves) and `KeySharePrivate` for ourselves.
+    type Output = (Vec<KeySharePublic>, KeySharePrivate);
 
     fn storage(&self) -> &Storage {
         &self.main_storage
@@ -103,28 +102,33 @@ impl ProtocolParticipant for KeygenParticipant {
     ) -> Result<ProcessOutcome<Self::Output>> {
         info!("Processing keygen message.");
 
-        let messages = match message.message_type() {
+        match message.message_type() {
             MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                let (broadcast_option, mut messages) = self.handle_broadcast(rng, message)?;
-                if let Some(bmsg) = broadcast_option {
-                    let more_messages = self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                    messages.extend_from_slice(&more_messages);
-                };
-                messages
+                let (broadcast_option, messages) = self.handle_broadcast(rng, message)?;
+
+                let broadcast_outcome = ProcessOutcome::from(None, messages);
+
+                match broadcast_option {
+                    // If the round one broadcast worked, process the round one message.
+                    Some(bmsg) => {
+                        let round_one_outcome =
+                            self.handle_round_one_msg(rng, &bmsg, main_storage)?;
+                        broadcast_outcome.consolidate(vec![round_one_outcome])
+                    }
+                    // Otherwise, wait to finish the broadcast
+                    None => Ok(broadcast_outcome),
+                }
             }
-            MessageType::Keygen(KeygenMessageType::Ready) => self.handle_ready_msg(rng, message)?,
+            MessageType::Keygen(KeygenMessageType::Ready) => self.handle_ready_msg(rng, message),
             MessageType::Keygen(KeygenMessageType::R2Decommit) => {
-                self.handle_round_two_msg(rng, message, main_storage)?
+                self.handle_round_two_msg(rng, message, main_storage)
             }
             MessageType::Keygen(KeygenMessageType::R3Proof) => {
-                self.handle_round_three_msg(rng, message, main_storage)?
+                self.handle_round_three_msg(rng, message, main_storage)
             }
             MessageType::Keygen(_) => Err(InternalError::MessageMustBeBroadcasted)?,
             _ => Err(InternalError::MisroutedMessage)?,
-        };
-
-        // TODO #194: This is wrong, the protocol will finish at some point.
-        Ok(ProcessOutcome::Processed(messages))
+        }
     }
 }
 
@@ -154,21 +158,24 @@ impl KeygenParticipant {
         &mut self,
         rng: &mut R,
         message: &Message,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling ready keygen message.");
 
         self.local_storage
             .store::<storage::Ready>(message.id(), message.from(), ());
-        let (outcome, is_ready) =
+        let (ready_outcome, is_ready) =
             self.process_ready_message::<storage::Ready>(message, &self.local_storage)?;
-        let mut messages = outcome.into_messages();
 
         if is_ready {
-            let more_messages =
-                run_only_once!(self.gen_round_one_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
+            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_one_msgs(rng, message),
+                message.id()
+            )?);
+
+            ready_outcome.consolidate(vec![round_one_outcome])
+        } else {
+            Ok(ready_outcome)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
@@ -180,7 +187,7 @@ impl KeygenParticipant {
     ) -> Result<Vec<Message>> {
         info!("Generating round one keygen messages.");
 
-        let (keyshare_private, keyshare_public) = new_keyshare(rng)?;
+        let (keyshare_private, keyshare_public) = new_keyshare(self.id(), rng)?;
         self.main_storage.store(
             PersistentStorageType::PrivateKeyshare,
             message.id(),
@@ -230,7 +237,7 @@ impl KeygenParticipant {
         rng: &mut R,
         broadcast_message: &BroadcastOutput,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round one keygen message.");
 
         if broadcast_message.tag != BroadcastTag::KeyGenR1CommitHash {
@@ -247,24 +254,28 @@ impl KeygenParticipant {
         let r1_done = self
             .local_storage
             .contains_for_all_ids::<storage::Commit>(message.id(), &self.other_participant_ids);
-        let mut messages = vec![];
 
         if r1_done {
-            let more_messages =
-                run_only_once!(self.gen_round_two_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
-            // process any round 2 messages we may have received early
-            for msg in self
+            // Finish round 1 by generating messages for round 2
+            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_two_msgs(rng, message),
+                message.id()
+            )?);
+
+            // Process any round 2 messages we may have received early
+            let round_two_outcomes = self
                 .fetch_messages(
                     MessageType::Keygen(KeygenMessageType::R2Decommit),
                     message.id(),
                 )?
                 .iter()
-            {
-                messages.extend_from_slice(&self.handle_round_two_msg(rng, msg, main_storage)?);
-            }
+                .map(|msg| self.handle_round_two_msg(rng, msg, main_storage))
+                .collect::<Result<Vec<_>>>()?;
+            round_one_outcome.consolidate(round_two_outcomes)
+        } else {
+            // Otherwise, wait for more round 1 messages
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
@@ -314,7 +325,7 @@ impl KeygenParticipant {
         rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round two keygen message.");
         // We must receive all commitments in round 1 before we start processing
         // decommits in round 2.
@@ -323,9 +334,9 @@ impl KeygenParticipant {
             &[self.other_participant_ids.clone(), vec![self.id]].concat(),
         );
         if !r1_done {
-            // store any early round2 messages
+            // Store any early round 2 messages
             self.stash_message(message)?;
-            return Ok(vec![]);
+            return Ok(ProcessOutcome::Incomplete);
         }
         let decom = KeygenDecommit::from_message(message)?;
         let com = self
@@ -335,27 +346,32 @@ impl KeygenParticipant {
         self.local_storage
             .store::<storage::Decommit>(message.id(), message.from(), decom);
 
-        // check if we've received all the decommits
+        // Check if we've received all the decommits
         let r2_done = self
             .local_storage
             .contains_for_all_ids::<storage::Decommit>(message.id(), &self.other_participant_ids);
-        let mut messages = vec![];
 
         if r2_done {
-            let more_messages =
-                run_only_once!(self.gen_round_three_msgs(rng, message), message.id())?;
-            messages.extend_from_slice(&more_messages);
-            for msg in self
+            // Generate messages for round 3...
+            let round_two_outcome = ProcessOutcome::Processed(run_only_once!(
+                self.gen_round_three_msgs(rng, message),
+                message.id()
+            )?);
+
+            // ...and handle any messages that other participants have sent for round 3.
+            let round_three_outcomes = self
                 .fetch_messages(
                     MessageType::Keygen(KeygenMessageType::R3Proof),
                     message.id(),
                 )?
                 .iter()
-            {
-                messages.extend_from_slice(&self.handle_round_three_msg(rng, msg, main_storage)?);
-            }
+                .map(|msg| self.handle_round_three_msg(rng, msg, main_storage))
+                .collect::<Result<Vec<_>>>()?;
+            round_two_outcome.consolidate(round_three_outcomes)
+        } else {
+            // Otherwise, wait for more round 2 messages.
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
@@ -443,7 +459,7 @@ impl KeygenParticipant {
         _rng: &mut R,
         message: &Message,
         main_storage: &mut Storage,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round three keygen message.");
 
         if self
@@ -452,7 +468,7 @@ impl KeygenParticipant {
             .is_err()
         {
             self.stash_message(message)?;
-            return Ok(vec![]);
+            return Ok(ProcessOutcome::Incomplete);
         }
         let proof = PiSchProof::from_message(message)?;
         let global_rid = self
@@ -478,47 +494,72 @@ impl KeygenParticipant {
             &keyshare,
         )?;
 
-        //check if we've stored all the public keyshares
+        // Check if we've stored all the public keyshares
         let keyshare_done = self.main_storage.contains_for_all_ids(
             PersistentStorageType::PublicKeyshare,
             message.id(),
-            &[self.other_participant_ids.clone(), vec![self.id]].concat(),
+            &self.all_participants(),
         )?;
 
+        // If so, we completed the protocol! Return the outputs.
         if keyshare_done {
-            for oid in self.other_participant_ids.iter() {
+            for pid in self.all_participants() {
                 self.main_storage.transfer::<_, KeySharePublic>(
                     main_storage,
                     PersistentStorageType::PublicKeyshare,
                     message.id(),
-                    *oid,
+                    pid,
                 )?;
             }
-            self.main_storage.transfer::<_, KeySharePublic>(
-                main_storage,
-                PersistentStorageType::PublicKeyshare,
-                message.id(),
-                self.id,
-            )?;
             self.main_storage.transfer::<_, KeySharePrivate>(
                 main_storage,
                 PersistentStorageType::PrivateKeyshare,
                 message.id(),
                 self.id,
             )?;
+
+            let public_key_shares = self
+                .all_participants()
+                .iter()
+                .map(|pid| {
+                    self.main_storage.retrieve(
+                        PersistentStorageType::PublicKeyshare,
+                        message.id(),
+                        *pid,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let private_key_share = self.main_storage.retrieve(
+                PersistentStorageType::PrivateKeyshare,
+                message.id(),
+                self.id,
+            )?;
+
+            Ok(ProcessOutcome::Terminated((
+                public_key_shares,
+                private_key_share,
+            )))
+        } else {
+            // Otherwise, we'll have to wait for more round three messages.
+            Ok(ProcessOutcome::Incomplete)
         }
-        Ok(vec![])
     }
 }
 
 /// Generates a new [KeySharePrivate] and [KeySharePublic]
-fn new_keyshare<R: RngCore + CryptoRng>(rng: &mut R) -> Result<(KeySharePrivate, KeySharePublic)> {
+fn new_keyshare<R: RngCore + CryptoRng>(
+    participant: ParticipantIdentifier,
+    rng: &mut R,
+) -> Result<(KeySharePrivate, KeySharePublic)> {
     let order = k256_order();
-    let x = BigNumber::from_rng(&order, rng);
+    let private_share = BigNumber::from_rng(&order, rng);
     let g = CurvePoint::GENERATOR;
-    let X = CurvePoint(g.0 * crate::utils::bn_to_scalar(&x)?);
+    let public_share = CurvePoint(g.0 * crate::utils::bn_to_scalar(&private_share)?);
 
-    Ok((KeySharePrivate { x }, KeySharePublic { X }))
+    Ok((
+        KeySharePrivate { x: private_share },
+        KeySharePublic::new(participant, public_share),
+    ))
 }
 
 #[cfg(test)]
@@ -611,12 +652,16 @@ mod tests {
         Ok(true)
     }
 
+    #[allow(clippy::type_complexity)]
     fn process_messages<R: RngCore + CryptoRng>(
         quorum: &mut Vec<KeygenParticipant>,
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
         rng: &mut R,
         main_storages: &mut [Storage],
-    ) -> Result<()> {
+    ) -> Option<(
+        usize,
+        ProcessOutcome<(Vec<KeySharePublic>, KeySharePrivate)>,
+    )> {
         // Pick a random participant to process
         let index = rng.gen_range(0..quorum.len());
         let participant = quorum.get_mut(index).unwrap();
@@ -624,45 +669,49 @@ mod tests {
         let inbox = inboxes.get_mut(&participant.id).unwrap();
         if inbox.is_empty() {
             // No messages to process for this participant, so pick another participant
-            return Ok(());
+            return None;
         }
         let main_storage = main_storages.get_mut(index).unwrap();
 
-        let index = rng.gen_range(0..inbox.len());
-        let message = inbox.remove(index);
+        let message = inbox.remove(rng.gen_range(0..inbox.len()));
         debug!(
             "processing participant: {}, with message type: {:?} from {}",
             &participant.id,
             &message.message_type(),
             &message.from(),
         );
-        let outcome = participant.process_message(rng, &message, main_storage)?;
-        deliver_all(&outcome.into_messages(), inboxes)?;
-
-        Ok(())
+        Some((
+            index,
+            participant
+                .process_message(rng, &message, main_storage)
+                .unwrap(),
+        ))
     }
 
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
-    #[ignore = "slow"]
     // This test is cheap. Try a bunch of message permutations to decrease error
     // likelihood
-    fn test_run_keygen_protocol_many_times() -> Result<()> {
+    fn keygen_always_produces_valid_outputs() -> Result<()> {
         for _ in 0..20 {
-            test_run_keygen_protocol()?;
+            keygen_produces_valid_outputs()?;
         }
         Ok(())
     }
     #[test]
-    fn test_run_keygen_protocol() -> Result<()> {
+    fn keygen_produces_valid_outputs() -> Result<()> {
+        let QUORUM_SIZE = 3;
         let mut rng = crate::utils::get_test_rng();
-        let mut quorum = KeygenParticipant::new_quorum(3, &mut rng)?;
+        let mut quorum = KeygenParticipant::new_quorum(QUORUM_SIZE, &mut rng)?;
         let mut inboxes = HashMap::new();
         let mut main_storages: Vec<Storage> = vec![];
         for participant in &quorum {
             let _ = inboxes.insert(participant.id, vec![]);
             main_storages.append(&mut vec![Storage::new()]);
         }
+        let mut outputs = std::iter::repeat_with(|| None)
+            .take(QUORUM_SIZE)
+            .collect::<Vec<_>>();
 
         let keyshare_identifier = Identifier::random(&mut rng);
 
@@ -671,9 +720,64 @@ mod tests {
             inbox.push(participant.initialize_keygen_message(keyshare_identifier));
         }
         while !is_keygen_done(&quorum, keyshare_identifier)? {
-            process_messages(&mut quorum, &mut inboxes, &mut rng, &mut main_storages)?;
+            let (index, outcome) =
+                match process_messages(&mut quorum, &mut inboxes, &mut rng, &mut main_storages) {
+                    None => continue,
+                    Some(x) => x,
+                };
+
+            // Deliver messages and save outputs
+            match outcome {
+                ProcessOutcome::Incomplete => {}
+                ProcessOutcome::Processed(messages) => deliver_all(&messages, &mut inboxes)?,
+                ProcessOutcome::Terminated(output) => outputs[index] = Some(output),
+                ProcessOutcome::TerminatedForThisParticipant(output, messages) => {
+                    deliver_all(&messages, &mut inboxes)?;
+                    outputs[index] = Some(output);
+                }
+            }
         }
 
+        // Make sure every player got an output
+        let outputs: Vec<_> = outputs.into_iter().flatten().collect();
+        assert!(outputs.len() == QUORUM_SIZE);
+
+        // 1. Check returned outputs
+        // Every participant should have a public output from every other participant
+        // and, for a given participant, they should be the same in every output
+        for party in &quorum {
+            let pid = party.id;
+
+            // Collect the KeySharePublic associated with pid from every output
+            let mut publics_for_pid = vec![];
+            for (publics, _) in &outputs {
+                let key_share = publics
+                    .iter()
+                    .find(|key_share| key_share.participant() == pid);
+
+                // Make sure every participant had a key share for this pid
+                assert!(key_share.is_some());
+                publics_for_pid.push(key_share.unwrap());
+            }
+
+            // Make sure they're all equal
+            assert!(publics_for_pid.windows(2).all(|pks| pks[0] == pks[1]));
+        }
+
+        // Check that each participant's own `PublicKeyshare` corresponds to their
+        // `PrivateKeyshare`
+        for ((publics, private), pid) in outputs.iter().zip(quorum.iter().map(|p| p.id())) {
+            let public_share = publics
+                .iter()
+                .find(|public_share| public_share.participant() == pid);
+            assert!(public_share.is_some());
+
+            let expected_public_share =
+                CurvePoint(CurvePoint::GENERATOR.0 * crate::utils::bn_to_scalar(&private.x)?);
+            assert_eq!(public_share.unwrap().X, expected_public_share);
+        }
+
+        // 2. Check saved outputs
         // check that all players have a PublicKeyshare stored for every player and that
         // these values all match
         for player in quorum.iter() {

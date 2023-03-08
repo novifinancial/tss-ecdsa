@@ -115,7 +115,7 @@ impl ProtocolParticipant for AuxInfoParticipant {
 
                 // This is kind of a bastardization of the outcome type, but this is basically a
                 // conversion from the broadcast outcome type (with a
-                // BroadcastOutput) to the aux-info outcome type (with a ()).
+                // BroadcastOutput) to the aux-info outcome type.
                 let broadcast_outcome = ProcessOutcome::from(None, messages);
 
                 match broadcast_option {
