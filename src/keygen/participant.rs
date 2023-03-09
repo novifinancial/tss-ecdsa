@@ -63,7 +63,7 @@ pub(crate) struct KeygenParticipant {
     other_participant_ids: Vec<ParticipantIdentifier>,
     /// Old storage mechanism currently used to store persistent data
     ///
-    /// TODO #205: To be removed once we remove the need for persistent storage
+    /// TODO #180: To be removed once we remove the need for persistent storage
     main_storage: Storage,
     /// Local storage for this participant to store secrets
     local_storage: LocalStorage,
@@ -160,7 +160,7 @@ impl KeygenParticipant {
         self.local_storage
             .store::<storage::Ready>(message.id(), message.from(), ());
         let (outcome, is_ready) =
-            self.process_ready_message_local::<storage::Ready>(message, &self.local_storage)?;
+            self.process_ready_message::<storage::Ready>(message, &self.local_storage)?;
         let mut messages = outcome.into_messages();
 
         if is_ready {
