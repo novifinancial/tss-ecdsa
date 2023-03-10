@@ -134,18 +134,15 @@ impl ProtocolParticipant for PresignParticipant {
                 self.handle_ready_msg(rng, message, main_storage)
             }
             MessageType::Presign(PresignMessageType::RoundOneBroadcast) => {
-                let (broadcast_output, messages) = self.handle_broadcast(rng, message)?;
+                let broadcast_outcome = self.handle_broadcast(rng, message)?;
 
-                let broadcast_outcome = ProcessOutcome::from(None, messages);
-
-                match broadcast_output {
-                    Some(bmsg) => {
-                        let round_one_outcome =
-                            self.handle_round_one_broadcast_msg(rng, &bmsg, main_storage)?;
-                        broadcast_outcome.consolidate(vec![round_one_outcome])
-                    }
-                    None => Ok(broadcast_outcome),
-                }
+                // Handle the broadcasted message if all parties have agreed on it
+                broadcast_outcome.convert(
+                    self,
+                    Self::handle_round_one_broadcast_msg,
+                    rng,
+                    main_storage,
+                )
             }
             MessageType::Presign(PresignMessageType::RoundOne) => {
                 self.handle_round_one_msg(rng, message, main_storage)
@@ -274,28 +271,26 @@ impl PresignParticipant {
             .store::<storage::RoundOnePrivate>(message.id(), self.id, private);
 
         // Publish public round one value to all other participants on the channel
-        let non_broadcast_outcome = ProcessOutcome::Processed(
-            r1_publics
-                .into_iter()
-                .map(|(other_id, r1_public)| {
-                    Ok(Message::new(
-                        MessageType::Presign(PresignMessageType::RoundOne),
-                        message.id(),
-                        self.id,
-                        other_id,
-                        &serialize!(&r1_public)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>>>()?,
-        );
+        let non_broadcast_messages = r1_publics
+            .into_iter()
+            .map(|(other_id, r1_public)| {
+                Ok(Message::new(
+                    MessageType::Presign(PresignMessageType::RoundOne),
+                    message.id(),
+                    self.id,
+                    other_id,
+                    &serialize!(&r1_public)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        let broadcast_outcome = ProcessOutcome::Processed(self.broadcast(
+        let broadcast_messages = self.broadcast(
             rng,
-            &MessageType::Presign(PresignMessageType::RoundOneBroadcast),
+            MessageType::Presign(PresignMessageType::RoundOneBroadcast),
             serialize!(&r1_public_broadcast)?,
             message.id(),
             BroadcastTag::PresignR1Ciphertexts,
-        )?);
+        )?;
 
         // Additionally, handle any round 1 messages which may have been received too
         // early
@@ -308,9 +303,9 @@ impl PresignParticipant {
             .map(|msg| self.handle_round_one_msg(rng, msg, main_storage))
             .collect::<Result<Vec<_>>>()?;
 
-        non_broadcast_outcome
-            .consolidate(vec![broadcast_outcome])?
-            .consolidate(round_two_outcomes)
+        Ok(ProcessOutcome::collect(round_two_outcomes)?
+            .with_messages(broadcast_messages)
+            .with_messages(non_broadcast_messages))
     }
 
     #[instrument(skip_all, err(Debug))]
@@ -318,7 +313,7 @@ impl PresignParticipant {
         &mut self,
         rng: &mut R,
         broadcast_message: &BroadcastOutput,
-        main_storage: &Storage,
+        main_storage: &mut Storage,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         if broadcast_message.tag != BroadcastTag::PresignR1Ciphertexts {
             error!("Incorrect tag for Presign R1 Broadcast!");
@@ -454,13 +449,13 @@ impl PresignParticipant {
             r2_priv_ij,
         );
 
-        let round_one_outcome = ProcessOutcome::Processed(vec![Message::new(
+        let round_one_message = vec![Message::new(
             MessageType::Presign(PresignMessageType::RoundTwo),
             message.id(),
             self.id,
             message.from(), // This is a essentially response to that sender
             &serialize!(&r2_pub_ij)?,
-        )]);
+        )];
 
         // Check if there's a round 2 message that this now allows us to process
         let retrieved_messages = self.fetch_messages_by_sender(
@@ -483,7 +478,7 @@ impl PresignParticipant {
             );
             Err(InternalError::ProtocolError)
         } else {
-            round_one_outcome.consolidate(round_two_outcomes)
+            ProcessOutcome::collect_with_messages(round_two_outcomes, round_one_message)
         }
     }
 
@@ -604,20 +599,18 @@ impl PresignParticipant {
             .store::<storage::RoundThreePrivate>(message.id(), self.id, r3_private);
 
         // Publish public r3 values to all other participants on the channel
-        let round_two_outcome = ProcessOutcome::Processed(
-            r3_publics_map
-                .into_iter()
-                .map(|(id, r3_public)| {
-                    Ok(Message::new(
-                        MessageType::Presign(PresignMessageType::RoundThree),
-                        message.id(),
-                        self.id,
-                        id,
-                        &serialize!(&r3_public)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>>>()?,
-        );
+        let round_two_messages = r3_publics_map
+            .into_iter()
+            .map(|(id, r3_public)| {
+                Ok(Message::new(
+                    MessageType::Presign(PresignMessageType::RoundThree),
+                    message.id(),
+                    self.id,
+                    id,
+                    &serialize!(&r3_public)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         // Additionally, handle any round 3 messages which may have been received too
         // early
@@ -630,7 +623,7 @@ impl PresignParticipant {
             .map(|msg| self.handle_round_three_msg(rng, msg, main_storage))
             .collect::<Result<Vec<_>>>()?;
 
-        round_two_outcome.consolidate(round_three_outcomes)
+        ProcessOutcome::collect_with_messages(round_three_outcomes, round_two_messages)
     }
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]

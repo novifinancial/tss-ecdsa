@@ -20,7 +20,7 @@ use crate::{
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, instrument};
+use tracing::{error, info, instrument};
 
 // Local storage data types.
 mod storage {
@@ -94,12 +94,10 @@ impl ProtocolParticipant for BroadcastParticipant {
 
         match message.message_type() {
             MessageType::Broadcast(BroadcastMessageType::Disperse) => {
-                let (output_option, messages) = self.handle_round_one_msg(rng, message)?;
-                Ok(ProcessOutcome::from(output_option, messages))
+                self.handle_round_one_msg(rng, message)
             }
             MessageType::Broadcast(BroadcastMessageType::Redisperse) => {
-                let (output_option, messages) = self.handle_round_two_msg(rng, message)?;
-                Ok(ProcessOutcome::from(output_option, messages))
+                self.handle_round_two_msg(rng, message)
             }
             _ => Err(InternalError::MisroutedMessage),
         }
@@ -122,7 +120,7 @@ impl BroadcastParticipant {
     pub(crate) fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,
         _rng: &mut R,
-        message_type: &MessageType,
+        message_type: MessageType,
         data: Vec<u8>,
         sid: Identifier,
         tag: BroadcastTag,
@@ -135,7 +133,7 @@ impl BroadcastParticipant {
         let b_data = BroadcastData {
             leader: self.id,
             tag,
-            message_type: *message_type,
+            message_type,
             data,
         };
         let b_data_bytes = serialize!(&b_data)?;
@@ -160,7 +158,7 @@ impl BroadcastParticipant {
         &mut self,
         rng: &mut R,
         message: &Message,
-    ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round one broadcast message.");
 
         // [ [data, votes], [data, votes], ...]
@@ -169,13 +167,14 @@ impl BroadcastParticipant {
         let tag = data.tag.clone();
         // it's possible that all Redisperse messages are received before the original
         // Disperse, causing an output
-        let output_option = self.process_vote(data, message.id(), message.from())?;
-        let messages = run_only_once_per_tag!(
+        let redisperse_outcome = self.process_vote(data, message.id(), message.from())?;
+        let disperse_messages = run_only_once_per_tag!(
             self.gen_round_two_msgs(rng, message, message.from()),
             message.id(),
             &tag
         )?;
-        Ok((output_option, messages))
+
+        Ok(redisperse_outcome.with_messages(disperse_messages))
     }
 
     #[instrument(skip_all, err(Debug))]
@@ -184,7 +183,7 @@ impl BroadcastParticipant {
         data: BroadcastData,
         sid: Identifier,
         voter: ParticipantIdentifier,
-    ) -> Result<Option<BroadcastOutput>> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Processing broadcast vote.");
 
         let other_participant_ids = self.other_participant_ids.clone();
@@ -197,7 +196,7 @@ impl BroadcastParticipant {
             other_id: voter,
         };
         if message_votes.contains_key(&idx) {
-            return Ok(None);
+            return Ok(ProcessOutcome::Incomplete);
         }
         let _ = message_votes.insert(idx, data.data.clone());
 
@@ -211,7 +210,7 @@ impl BroadcastParticipant {
             };
             match message_votes.get(&idx) {
                 Some(value) => redispersed_messages.push(value.clone()),
-                None => return Ok(None),
+                None => return Ok(ProcessOutcome::Incomplete),
             };
         }
 
@@ -228,12 +227,11 @@ impl BroadcastParticipant {
             if *v == self.other_participant_ids.len() {
                 let msg = Message::new(data.message_type, sid, data.leader, self.id(), k);
                 let out = BroadcastOutput { tag: data.tag, msg };
-                return Ok(Some(out));
+                return Ok(ProcessOutcome::Terminated(out));
             }
         }
-        Err(InternalError::BroadcastFailure(
-            "No message got enough votes".to_string(),
-        ))
+        error!("Broadcast failed because no message got enough votes");
+        Err(InternalError::ProtocolError)
     }
 
     #[instrument(skip_all, err(Debug))]
@@ -270,14 +268,13 @@ impl BroadcastParticipant {
         &mut self,
         _rng: &mut R,
         message: &Message,
-    ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+    ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round two broadcast message.");
 
         let data = BroadcastData::from_message(message)?;
         if data.leader == self.id() {
-            return Ok((None, vec![]));
+            return Ok(ProcessOutcome::Incomplete);
         }
-        let output_option = self.process_vote(data, message.id(), message.from())?;
-        Ok((output_option, vec![]))
+        self.process_vote(data, message.id(), message.from())
     }
 }

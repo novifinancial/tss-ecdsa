@@ -107,23 +107,10 @@ impl ProtocolParticipant for AuxInfoParticipant {
 
         match message.message_type() {
             MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
-                let (broadcast_option, messages) = self.handle_broadcast(rng, message)?;
+                let broadcast_outcome = self.handle_broadcast(rng, message)?;
 
-                // This is kind of a bastardization of the outcome type, but this is basically a
-                // conversion from the broadcast outcome type (with a
-                // BroadcastOutput) to the aux-info outcome type.
-                let broadcast_outcome = ProcessOutcome::from(None, messages);
-
-                match broadcast_option {
-                    // If the round one broadcast worked, process the round one message.
-                    Some(bmsg) => {
-                        let round_one_outcome =
-                            self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                        broadcast_outcome.consolidate(vec![round_one_outcome])
-                    }
-                    // Otherwise, finish the broadcast.
-                    None => Ok(broadcast_outcome),
-                }
+                // Handle the broadcasted message if all parties have agreed on it
+                broadcast_outcome.convert(self, Self::handle_round_one_msg, rng, main_storage)
             }
             MessageType::Auxinfo(AuxinfoMessageType::Ready) => self.handle_ready_msg(rng, message),
             MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) => {
@@ -169,12 +156,10 @@ impl AuxInfoParticipant {
         let (ready_outcome, is_ready) = self.process_ready_message::<storage::Ready>(message)?;
 
         if is_ready {
-            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_one_msgs(rng, message),
-                message.id()
-            )?);
+            let round_one_messages =
+                run_only_once!(self.gen_round_one_msgs(rng, message), message.id())?;
 
-            ready_outcome.consolidate(vec![round_one_outcome])
+            Ok(ready_outcome.with_messages(round_one_messages))
         } else {
             Ok(ready_outcome)
         }
@@ -207,7 +192,7 @@ impl AuxInfoParticipant {
 
         let messages = self.broadcast(
             rng,
-            &MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash),
+            MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash),
             serialize!(&com)?,
             message.id(),
             BroadcastTag::AuxinfoR1CommitHash,
@@ -242,10 +227,8 @@ impl AuxInfoParticipant {
 
         if r1_done {
             // Generate messages for round two...
-            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_two_msgs(rng, message),
-                message.id()
-            )?);
+            let round_one_messages =
+                run_only_once!(self.gen_round_two_msgs(rng, message), message.id())?;
 
             // ...and process any round two messages we may have received early.
             let round_two_outcomes = self
@@ -257,7 +240,7 @@ impl AuxInfoParticipant {
                 .map(|msg| self.handle_round_two_msg(rng, msg, main_storage))
                 .collect::<Result<Vec<_>>>()?;
 
-            round_one_outcome.consolidate(round_two_outcomes)
+            ProcessOutcome::collect_with_messages(round_two_outcomes, round_one_messages)
         } else {
             // Round 1 isn't done, so we have neither outputs nor new messages to send.
             Ok(ProcessOutcome::Incomplete)
@@ -341,10 +324,8 @@ impl AuxInfoParticipant {
             .contains_for_all_ids::<storage::Decommit>(message.id(), &self.other_participant_ids);
         if r2_done {
             // Generate messages for round 3...
-            let round_two_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_three_msgs(rng, message),
-                message.id()
-            )?);
+            let round_two_messages =
+                run_only_once!(self.gen_round_three_msgs(rng, message), message.id())?;
 
             // ...and handle any messages that other participants have sent for round 3.
             let round_three_outcomes = self
@@ -356,7 +337,7 @@ impl AuxInfoParticipant {
                 .map(|msg| self.handle_round_three_msg(rng, msg, main_storage))
                 .collect::<Result<Vec<_>>>()?;
 
-            round_two_outcome.consolidate(round_three_outcomes)
+            ProcessOutcome::collect_with_messages(round_three_outcomes, round_two_messages)
         } else {
             Ok(ProcessOutcome::Incomplete)
         }

@@ -7,7 +7,7 @@
 // of this source tree.
 
 use crate::{
-    broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
+    broadcast::participant::{BroadcastParticipant, BroadcastTag},
     errors::{InternalError, Result},
     local_storage::{storage as local_storage, LocalStorage, TypeTag},
     messages::{Message, MessageType},
@@ -85,6 +85,35 @@ where
         }
     }
 
+    /// Convert the caller into a `ProcessOutcome` with a different output type.
+    ///
+    /// This method handles both the output and message components of the
+    /// calling outcome:
+    /// - messages are copied as-is into the returned outcome
+    /// - if there's an output, it's processed by the handler function
+    ///
+    /// The handler function must be a method on a `ProtocolParticipant`, and
+    /// must produce an outcome for that `ProtocolParticipant`.
+    pub(crate) fn convert<P, F, R>(
+        self,
+        participant: &mut P,
+        mut handle_output: F,
+        rng: &mut R,
+        storage: &mut Storage,
+    ) -> Result<ProcessOutcome<P::Output>>
+    where
+        P: ProtocolParticipant,
+        F: FnMut(&mut P, &mut R, &O, &mut Storage) -> Result<ProcessOutcome<P::Output>>,
+        R: CryptoRng + RngCore,
+    {
+        let (output, messages) = self.into_parts();
+        let outcome = match output {
+            Some(o) => handle_output(participant, rng, &o, storage)?,
+            None => ProcessOutcome::Incomplete,
+        };
+        Ok(outcome.with_messages(messages))
+    }
+
     /// Convert the [`ProcessOutcome`] into its constituent parts.
     pub(crate) fn into_parts(self) -> (Option<O>, Vec<Message>) {
         match self {
@@ -93,6 +122,28 @@ where
             Self::TerminatedForThisParticipant(output, msgs) => (Some(output), msgs),
             Self::Terminated(output) => (Some(output), Vec::new()),
         }
+    }
+
+    /// Collect a set of `ProcessOutcome`s into a single outcome.
+    ///
+    /// This collects all of the messages into a single set, and makes sure that
+    /// there's no more than one output specified among all the outcomes.
+    pub(crate) fn collect(outcomes: Vec<Self>) -> Result<Self> {
+        Self::Incomplete.consolidate(outcomes)
+    }
+
+    /// Collect a set of `ProcessOutcome`s into a single outcome with the given
+    /// `Message`s.
+    ///
+    /// This collects all of the messages into a single set, including messages
+    /// from the outcome set and from the additional messages, and makes
+    /// sure that there's no more than one output specified among all the
+    /// outcomes.
+    pub(crate) fn collect_with_messages(
+        outcomes: Vec<Self>,
+        messages: Vec<Message>,
+    ) -> Result<Self> {
+        Ok(Self::collect(outcomes)?.with_messages(messages))
     }
 
     /// Consolidate a set of `ProcessOutcome`s, including `self`, into a single
@@ -122,11 +173,18 @@ where
 
         Ok(ProcessOutcome::from(output, messages))
     }
+
+    /// Combine a `ProcessOutcome` with an additional set of [`Message`]s.
+    pub(crate) fn with_messages(self, mut messages: Vec<Message>) -> Self {
+        let (output, mut original_messages) = self.into_parts();
+        original_messages.append(&mut messages);
+        Self::from(output, original_messages)
+    }
 }
 
 pub(crate) trait ProtocolParticipant {
     /// Output type of a successful protocol execution.
-    type Output;
+    type Output: Debug;
 
     /// Returns a reference to the [`LocalStorage`] associated with this
     /// protocol.
@@ -268,7 +326,7 @@ pub(crate) trait Broadcast {
     fn broadcast<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        message_type: &MessageType,
+        message_type: MessageType,
         data: Vec<u8>,
         sid: Identifier,
         tag: BroadcastTag,
@@ -276,9 +334,9 @@ pub(crate) trait Broadcast {
         let mut messages =
             self.broadcast_participant()
                 .gen_round_one_msgs(rng, message_type, data, sid, tag)?;
-        for msg in messages.iter_mut() {
+        for msg in &mut messages {
             msg.unverified_bytes = serialize!(msg)?;
-            msg.message_type = *message_type;
+            msg.message_type = message_type;
         }
         Ok(messages)
     }
@@ -287,25 +345,30 @@ pub(crate) trait Broadcast {
         &mut self,
         rng: &mut R,
         message: &Message,
-    ) -> Result<(Option<BroadcastOutput>, Vec<Message>)> {
+    ) -> Result<ProcessOutcome<<BroadcastParticipant as ProtocolParticipant>::Output>> {
+        // Broadcast messages are handled by wrapping the broadcast protocol messages
+        // into calling-protocol-specific wrappers. To handle a broadcast message, we
+        // need to first unwrap the broadcast message...
         let message_type = message.message_type;
         let broadcast_input: Message = deserialize!(&message.unverified_bytes)?;
 
         // Make some empty storage to satisfy the trait. TODO #180: remove this.
         let mut empty_storage = Storage::new();
 
+        // ...process the message...
         let outcome = self.broadcast_participant().process_message(
             rng,
             &broadcast_input,
             &mut empty_storage,
         )?;
 
+        // ...and then re-wrap the output messages.
         let (output, mut messages) = outcome.into_parts();
-        for msg in messages.iter_mut() {
+        for msg in &mut messages {
             msg.unverified_bytes = serialize!(msg)?;
             msg.message_type = message_type;
         }
-        Ok((output, messages))
+        Ok(ProcessOutcome::from(output, messages))
     }
 }
 

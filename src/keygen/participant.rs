@@ -108,20 +108,10 @@ impl ProtocolParticipant for KeygenParticipant {
 
         match message.message_type() {
             MessageType::Keygen(KeygenMessageType::R1CommitHash) => {
-                let (broadcast_option, messages) = self.handle_broadcast(rng, message)?;
+                let broadcast_outcome = self.handle_broadcast(rng, message)?;
 
-                let broadcast_outcome = ProcessOutcome::from(None, messages);
-
-                match broadcast_option {
-                    // If the round one broadcast worked, process the round one message.
-                    Some(bmsg) => {
-                        let round_one_outcome =
-                            self.handle_round_one_msg(rng, &bmsg, main_storage)?;
-                        broadcast_outcome.consolidate(vec![round_one_outcome])
-                    }
-                    // Otherwise, wait to finish the broadcast
-                    None => Ok(broadcast_outcome),
-                }
+                // Handle the broadcasted message if all parties have agreed on it
+                broadcast_outcome.convert(self, Self::handle_round_one_msg, rng, main_storage)
             }
             MessageType::Keygen(KeygenMessageType::Ready) => self.handle_ready_msg(rng, message),
             MessageType::Keygen(KeygenMessageType::R2Decommit) => {
@@ -167,12 +157,10 @@ impl KeygenParticipant {
         let (ready_outcome, is_ready) = self.process_ready_message::<storage::Ready>(message)?;
 
         if is_ready {
-            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_one_msgs(rng, message),
-                message.id()
-            )?);
+            let round_one_messages =
+                run_only_once!(self.gen_round_one_msgs(rng, message), message.id())?;
 
-            ready_outcome.consolidate(vec![round_one_outcome])
+            Ok(ready_outcome.with_messages(round_one_messages))
         } else {
             Ok(ready_outcome)
         }
@@ -220,7 +208,7 @@ impl KeygenParticipant {
 
         let messages = self.broadcast(
             rng,
-            &MessageType::Keygen(KeygenMessageType::R1CommitHash),
+            MessageType::Keygen(KeygenMessageType::R1CommitHash),
             com_bytes.clone(),
             message.id(),
             BroadcastTag::KeyGenR1CommitHash,
@@ -255,10 +243,8 @@ impl KeygenParticipant {
 
         if r1_done {
             // Finish round 1 by generating messages for round 2
-            let round_one_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_two_msgs(rng, message),
-                message.id()
-            )?);
+            let round_one_messages =
+                run_only_once!(self.gen_round_two_msgs(rng, message), message.id())?;
 
             // Process any round 2 messages we may have received early
             let round_two_outcomes = self
@@ -269,7 +255,8 @@ impl KeygenParticipant {
                 .iter()
                 .map(|msg| self.handle_round_two_msg(rng, msg, main_storage))
                 .collect::<Result<Vec<_>>>()?;
-            round_one_outcome.consolidate(round_two_outcomes)
+
+            ProcessOutcome::collect_with_messages(round_two_outcomes, round_one_messages)
         } else {
             // Otherwise, wait for more round 1 messages
             Ok(ProcessOutcome::Incomplete)
@@ -352,10 +339,8 @@ impl KeygenParticipant {
 
         if r2_done {
             // Generate messages for round 3...
-            let round_two_outcome = ProcessOutcome::Processed(run_only_once!(
-                self.gen_round_three_msgs(rng, message),
-                message.id()
-            )?);
+            let round_two_messages =
+                run_only_once!(self.gen_round_three_msgs(rng, message), message.id())?;
 
             // ...and handle any messages that other participants have sent for round 3.
             let round_three_outcomes = self
@@ -366,7 +351,7 @@ impl KeygenParticipant {
                 .iter()
                 .map(|msg| self.handle_round_three_msg(rng, msg, main_storage))
                 .collect::<Result<Vec<_>>>()?;
-            round_two_outcome.consolidate(round_three_outcomes)
+            ProcessOutcome::collect_with_messages(round_three_outcomes, round_two_messages)
         } else {
             // Otherwise, wait for more round 2 messages.
             Ok(ProcessOutcome::Incomplete)
