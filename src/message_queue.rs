@@ -18,6 +18,7 @@ use std::{collections::HashMap, fmt::Debug};
 #[derive(Debug, Serialize, Deserialize)]
 struct MessageIndex {
     message_type: MessageType,
+    /// `identifier` corresponds to a unique session identifier.
     identifier: Identifier,
 }
 
@@ -36,6 +37,8 @@ impl MessageQueue {
     }
 
     /// Store a message in the MessageQueue.
+    ///
+    /// `identifier` corresponds to a unique session identifier.
     pub(crate) fn store(
         &mut self,
         message_type: MessageType,
@@ -49,6 +52,8 @@ impl MessageQueue {
 
     /// Retrieve (and remove) all messages of a given type from the
     /// MessageQueue.
+    ///
+    /// `identifier` corresponds to a unique session identifier.
     pub(crate) fn retrieve_all(
         &mut self,
         message_type: MessageType,
@@ -59,6 +64,8 @@ impl MessageQueue {
 
     /// Retrieve (and remove) all messages of a given type from a given sender
     /// from the MessageQueue.
+    ///
+    ///`identifier` corresponds to a unique session identifier.
     pub(crate) fn retrieve(
         &mut self,
         message_type: MessageType,
@@ -67,7 +74,7 @@ impl MessageQueue {
     ) -> Result<Vec<Message>> {
         self.do_retrieve(message_type, identifier, Some(sender))
     }
-
+    ///`identifier` corresponds to a unique session identifier.
     fn do_retrieve(
         &mut self,
         message_type: MessageType,

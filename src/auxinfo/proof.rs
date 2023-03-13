@@ -69,6 +69,7 @@ impl AuxInfoProof {
         Ok(Self { pimod, pifac })
     }
 
+    ///`sid` corresponds to a unique session identifier.
     pub(crate) fn verify(
         &self,
         sid: Identifier,

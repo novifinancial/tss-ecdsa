@@ -35,6 +35,7 @@ impl KeygenCommit {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct KeygenDecommit {
+    ///`sid` corresponds to a unique session identifier.
     pub sid: Identifier,
     pub sender: ParticipantIdentifier,
     pub rid: [u8; 32],
@@ -44,6 +45,7 @@ pub(crate) struct KeygenDecommit {
 }
 
 impl KeygenDecommit {
+    ///`sid` corresponds to a unique session identifier.
     pub(crate) fn new<R: RngCore + CryptoRng>(
         rng: &mut R,
         sid: &Identifier,
@@ -86,6 +88,7 @@ impl KeygenDecommit {
     }
 
     #[instrument(skip_all, err(Debug))]
+    /// `sid` is a unique session identifier.
     pub(crate) fn verify(
         &self,
         sid: &Identifier,

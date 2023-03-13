@@ -33,9 +33,9 @@ impl Storable for PersistentStorageType {}
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 struct StorableIndex<T: Storable> {
     storable_type: T,
-    /// The unique identifier associated with this stored value
+    /// Identifier for the session that the stored value belongs to.
     identifier: Identifier,
-    // The participant identifier that this storable is associated with
+    // The participant identifier that this storable is associated with.
     participant: ParticipantIdentifier,
 }
 
@@ -55,6 +55,7 @@ impl Storage {
 
     /// Stores `val` in its serialied form, using `storable_type`, `identifier`,
     /// and `associated_partipant_id` as the key.
+    /// The `identifier` here corresponds to a unique session identifier.
     pub(crate) fn store<T: Storable, S: Serialize>(
         &mut self,
         storable_type: T,
@@ -72,6 +73,7 @@ impl Storage {
 
     /// Retrieves an item in its deserialized form, using `storable_type`,
     /// `identifier`, and `associated_partipant_id` as the key.
+    /// The `identifier` here corresponds to a unique session identifier.
     pub(crate) fn retrieve<T: Storable, D: DeserializeOwned>(
         &self,
         storable_type: T,
@@ -84,7 +86,7 @@ impl Storage {
             participant,
         })?)
     }
-
+    /// The `identifier` here corresponds to a unique session identifier.
     pub(crate) fn delete<T: Storable>(
         &mut self,
         storable_type: T,
@@ -139,6 +141,8 @@ impl Storage {
             .iter()
             .map(|(t, identifier, participant)| StorableIndex {
                 storable_type: *t,
+                /// The `identifier` here corresponds to a unique
+                /// session identifier.
                 identifier: *identifier,
                 participant: *participant,
             })

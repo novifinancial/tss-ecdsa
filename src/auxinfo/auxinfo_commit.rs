@@ -34,6 +34,7 @@ impl AuxInfoCommit {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+///`sid` corresponds to a unique session identifier.
 pub(crate) struct AuxInfoDecommit {
     sid: Identifier,
     sender: ParticipantIdentifier,
@@ -57,6 +58,7 @@ impl Debug for AuxInfoDecommit {
 }
 
 impl AuxInfoDecommit {
+    ///`sid` corresponds to a unique session identifier.
     pub(crate) fn new<R: RngCore + CryptoRng>(
         rng: &mut R,
         sid: &Identifier,
@@ -141,6 +143,7 @@ impl AuxInfoDecommit {
 
     /// Verify that this [`AuxInfoDecommit`] corresponds to the given
     /// [`AuxInfoCommit`].
+    /// `sid` is a unique session identifier.
     #[instrument(skip_all, err(Debug))]
     pub(crate) fn verify(
         &self,
