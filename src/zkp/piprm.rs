@@ -28,6 +28,7 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 // Soundness parameter.
 const SOUNDNESS: usize = crate::parameters::SOUNDNESS_PARAMETER;
@@ -128,12 +129,14 @@ impl Proof for PiPrmProof {
             || self.challenge_bytes.len() != SOUNDNESS
             || self.responses.len() != SOUNDNESS
         {
-            return verify_err!("length of values provided does not match soundness parameter");
+            warn!("length of values provided does not match soundness parameter");
+            return Err(InternalError::FailedToVerifyProof);
         }
         let challenges = generate_challenge_bytes(input, &self.commitments, transcript)?;
         // Check Fiat-Shamir consistency.
         if challenges != self.challenge_bytes.as_slice() {
-            return verify_err!("Fiat-Shamir does not verify");
+            warn!("Fiat-Shamir does not verify");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         let is_sound = challenges
@@ -153,7 +156,8 @@ impl Proof for PiPrmProof {
             .all(|check| check);
 
         if !is_sound {
-            return verify_err!("response validation check failed");
+            warn!("response validation check failed");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         Ok(())
@@ -163,9 +167,8 @@ impl Proof for PiPrmProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paillier::DecryptionKey;
+    use crate::{paillier::DecryptionKey, utils::testing::init_testing};
     use rand::Rng;
-    use test_log::test;
 
     fn random_ring_pedersen_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -180,7 +183,7 @@ mod tests {
 
     #[test]
     fn piprm_proof_verifies() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let mut transcript = Transcript::new(b"PiPrmProof");
         proof.verify(&input, &mut transcript)
@@ -188,7 +191,7 @@ mod tests {
 
     #[test]
     fn piprm_proof_serializes() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let serialized = bincode::serialize(&proof).unwrap();
         let deserialized: PiPrmProof = bincode::deserialize(&serialized).unwrap();
@@ -199,7 +202,7 @@ mod tests {
 
     #[test]
     fn incorrect_lengths_fails() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         // Validate that the proof is okay.
         let mut transcript = Transcript::new(b"PiPrmProof");
@@ -263,7 +266,7 @@ mod tests {
 
     #[test]
     fn bad_secret_exponent_fails() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (input, proof, _, totient) = random_ring_pedersen_proof(&mut rng)?;
         let bad_lambda = random_positive_bn(&mut rng, &totient);
         let secrets = PiPrmSecret::new(bad_lambda, totient);
@@ -280,7 +283,7 @@ mod tests {
 
     #[test]
     fn bad_secret_totient_fails() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (input, proof, lambda, _) = random_ring_pedersen_proof(&mut rng)?;
         let bad_totient = random_positive_bn(&mut rng, input.modulus());
         let secrets = PiPrmSecret::new(lambda, bad_totient);
@@ -296,7 +299,8 @@ mod tests {
 
     #[test]
     fn incorrect_ring_pedersen_fails() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
+
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let (bad_input, _, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let mut transcript = Transcript::new(b"PiPrmProof");
@@ -309,7 +313,8 @@ mod tests {
 
     #[test]
     fn invalid_values_fails() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
+
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         for i in 0..SOUNDNESS {
             let mut bad_proof = proof.clone();

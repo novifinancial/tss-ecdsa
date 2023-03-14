@@ -23,7 +23,7 @@ use k256::elliptic_curve::{Field, IsHigh};
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-use tracing::{info, instrument, trace};
+use tracing::{error, info, instrument, trace};
 
 /////////////////////
 // Participant API //
@@ -325,8 +325,10 @@ impl SignatureShare {
     /// Can be used to combine [SignatureShare]s
     pub fn chain(&self, share: Self) -> Result<Self> {
         let r = match (self.r, share.r) {
-            // Reason: Input share was not initialized
-            (_, None) => Err(InternalError::InternalInvariantFailed),
+            (_, None) => {
+                error!("Input share was not initialized");
+                Err(InternalError::InternalInvariantFailed)
+            }
             (Some(prev_r), Some(new_r)) => {
                 if prev_r != new_r {
                     return Err(InternalError::SignatureInstantiationError);
@@ -419,11 +421,11 @@ impl std::fmt::Display for Identifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::testing::init_testing;
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha2::{Digest, Sha256};
     use std::collections::HashMap;
-    use test_log::test;
     use tracing::debug;
 
     /// Delivers all messages into their respective participant's inboxes   
@@ -501,7 +503,7 @@ mod tests {
     #[cfg_attr(feature = "flame_it", flame)]
     #[test]
     fn test_run_protocol() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let mut quorum = Participant::new_quorum(3, &mut rng)?;
         let mut inboxes = HashMap::new();
         for participant in &quorum {

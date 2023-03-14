@@ -2,6 +2,7 @@ use crate::{errors::InternalError, utils};
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// Tool for verifying and operating on elements of the multiplicative
 /// group of integers mod `N`, for some modulus `N`.
@@ -25,17 +26,21 @@ impl ZStarNBuilder {
     /// sampling the element in the multiplicative group modulo n.
     pub fn validate(&self, unverified: ZStarNUnverified) -> Result<ZStarN, InternalError> {
         if unverified.value().is_zero() {
-            return verify_err!("Elements of the multiplicative group  ZK*_N cannot be zero");
+            warn!("Elements of the multiplicative group  ZK*_N cannot be zero");
+            return Err(InternalError::FailedToVerifyProof);
         } else if unverified.value() > self.modulus() {
-            return verify_err!(
+            warn!(
                 "Elements of the multiplicative group ZK*_N cannot be larger than the RSA modulus"
             );
+            return Err(InternalError::FailedToVerifyProof);
         } else if unverified.value() < &BigNumber::zero() {
-            return verify_err!("Elements of the multiplicative group ZK*_N cannot be negative");
+            warn!("Elements of the multiplicative group ZK*_N cannot be negative");
+            return Err(InternalError::FailedToVerifyProof);
         }
         let result = unverified.value().gcd(self.modulus());
         if result != BigNumber::one() {
-            return verify_err!("Elements are not coprime");
+            warn!("Elements are not coprime");
+            return Err(InternalError::FailedToVerifyProof);
         }
         Ok(ZStarN {
             value: unverified.value().to_owned(),
@@ -100,11 +105,11 @@ impl ZStarNUnverified {
 
 #[cfg(test)]
 mod test {
-    use crate::{paillier::DecryptionKey, zkstar::*};
+    use crate::{paillier::DecryptionKey, utils::testing::init_testing, zkstar::*};
 
     #[test]
     fn zkstar_verification_works() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (_, p, q) = DecryptionKey::new(&mut rng).unwrap();
         let builder = ZStarNBuilder::new(&p * &q);
 
@@ -117,9 +122,10 @@ mod test {
         let zstar_verifies_one = builder.validate(value_verifies_one);
         assert!(zstar_verifies_one.is_ok());
     }
+
     #[test]
     fn zkstar_constructor_rejects_elements_outside_group() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (_, p, q) = DecryptionKey::new(&mut rng).unwrap();
         let builder = ZStarNBuilder::new(&p * &q);
 
@@ -146,7 +152,7 @@ mod test {
     }
     #[test]
     fn randomly_sample_element_in_zkstar_works() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (_, p, q) = DecryptionKey::new(&mut rng).unwrap();
         let builder = ZStarNBuilder::new(&p * &q);
         let zstar = ZStarN::random_element(&builder, &mut rng);
@@ -154,7 +160,7 @@ mod test {
     }
     #[test]
     fn zkstar_serialization_deserialization_works() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (_, p, q) = DecryptionKey::new(&mut rng).unwrap();
         let builder = ZStarNBuilder::new(&p * &q);
 
@@ -170,7 +176,8 @@ mod test {
     }
     #[test]
     fn zkstar_rejects_deserialized_elements_outside_group() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
+
         let (_, p, q) = DecryptionKey::new(&mut rng).unwrap();
         let builder = ZStarNBuilder::new(&p * &q);
 

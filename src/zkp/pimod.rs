@@ -16,6 +16,7 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::{error, warn};
 
 // Soundness parameter lambda
 static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
@@ -87,17 +88,15 @@ impl Proof for PiModProof {
         let mut elements = vec![];
         for _ in 0..LAMBDA {
             let y = positive_bn_random_from_transcript(transcript, &input.N);
-
             let (a, b, x) = y_prime_combinations(&w, &y, &secret.p, &secret.q)?;
 
             // Compute phi(N) = (p-1) * (q-1)
             let phi_n = (&secret.p - 1) * (&secret.q - 1);
-            let exp = &input
-                .N
-                .invert(&phi_n)
-                // Reason: "Could not invert a BigNumber"
-                .ok_or(InternalError::CouldNotGenerateProof)?;
-            let z = modpow(&y, exp, &input.N);
+            let exp = input.N.invert(&phi_n).ok_or_else(|| {
+                error!("Could not invert a BigNumber");
+                InternalError::CouldNotGenerateProof
+            })?;
+            let z = modpow(&y, &exp, &input.N);
 
             elements.push(PiModProofElements {
                 x: x[0].clone(),
@@ -117,26 +116,34 @@ impl Proof for PiModProof {
     fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
         // Verify that proof is sound -- it must have exactly LAMBDA elements
         match self.elements.len().cmp(&LAMBDA) {
-            Ordering::Less => verify_err!(format!(
-                "PiMod proof is not sound: has {} elements, expected {}",
-                self.elements.len(),
-                LAMBDA,
-            ))?,
-            Ordering::Greater => verify_err!(format!(
-                "PiMod proof has too many elements: has {}, expected {}",
-                self.elements.len(),
-                LAMBDA
-            ))?,
+            Ordering::Less => {
+                warn!(
+                    "PiMod proof is not sound: has {} elements, expected {}",
+                    self.elements.len(),
+                    LAMBDA,
+                );
+                return Err(InternalError::FailedToVerifyProof);
+            }
+            Ordering::Greater => {
+                warn!(
+                    "PiMod proof has too many elements: has {}, expected {}",
+                    self.elements.len(),
+                    LAMBDA
+                );
+                return Err(InternalError::FailedToVerifyProof);
+            }
             Ordering::Equal => {}
         }
 
         // Verify that N is an odd composite number
         if &input.N % BigNumber::from(2u64) == BigNumber::zero() {
-            return verify_err!("N is even");
+            warn!("N is even");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         if input.N.is_prime() {
-            return verify_err!("N is not composite");
+            warn!("N is not composite");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         transcript.append_message(b"CommonInput", &serialize!(&input)?);
@@ -146,25 +153,30 @@ impl Proof for PiModProof {
             // First, check that y came from Fiat-Shamir transcript
             let y = positive_bn_random_from_transcript(transcript, &input.N);
             if y != elements.y {
-                return verify_err!("y does not match Fiat-Shamir challenge");
+                warn!("y does not match Fiat-Shamir challenge");
+                return Err(InternalError::FailedToVerifyProof);
             }
 
             let y_candidate = modpow(&elements.z, &input.N, &input.N);
             if elements.y != y_candidate {
-                return verify_err!("z^N != y (mod N)");
+                warn!("z^N != y (mod N)");
+                return Err(InternalError::FailedToVerifyProof);
             }
 
             if elements.a != 0 && elements.a != 1 {
-                return verify_err!("a not in {0,1}");
+                warn!("a not in {{0,1}}");
+                return Err(InternalError::FailedToVerifyProof);
             }
 
             if elements.b != 0 && elements.b != 1 {
-                return verify_err!("b not in {0,1}");
+                warn!("b not in {{0,1}}");
+                return Err(InternalError::FailedToVerifyProof);
             }
 
             let y_prime = y_prime_from_y(&elements.y, &self.w, elements.a, elements.b, &input.N);
             if modpow(&elements.x, &BigNumber::from(4u64), &input.N) != y_prime {
-                return verify_err!("x^4 != y' (mod N)");
+                warn!("x^4 != y' (mod N)");
+                return Err(InternalError::FailedToVerifyProof);
             }
         }
 
@@ -226,7 +238,7 @@ fn square_roots_mod_prime(n: &BigNumber, p: &BigNumber) -> Result<(BigNumber, Bi
     if modpow(&r, &BigNumber::from(2), p) == bn_mod(n, p) {
         return Ok((r, neg_r));
     }
-    // Reason: Could not find square roots modulo n
+    warn!("Could not find square roots modulo n");
     Err(InternalError::CouldNotGenerateProof)
 }
 
@@ -236,7 +248,7 @@ fn extended_euclidean(a: &BigNumber, b: &BigNumber) -> Result<(BigNumber, BigNum
     let result = a.extended_gcd(b);
 
     if result.gcd != BigNumber::one() {
-        // Reason: Elements are not coprime
+        warn!("Elements are not coprime");
         Err(InternalError::CouldNotGenerateProof)?
     }
 
@@ -263,8 +275,7 @@ fn chinese_remainder_theorem(
 ) -> Result<BigNumber> {
     let zero = &BigNumber::zero();
     if a1 >= p || a1 < zero || a2 >= q || a2 < zero {
-        // Reason: One or more of the integer inputs to the Chinese remainder theorem
-        // were outside the expected range
+        warn!("One or more of the integer inputs to the Chinese remainder theorem were outside the expected range");
         Err(InternalError::CouldNotGenerateProof)?
     }
     let (z, w) = extended_euclidean(p, q)?;
@@ -366,8 +377,9 @@ fn y_prime_combinations(
     }
 
     if has_fourth_roots != 1 {
-        // Reason: Could not find uniqueness for fourth roots combination in
-        // Paillier-Blum modulus proof
+        error!(
+            "Could not find uniqueness for fourth roots combination in Paillier-Blum modulus proof"
+        );
         return Err(InternalError::CouldNotGenerateProof);
     }
 
@@ -380,12 +392,12 @@ mod tests {
     use crate::{
         paillier::{prime_gen, DecryptionKey},
         parameters::SOUNDNESS_PARAMETER,
+        utils::testing::init_testing,
     };
-    use test_log::test;
 
     #[test]
     fn test_jacobi() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let N = &p * &q;
 
@@ -415,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_prime() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let p = prime_gen::try_get_prime_from_pool_insecure(&mut rng).unwrap();
 
         for _ in 0..100 {
@@ -441,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_square_roots_mod_composite() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let N = &p * &q;
 
@@ -472,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_fourth_roots_mod_composite() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         let N = &p * &q;
 
@@ -503,7 +515,7 @@ mod tests {
 
     #[test]
     fn chinese_remainder_theorem_works() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         // This guarantees p and q are coprime and not equal.
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
         assert!(p != q);
@@ -523,7 +535,7 @@ mod tests {
 
     #[test]
     fn chinese_remainder_theorem_integers_must_be_in_range() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
 
         // This guarantees p and q are coprime and not equal.
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
@@ -576,7 +588,7 @@ mod tests {
 
     #[test]
     fn chinese_remainder_theorem_moduli_must_be_coprime() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
 
         // This guarantees p and q are coprime and not equal.
         let (p, q) = prime_gen::get_prime_pair_from_pool_insecure(&mut rng).unwrap();
@@ -637,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_blum_modulus_proof_elements_roundtrip() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
         let pbelement = random_pbmpe(&mut rng);
         let buf = bincode::serialize(&pbelement).unwrap();
         let roundtrip_pbelement: PiModProofElements = bincode::deserialize(&buf).unwrap();
@@ -646,9 +658,9 @@ mod tests {
 
     #[test]
     fn test_blum_modulus_roundtrip() {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
+
         let w = random_big_number(&mut rng);
-        let mut rng = crate::utils::get_test_rng();
         let num_elements = rng.next_u64() as u8;
         let elements = (0..num_elements)
             .map(|_| random_pbmpe(&mut rng))
@@ -675,7 +687,7 @@ mod tests {
 
     #[test]
     fn pimod_proof_verifies() {
-        let mut rng = get_test_rng();
+        let mut rng = init_testing();
         let (proof, input) = random_pimod_proof(&mut rng);
         let mut transcript = Transcript::new(b"PiMod Test");
         assert!(proof.verify(&input, &mut transcript).is_ok());
@@ -683,7 +695,7 @@ mod tests {
 
     #[test]
     fn pimod_proof_requires_correct_number_of_elements_for_soundness() {
-        let mut rng = get_test_rng();
+        let mut rng = init_testing();
 
         let transform = |proof: &PiModProof| {
             // Remove iterations from the proof

@@ -38,6 +38,7 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// Proof of knowledge of the plaintext value of a ciphertext, where the value
 /// is within a desired range.
@@ -184,7 +185,8 @@ impl Proof for PiEncProof {
         // ...generate a challenge, and make sure it matches the one the prover sent.
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
         if e != self.challenge {
-            return verify_err!("Fiat-Shamir didn't verify");
+            warn!("Fiat-Shamir didn't verify");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         // Check that the plaintext and nonce responses are well-formed (e.g. that the
@@ -201,7 +203,8 @@ impl Proof for PiEncProof {
             lhs == rhs
         };
         if !ciphertext_mask_is_well_formed {
-            return verify_err!("ciphertext mask check (first equality check) failed");
+            warn!("ciphertext mask check (first equality check) failed");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         // Check that the plaintext and commitment randomness responses are well formed
@@ -220,13 +223,15 @@ impl Proof for PiEncProof {
             lhs == rhs
         };
         if !responses_match_commitments {
-            return verify_err!("response validation check (second equality check) failed");
+            warn!("response validation check (second equality check) failed");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         // Make sure the ciphertext response is in range
         let bound = BigNumber::one() << (ELL + EPSILON);
         if self.plaintext_response < -bound.clone() || self.plaintext_response > bound {
-            return verify_err!("bounds check on plaintext response failed");
+            warn!("bounds check on plaintext response failed");
+            return Err(InternalError::FailedToVerifyProof);
         }
 
         Ok(())
@@ -262,9 +267,11 @@ mod tests {
     use super::*;
     use crate::{
         paillier::DecryptionKey,
-        utils::{random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn},
+        utils::{
+            random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn,
+            testing::init_testing,
+        },
     };
-    use test_log::test;
 
     fn build_random_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -295,7 +302,7 @@ mod tests {
 
     #[test]
     fn proof_serializes_correctly() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
 
         let plaintext = random_plusminus_by_size(&mut rng, ELL);
         let (proof, input) = build_random_proof(&mut rng, plaintext)?;
@@ -315,7 +322,7 @@ mod tests {
 
     #[test]
     fn plaintext_must_be_in_range() -> Result<()> {
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
 
         // A plaintext in the range 2^ELL should always succeed
         let in_range = random_plusminus_by_size(&mut rng, ELL);
@@ -365,7 +372,7 @@ mod tests {
 
     #[test]
     fn every_proof_field_matters() {
-        let rng = &mut crate::utils::get_test_rng();
+        let rng = &mut init_testing();
         let plaintext = random_plusminus_by_size(rng, ELL);
 
         let (proof, input) = build_random_proof(rng, plaintext.clone()).unwrap();
@@ -449,7 +456,7 @@ mod tests {
 
     #[test]
     fn proof_must_be_constructed_with_knowledge_of_secrets() -> Result<()> {
-        let rng = &mut crate::utils::get_test_rng();
+        let rng = &mut init_testing();
 
         // Form common inputs
         let (decryption_key, _, _) = DecryptionKey::new(rng)?;
@@ -518,7 +525,7 @@ mod tests {
     #[test]
     fn verification_requires_correct_common_input() -> Result<()> {
         // Replace each field of `CommonInput` with something else to verify
-        let mut rng = crate::utils::get_test_rng();
+        let mut rng = init_testing();
 
         // Form inputs
         let plaintext = random_plusminus_by_size(&mut rng, ELL);
