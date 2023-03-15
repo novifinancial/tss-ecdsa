@@ -201,7 +201,8 @@ impl PresignParticipant {
             Ok(ready_outcome)
         }
     }
-
+    /// `auxinfo_identifier`, `keyshare_identifier` and `identifier` correspond
+    /// to unique session identifiers.
     #[instrument(skip_all, err(Debug))]
     pub(crate) fn initialize_presign_message(
         &mut self,
@@ -701,6 +702,8 @@ impl PresignParticipant {
         Ok(presign_record)
     }
 
+    ///`presign_identifier` corresponds to a unique session identifier for
+    /// presigning.
     fn get_associated_identifiers_for_presign(
         &self,
         presign_identifier: &Identifier,
@@ -712,7 +715,8 @@ impl PresignParticipant {
 
         Ok((*id1, *id2))
     }
-
+    /// `auxinfo_identifier` and `keyshare_identifier` correspond to unique
+    /// session identifiers.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_two_public(
         &mut self,
@@ -760,7 +764,7 @@ impl PresignParticipant {
 
         Ok(())
     }
-
+    /// `auxinfo_identifier` corresponds to a unique session identifier.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     fn validate_and_store_round_three_public(
         &mut self,
@@ -806,6 +810,8 @@ impl PresignParticipant {
     ///
     /// This returns a HashMap with the key as the participant id and these
     /// values being mapped
+    /// `auxinfo_identifier` and `identifier` correspond to unique session
+    /// identifiers.
     fn get_other_participants_round_three_values(
         &self,
         identifier: Identifier,
@@ -861,7 +867,8 @@ impl PresignParticipant {
     /// Aggregate the other participants' round three public values from
     /// storage. But don't remove them from storage.
     ///
-    /// This returns a Vec with the values
+    /// This returns a Vec with the values.
+    /// `identifier` here correspond to a unique session identifier.
     fn get_other_participants_round_three_publics(
         &self,
         identifier: Identifier,
@@ -889,6 +896,8 @@ impl PresignParticipant {
     }
 }
 
+/// `auxinfo_identifier` and `keyshare_identifier` correspond to unique session
+/// identifiers.
 pub(crate) fn get_keyshare(
     self_id: ParticipantIdentifier,
     auxinfo_identifier: Identifier,

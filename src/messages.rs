@@ -92,11 +92,11 @@ pub enum BroadcastMessageType {
 pub struct Message {
     /// The type of the message
     pub(crate) message_type: MessageType,
-    /// The unique identifier corresponding to the object carried by the message
+    /// The globally unique session identifier that this message belongs to.
     identifier: Identifier,
-    /// Which participant this message is coming from
+    /// Which participant this message is coming from.
     from: ParticipantIdentifier,
-    /// Which participant this message is addressed to
+    /// Which participant this message is addressed to.
     to: ParticipantIdentifier,
     /// The raw bytes for the message, which need to be verified.
     /// This should be a private member of the struct, so that
@@ -110,7 +110,7 @@ impl Debug for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Message")
             .field("message_type", &self.message_type)
-            .field("identifier", &self.identifier)
+            .field("session identifier", &self.identifier)
             .field("from", &self.from)
             .field("to", &self.to)
             .finish()
@@ -142,7 +142,7 @@ impl Message {
         self.message_type
     }
 
-    /// The identifier associated with the message
+    /// The session identifier associated with the message.
     pub fn id(&self) -> Identifier {
         self.identifier
     }

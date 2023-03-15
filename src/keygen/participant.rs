@@ -64,7 +64,7 @@ mod storage {
 
 #[derive(Debug)]
 pub(crate) struct KeygenParticipant {
-    /// A unique identifier for this participant
+    /// A unique identifier for this participant.
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
     /// protocol

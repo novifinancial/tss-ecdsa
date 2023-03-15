@@ -157,7 +157,7 @@ impl Participant {
     }
 
     /// Produces a message to signal to this participant that auxinfo generation
-    /// is ready for the specified identifier
+    /// is ready for the specified identifier.
     #[instrument(skip_all)]
     pub fn initialize_auxinfo_message(&self, auxinfo_identifier: Identifier) -> Message {
         info!("Auxinfo generation is ready.");
@@ -187,6 +187,8 @@ impl Participant {
     /// Produces a message to signal to this participant that presignature
     /// generation is ready for the specified identifier. This also requires
     /// supplying the associated auxinfo identifier and keyshare identifier.
+    /// `auxinfo_identifier`, `keyshare_identifier` and `identifier` correspond
+    /// to session identifiers.
     #[instrument(skip_all)]
     pub fn initialize_presign_message(
         &mut self,
@@ -273,6 +275,8 @@ impl Participant {
 
     /// If presign record is populated, then this participant is ready to issue
     /// a signature
+    /// The `presign_identifier` globally and uniquely defines a session for
+    /// the pre-signing.
     #[instrument(skip_all, err(Debug))]
     pub fn sign(
         &mut self,
@@ -372,12 +376,15 @@ pub struct ParticipantConfig {
 
 /// An identifier corresponding to a [Participant]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ParticipantIdentifier(Identifier);
+pub struct ParticipantIdentifier(u128);
 
 impl ParticipantIdentifier {
     /// Generates a random [ParticipantIdentifier]
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        ParticipantIdentifier(Identifier::random(rng))
+        // Sample random 32 bytes and convert to hex
+        let random_bytes = rng.gen::<u128>();
+        trace!("Created new Participant Identifier({random_bytes})");
+        Self(random_bytes)
     }
 }
 
@@ -386,13 +393,49 @@ impl std::fmt::Display for ParticipantIdentifier {
         write!(
             f,
             "ParticipantId({})",
-            hex::encode(&self.0 .0.to_be_bytes()[..4])
+            hex::encode(&self.0.to_be_bytes()[..4])
         )
     }
 }
 
-/// A generic identifier
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+
+/// An [`Identifier`] is a session identifier that uniquely identifies a single
+/// instance of a protocol and all messages associated with it.
+///
+/// [`Identifier`] are globally unique identifiers that allow parties to
+/// distinguish between different sessions. The "globally unique" property
+/// of these identifiers forces parties to avoid any collisions between
+/// different sessions and any kind of replay attack by associating messages,
+/// parameters, proofs and commitments with their corresponding sessions.
+///
+/// # Discrepancies with the paper with respect to session identifiers:
+///
+/// Discrepancy (A): The paper distinguishes between the Session identifiers
+/// (sid) which are created from shared parameters in the protocol at the
+/// beginning of key generation and the Sub-Session identifiers (ssid) that are
+/// created from sid and other post key generation shared parameters for the
+/// purpose of pre/signing. The codebase does not make this kind of distinction
+/// relying instead on a single type for all session identifiers. The
+/// distinction between sessions and sub-sessions is inherently enforced by the
+/// order of inputs and outputs to different stages in the protocol.
+///
+/// Discrepancy (B): The codebase  instantiates [`Identifier`]s in three
+/// different ways: (1) as a session identifier for keygen, that are created at
+/// the start of a key generation instance; (2) as a session identifier for
+/// pre-signing, (3) as a session identifier for auxiliary information
+/// generation sessions; The paper itself only distinguishes between sessions
+/// and sub-sessions and combine (2) and (3).
+///
+/// Discrepancy (C): In the paper ssid is periodically refreshed with the
+/// session key and auxiliary information. The codebase does not do that and
+/// instead relies on the calling application to generate and refresh these
+/// identifiers by randomly sampling a new and unique 32 bytes identifier using
+/// `Identifier::random()`. This assumes that the participants initiating a
+/// protocol run are honestly generating globally unique identifiers and
+/// distributing them to the correct set of parties.
+///
+/// TODO: Discrepancy (C) needs to be further addressed by issue #218.
 pub struct Identifier(u128);
 
 impl Debug for Identifier {
@@ -407,7 +450,7 @@ impl Identifier {
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         // Sample random 32 bytes and convert to hex
         let random_bytes = rng.gen::<u128>();
-        trace!("Created new Identifier({random_bytes})");
+        trace!("Created new Session Identifier({random_bytes})");
         Self(random_bytes)
     }
 }
@@ -443,7 +486,8 @@ mod tests {
         }
         Ok(())
     }
-
+    /// `presign_identifier` identifies a sub-session for pre-signing and
+    /// signing.
     fn is_presigning_done(quorum: &[Participant], presign_identifier: Identifier) -> Result<bool> {
         for participant in quorum {
             if !participant.is_presigning_done(presign_identifier)? {
@@ -452,7 +496,8 @@ mod tests {
         }
         Ok(true)
     }
-
+    /// `auxinfo_identifier` identifies a sub-session for auxiliary information
+    /// generation.
     fn is_auxinfo_done(quorum: &[Participant], auxinfo_identifier: Identifier) -> Result<bool> {
         for participant in quorum {
             if !participant.is_auxinfo_done(auxinfo_identifier)? {
@@ -461,7 +506,8 @@ mod tests {
         }
         Ok(true)
     }
-
+    /// `keygen_identifier` identifies a session that is initiated and defined
+    /// by a call to KeyGen.
     fn is_keygen_done(quorum: &[Participant], keygen_identifier: Identifier) -> Result<bool> {
         for participant in quorum {
             if !participant.is_keygen_done(keygen_identifier)? {

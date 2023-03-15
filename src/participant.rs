@@ -222,7 +222,7 @@ pub(crate) trait ProtocolParticipant {
         message_storage.store(message.message_type(), message.id(), message.clone())?;
         Ok(())
     }
-
+    ///`sid` corresponds to a unique session identifier.
     fn fetch_messages(
         &mut self,
         message_type: MessageType,
@@ -232,7 +232,7 @@ pub(crate) trait ProtocolParticipant {
         let messages = message_storage.retrieve_all(message_type, sid)?;
         Ok(messages)
     }
-
+    ///`sid` corresponds to a unique session identifier.
     fn fetch_messages_by_sender(
         &mut self,
         message_type: MessageType,
@@ -243,7 +243,7 @@ pub(crate) trait ProtocolParticipant {
         let messages = message_storage.retrieve(message_type, sid, sender)?;
         Ok(messages)
     }
-
+    ///`sid` corresponds to a unique session identifier.
     fn write_progress(&mut self, func_name: String, sid: Identifier) -> Result<()> {
         let key = serialize!(&ProgressIndex { func_name, sid })?;
         let progress_storage = self.get_from_storage::<local_storage::ProgressStore>(sid)?;
@@ -264,7 +264,7 @@ pub(crate) trait ProtocolParticipant {
 
 pub(crate) trait Broadcast {
     fn broadcast_participant(&mut self) -> &mut BroadcastParticipant;
-
+    ///`sid` corresponds to a unique session identifier.
     fn broadcast<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,

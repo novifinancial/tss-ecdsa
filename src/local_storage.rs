@@ -51,6 +51,8 @@ pub(crate) struct LocalStorage {
 impl LocalStorage {
     /// Stores `value` via a [`TypeTag`], [`Identifier`], and
     /// [`ParticipantIdentifier`] tuple.
+    ///
+    /// `id` correspond to unique session identifier.
     pub(crate) fn store<T: TypeTag>(
         &mut self,
         id: Identifier,
@@ -64,6 +66,8 @@ impl LocalStorage {
 
     /// Retrieves a reference to a value via its [`TypeTag`], [`Identifier`],
     /// and [`ParticipantIdentifier`].
+    ///
+    /// `id` correspond to unique session identifier.
     pub(crate) fn retrieve<T: TypeTag>(
         &self,
         id: Identifier,
@@ -80,6 +84,8 @@ impl LocalStorage {
 
     /// Retrieves a mutable reference to a value via its [`TypeTag`],
     /// [`Identifier`], and [`ParticipantIdentifier`].
+    ///
+    /// `id` correspond to unique session identifier.
     pub(crate) fn retrieve_mut<T: TypeTag>(
         &mut self,
         id: Identifier,
@@ -116,6 +122,8 @@ impl LocalStorage {
     /// Checks whether values exist for the given [`TypeTag`], [`Identifier`],
     /// and each of the `participant_ids` provided, returning `true` if so
     /// and `false` otherwise.
+    ///
+    ///`id` corresponds to a unique session identifier.
     pub(crate) fn contains_for_all_ids<T: TypeTag>(
         &self,
         id: Identifier,
@@ -131,6 +139,8 @@ impl LocalStorage {
 
     /// Returns `true` if a value exists for the given [`TypeTag`],
     /// [`Identifier`], and [`ParticipantIdentifier`].
+    ///
+    /// `id` corresponds to a unique session identifier.
     pub(crate) fn contains<T: TypeTag>(
         &self,
         id: Identifier,
