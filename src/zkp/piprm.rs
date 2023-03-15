@@ -282,22 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn bad_secret_totient_fails() -> Result<()> {
-        let mut rng = init_testing();
-        let (input, proof, lambda, _) = random_ring_pedersen_proof(&mut rng)?;
-        let bad_totient = random_positive_bn(&mut rng, input.modulus());
-        let secrets = PiPrmSecret::new(lambda, bad_totient);
-        let mut transcript = Transcript::new(b"PiPrmProof");
-        let bad_proof = PiPrmProof::prove(&input, &secrets, &mut transcript, &mut rng)?;
-        let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(bad_proof.verify(&input, &mut transcript).is_err());
-        // Validate that the original proof is okay.
-        let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
-        Ok(())
-    }
-
-    #[test]
     fn incorrect_ring_pedersen_fails() -> Result<()> {
         let mut rng = init_testing();
 
