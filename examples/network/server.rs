@@ -83,7 +83,7 @@ pub(crate) async fn process(state: &State<ParticipantState>, message_bytes: Vec<
         .ok_or_else(|| anyhow!("Config not set"))?;
 
     let mut rng = OsRng;
-    let messages = participant.process_single_message(&message, &mut rng)?;
+    let (_sid, _output, messages) = participant.process_single_message(&message, &mut rng)?;
 
     // Deliver messages to other participants
     let client = reqwest::Client::new();

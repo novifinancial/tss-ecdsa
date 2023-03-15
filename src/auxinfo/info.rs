@@ -24,17 +24,17 @@ use tracing::{error, instrument};
 /// TODO #169: Let's be more careful about allowing `Clone`, `Serialize`, etc.
 /// here due to this being sensitive data.
 #[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
-pub(crate) struct AuxInfoPrivate {
+pub struct AuxInfoPrivate {
     decryption_key: DecryptionKey,
 }
 
 impl AuxInfoPrivate {
     #[cfg(test)]
-    pub fn encryption_key(&self) -> EncryptionKey {
+    pub(crate) fn encryption_key(&self) -> EncryptionKey {
         self.decryption_key.encryption_key()
     }
 
-    pub fn decryption_key(&self) -> &DecryptionKey {
+    pub(crate) fn decryption_key(&self) -> &DecryptionKey {
         &self.decryption_key
     }
 }
@@ -55,7 +55,7 @@ impl Debug for AuxInfoPrivate {
 
 /// The public Auxilary Information corresponding to a given Participant.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub(crate) struct AuxInfoPublic {
+pub struct AuxInfoPublic {
     participant: ParticipantIdentifier,
     pk: EncryptionKey,
     params: VerifiedRingPedersen,

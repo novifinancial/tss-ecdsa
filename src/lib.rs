@@ -69,7 +69,7 @@ mod zkstar;
 
 pub use messages::Message;
 pub use protocol::{
-    Identifier, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
+    Identifier, Output, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
 };
 pub use utils::CurvePoint;
 

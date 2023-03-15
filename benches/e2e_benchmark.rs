@@ -65,7 +65,7 @@ fn process_messages<R: RngCore + CryptoRng>(
     // This is done to simulate arbitrary message arrival ordering
     let index = rng.gen_range(0..inbox.len());
     let message = inbox.remove(index);
-    let messages = participant.process_single_message(&message, rng)?;
+    let (_sid, _output, messages) = participant.process_single_message(&message, rng)?;
     deliver_all(&messages, inboxes)?;
 
     Ok(())

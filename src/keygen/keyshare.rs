@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 
 /// Private key corresponding to a given [KeySharePublic]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct KeySharePrivate {
+pub struct KeySharePrivate {
     pub(crate) x: BigNumber, // in the range [1, q)
 }
 
 /// A CurvePoint representing a given Participant's public key
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct KeySharePublic {
+pub struct KeySharePublic {
     participant: ParticipantIdentifier,
     pub(crate) X: CurvePoint,
 }
@@ -33,7 +33,7 @@ impl KeySharePublic {
 
     /// Get the ID of the participant who claims to hold the private share
     /// corresponding to this public key share.
-    pub(crate) fn participant(&self) -> ParticipantIdentifier {
+    pub fn participant(&self) -> ParticipantIdentifier {
         self.participant
     }
 }

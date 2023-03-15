@@ -31,7 +31,7 @@ pub(crate) struct RecordPair {
 
 /// The precomputation used to create a partial signature
 #[derive(Serialize, Deserialize)]
-pub(crate) struct PresignRecord {
+pub struct PresignRecord {
     R: CurvePoint,
     k: BigNumber,
     chi: k256::Scalar,

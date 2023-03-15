@@ -9,9 +9,15 @@
 //! Contains the main protocol that is executed through a [Participant]
 
 use crate::{
-    auxinfo::participant::AuxInfoParticipant,
+    auxinfo::{
+        info::{AuxInfoPrivate, AuxInfoPublic},
+        participant::AuxInfoParticipant,
+    },
     errors::{InternalError, Result},
-    keygen::{keyshare::KeySharePublic, participant::KeygenParticipant},
+    keygen::{
+        keyshare::{KeySharePrivate, KeySharePublic},
+        participant::KeygenParticipant,
+    },
     messages::{AuxinfoMessageType, KeygenMessageType, MessageType},
     participant::ProtocolParticipant,
     presign::{participant::PresignParticipant, record::PresignRecord},
@@ -98,16 +104,24 @@ impl Participant {
         Ok(participants)
     }
 
-    /// Pulls the first message from the participant's inbox, and then
-    /// potentially outputs a bunch of messages that need to be delivered to
-    /// other participants' inboxes.
+    /// Processes the first message from the participant's inbox.
+    ///
+    /// ## Return type
+    /// This returns a tuple of a session ID, an output, and a set of messages.
+    /// - The session ID will always match the session ID of the input message,
+    ///   and of all the outgoing messages. It's passed out as a convenience for
+    ///   associating with the [`Output`].
+    /// - The [`Output`] encodes the termination status and any outputs of the
+    ///   protocol with the given session ID.
+    /// - The messages are a (possibly empty) list of messages to be sent out to
+    ///   other participants.
     #[cfg_attr(feature = "flame_it", flame)]
     #[instrument(skip_all, err(Debug))]
     pub fn process_single_message<R: RngCore + CryptoRng>(
         &mut self,
         message: &Message,
         rng: &mut R,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<(Identifier, Output, Vec<Message>)> {
         info!("Processing single message.");
 
         if message.to() != self.id {
@@ -118,48 +132,58 @@ impl Participant {
                 let outcome = self
                     .auxinfo_participant
                     .process_message(rng, message, &())?;
-                // TODO #180: Remove once we've pulled the use of main storage out of `presign`.
                 let (output, messages) = outcome.into_parts();
-                if let Some((auxinfo_publics, auxinfo_private)) = output {
-                    for auxinfo_public in auxinfo_publics {
+                let public_output = match output {
+                    Some((auxinfo_publics, auxinfo_private)) => {
+                        // TODO #180: Remove storage once we've pulled the use of main storage out
+                        // of `presign`.
+                        for auxinfo_public in &auxinfo_publics {
+                            self.main_storage.store(
+                                PersistentStorageType::AuxInfoPublic,
+                                message.id(),
+                                *auxinfo_public.participant(),
+                                auxinfo_public,
+                            )?;
+                        }
                         self.main_storage.store(
-                            PersistentStorageType::AuxInfoPublic,
+                            PersistentStorageType::AuxInfoPrivate,
                             message.id(),
-                            *auxinfo_public.participant(),
-                            &auxinfo_public,
+                            self.id,
+                            &auxinfo_private,
                         )?;
-                    }
-                    self.main_storage.store(
-                        PersistentStorageType::AuxInfoPrivate,
-                        message.id(),
-                        self.id,
-                        &auxinfo_private,
-                    )?;
-                }
 
-                Ok(messages)
+                        Output::AuxInfo(auxinfo_publics, auxinfo_private)
+                    }
+                    None => Output::None,
+                };
+                Ok((message.id(), public_output, messages))
             }
             MessageType::Keygen(_) => {
                 let outcome = self.keygen_participant.process_message(rng, message, &())?;
-                // TODO #180: Remove once we've pulled the use of main storage out of `presign`.
                 let (output, messages) = outcome.into_parts();
-                if let Some((keyshare_publics, keyshare_private)) = output {
-                    for keyshare_public in keyshare_publics {
+                let public_output = match output {
+                    Some((keyshare_publics, keyshare_private)) => {
+                        // TODO #180: Remove storage once we've pulled the use of main storage out
+                        // of `presign`.
+                        for keyshare_public in &keyshare_publics {
+                            self.main_storage.store(
+                                PersistentStorageType::PublicKeyshare,
+                                message.id(),
+                                keyshare_public.participant(),
+                                keyshare_public,
+                            )?;
+                        }
                         self.main_storage.store(
-                            PersistentStorageType::PublicKeyshare,
+                            PersistentStorageType::PrivateKeyshare,
                             message.id(),
-                            keyshare_public.participant(),
-                            &keyshare_public,
+                            self.id,
+                            &keyshare_private,
                         )?;
+                        Output::KeyGen(keyshare_publics, keyshare_private)
                     }
-                    self.main_storage.store(
-                        PersistentStorageType::PrivateKeyshare,
-                        message.id(),
-                        self.id,
-                        &keyshare_private,
-                    )?;
-                }
-                Ok(messages)
+                    None => Output::None,
+                };
+                Ok((message.id(), public_output, messages))
             }
             MessageType::Presign(_) => {
                 // Send presign message and existing storage containing auxinfo and
@@ -170,16 +194,19 @@ impl Participant {
 
                 let (output, messages) = outcome.into_parts();
 
-                if let Some(presign_record) = output {
-                    self.main_storage.store(
-                        PersistentStorageType::PresignRecord,
-                        message.id(),
-                        self.id,
-                        &presign_record,
-                    )?;
-                }
-
-                Ok(messages)
+                let public_output = match output {
+                    Some(record) => {
+                        self.main_storage.store(
+                            PersistentStorageType::PresignRecord,
+                            message.id(),
+                            self.id,
+                            &record,
+                        )?;
+                        Output::Presign(record)
+                    }
+                    None => Output::None,
+                };
+                Ok((message.id(), public_output, messages))
             }
             _ => Err(InternalError::MisroutedMessage),
         }
@@ -490,6 +517,25 @@ impl std::fmt::Display for Identifier {
     }
 }
 
+/// Encodes the termination status and output (if any) of processing a message
+/// as part of a protocol run.
+#[derive(Debug)]
+pub enum Output {
+    /// The protocol did not complete.
+    None,
+    /// AuxInfo completed; output includes public key material for all
+    /// participants and private key material for this participant.
+    AuxInfo(Vec<AuxInfoPublic>, AuxInfoPrivate),
+    /// KeyGen completed; output includes public key shares for all participants
+    /// and a private key share for this participant.
+    KeyGen(Vec<KeySharePublic>, KeySharePrivate),
+    /// Presign completed; output includes a one-time-use presign record.
+    Presign(PresignRecord),
+    /// Local signing completed; output is this participant's share of the
+    /// signature.
+    Sign(SignatureShare),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -569,8 +615,32 @@ mod tests {
             &participant.id,
             &message.message_type(),
         );
-        let messages = participant.process_single_message(&message, rng)?;
+        let (sid, output, messages) = participant.process_single_message(&message, rng)?;
         deliver_all(&messages, inboxes)?;
+
+        // Check the protocol outputs are valid
+        assert_eq!(message.id(), sid);
+        let is_done_computes_correctly = match output {
+            Output::AuxInfo(_, _) => participant.is_auxinfo_done(sid),
+            Output::KeyGen(_, _) => participant.is_keygen_done(sid),
+            Output::Presign(_) => participant.is_presigning_done(sid),
+            Output::Sign(_) => Ok(true), // this doesn't have a check
+            Output::None => {
+                let auxinfo = participant.is_auxinfo_done(sid);
+                let keygen = participant.is_keygen_done(sid);
+                let presign = participant.is_presigning_done(sid);
+
+                // The current behavior of these is weird -- they return Ok even if the `sid`
+                // corresponds to a different protocol. Perhaps the "most
+                // correct" version of this would check that exactly
+                // one of these returns Ok(false), and the others return Err, but here we are:
+                assert_eq!(auxinfo, Ok(false));
+                assert_eq!(keygen, Ok(false));
+                assert_eq!(presign, Ok(false));
+                Ok(true)
+            }
+        };
+        assert!(is_done_computes_correctly.is_ok() && is_done_computes_correctly.unwrap());
 
         Ok(())
     }
