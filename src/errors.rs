@@ -19,6 +19,8 @@ pub type Result<T> = std::result::Result<T, InternalError>;
 #[derive(Clone, Eq, PartialEq, Error, Debug)]
 #[allow(missing_docs)]
 pub enum InternalError {
+    #[error("Caller error: {0}")]
+    CallingApplicationMistake(#[from] CallerError),
     #[error("Serialization Error")]
     Serialization,
     #[error("Protocol error")]
@@ -57,6 +59,23 @@ pub enum InternalError {
         "Tried to start a new protocol instance with an Identifier used in an existing instance"
     )]
     IdentifierInUse,
+}
+
+/// Errors that are caused by incorrect behavior by the calling application.
+///
+/// These are triggered when the calling application incorrectly
+/// routes a message to the
+/// [`process_single_message()`](crate::Participant::process_single_message())
+/// method.
+#[derive(Clone, Eq, PartialEq, Error, Debug)]
+#[allow(missing_docs)]
+pub enum CallerError {
+    #[error("Recieved a message with the wrong recipient ID")]
+    WrongMessageRecipient,
+    #[error("Recieved a message with the wrong session ID")]
+    WrongSessionId,
+    #[error("Recieved a message with the wrong protocol type for this participant (malicious behavior suspected)")]
+    WrongProtocol,
 }
 
 macro_rules! serialize {

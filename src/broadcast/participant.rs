@@ -11,8 +11,8 @@ use crate::{
     errors::{InternalError, Result},
     local_storage::LocalStorage,
     messages::{BroadcastMessageType, Message, MessageType},
-    participant::{ProcessOutcome, ProtocolParticipant},
-    protocol::ParticipantIdentifier,
+    participant::{InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
+    protocol::{ParticipantIdentifier, ProtocolType},
     run_only_once_per_tag, Identifier,
 };
 use rand::{CryptoRng, RngCore};
@@ -65,25 +65,26 @@ pub(crate) struct BroadcastOutput {
 impl ProtocolParticipant for BroadcastParticipant {
     type Input = ();
     type Output = BroadcastOutput;
-    type Context = ();
-    fn local_storage(&self) -> &LocalStorage {
-        &self.local_storage
+
+    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+        Self {
+            id,
+            other_participant_ids,
+            local_storage: Default::default(),
+        }
     }
 
-    fn local_storage_mut(&mut self) -> &mut LocalStorage {
-        &mut self.local_storage
+    fn ready_type() -> MessageType {
+        // I'm not totally confident since broadcast takes a different shape than the
+        // other protocols, but this is definitely the first message in the
+        // protocol.
+        MessageType::Broadcast(BroadcastMessageType::Disperse)
     }
 
-    fn id(&self) -> ParticipantIdentifier {
-        self.id
+    fn protocol_type() -> ProtocolType {
+        ProtocolType::Broadcast
     }
 
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
-        &self.other_participant_ids
-    }
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
-    }
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
         &mut self,
@@ -105,18 +106,31 @@ impl ProtocolParticipant for BroadcastParticipant {
     }
 }
 
-impl BroadcastParticipant {
-    pub(crate) fn from_ids(
-        id: ParticipantIdentifier,
-        other_participant_ids: Vec<ParticipantIdentifier>,
-    ) -> Self {
-        Self {
-            id,
-            other_participant_ids,
-            local_storage: Default::default(),
-        }
+impl InnerProtocolParticipant for BroadcastParticipant {
+    type Context = ();
+
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
     }
 
+    fn local_storage(&self) -> &LocalStorage {
+        &self.local_storage
+    }
+
+    fn local_storage_mut(&mut self) -> &mut LocalStorage {
+        &mut self.local_storage
+    }
+
+    fn id(&self) -> ParticipantIdentifier {
+        self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
+    }
+}
+
+impl BroadcastParticipant {
     #[instrument(skip_all, err(Debug))]
     pub(crate) fn gen_round_one_msgs<R: RngCore + CryptoRng>(
         &mut self,

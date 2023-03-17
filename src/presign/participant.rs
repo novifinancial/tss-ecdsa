@@ -17,7 +17,7 @@ use crate::{
     local_storage::LocalStorage,
     messages::{Message, MessageType, PresignMessageType},
     parameters::ELL_PRIME,
-    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
+    participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
     presign::{
         record::{PresignRecord, RecordPair},
         round_one::{
@@ -27,7 +27,7 @@ use crate::{
         round_three::{Private as RoundThreePrivate, Public as RoundThreePublic, RoundThreeInput},
         round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
     },
-    protocol::ParticipantIdentifier,
+    protocol::{ParticipantIdentifier, ProtocolType},
     utils::{bn_to_scalar, k256_order, random_plusminus_by_size, random_positive_bn},
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
@@ -81,8 +81,9 @@ mod storage {
     }
 }
 
+/// A participant that runs the presign protocol.
 #[derive(Debug)]
-pub(crate) struct PresignParticipant {
+pub struct PresignParticipant {
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -90,14 +91,13 @@ pub(crate) struct PresignParticipant {
     other_participant_ids: Vec<ParticipantIdentifier>,
     /// Local storage for this participant to store secrets
     local_storage: LocalStorage,
-    /// presign -> {keyshare, auxinfo} map
-    presign_map: HashMap<Identifier, (Identifier, Identifier)>,
     /// Broadcast subprotocol handler
     broadcast_participant: BroadcastParticipant,
 }
 
 /// Input needed for [`PresignParticipant`] to run.
-pub(crate) struct Input {
+#[derive(Debug)]
+pub struct Input {
     /// The private keyshare of this participant.
     keyshare_private: KeySharePrivate,
     /// The public keyshares of all the participants.
@@ -112,7 +112,7 @@ impl Input {
     /// Creates a new [`Input`] from the outputs of
     /// [`crate::auxinfo::participant::AuxInfoParticipant`]
     /// and [`crate::keygen::participant::KeygenParticipant`].
-    pub(crate) fn new(
+    pub fn new(
         all_auxinfo_public: Vec<AuxInfoPublic>,
         auxinfo_private: AuxInfoPrivate,
         all_keyshare_public: Vec<KeySharePublic>,
@@ -161,28 +161,27 @@ impl Input {
 impl ProtocolParticipant for PresignParticipant {
     type Input = Input;
     type Output = PresignRecord;
-    type Context = ();
-    fn local_storage(&self) -> &LocalStorage {
-        &self.local_storage
+
+    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+        Self {
+            id,
+            other_participant_ids: other_participant_ids.clone(),
+            local_storage: Default::default(),
+            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+        }
     }
 
-    fn local_storage_mut(&mut self) -> &mut LocalStorage {
-        &mut self.local_storage
+    fn ready_type() -> MessageType {
+        MessageType::Presign(PresignMessageType::Ready)
     }
 
-    fn id(&self) -> ParticipantIdentifier {
-        self.id
+    fn protocol_type() -> ProtocolType {
+        ProtocolType::Presign
     }
 
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
-        &self.other_participant_ids
-    }
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
-    }
     /// Processes the incoming message given the storage from the protocol
     /// participant (containing auxinfo and keygen artifacts). Optionally
-    /// produces a [PresignRecord] once presigning is complete.
+    /// produces a [`PresignRecord`] once presigning is complete.
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
@@ -218,6 +217,30 @@ impl ProtocolParticipant for PresignParticipant {
     }
 }
 
+impl InnerProtocolParticipant for PresignParticipant {
+    type Context = ();
+
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
+
+    fn local_storage(&self) -> &LocalStorage {
+        &self.local_storage
+    }
+
+    fn local_storage_mut(&mut self) -> &mut LocalStorage {
+        &mut self.local_storage
+    }
+
+    fn id(&self) -> ParticipantIdentifier {
+        self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
+    }
+}
+
 impl Broadcast for PresignParticipant {
     fn broadcast_participant(&mut self) -> &mut BroadcastParticipant {
         &mut self.broadcast_participant
@@ -225,19 +248,6 @@ impl Broadcast for PresignParticipant {
 }
 
 impl PresignParticipant {
-    pub(crate) fn from_ids(
-        id: ParticipantIdentifier,
-        other_participant_ids: Vec<ParticipantIdentifier>,
-    ) -> Self {
-        Self {
-            id,
-            other_participant_ids: other_participant_ids.clone(),
-            local_storage: Default::default(),
-            presign_map: HashMap::new(),
-            broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
     #[cfg_attr(feature = "flame_it", flame("presign"))]
     #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
@@ -256,34 +266,6 @@ impl PresignParticipant {
         } else {
             Ok(ready_outcome)
         }
-    }
-    /// `auxinfo_identifier`, `keyshare_identifier` and `identifier` correspond
-    /// to unique session identifiers.
-    #[instrument(skip_all, err(Debug))]
-    pub(crate) fn initialize_presign_message(
-        &mut self,
-        auxinfo_identifier: Identifier,
-        keyshare_identifier: Identifier,
-        identifier: Identifier,
-    ) -> Result<Message> {
-        info!("Initializing presign message.");
-
-        if self.presign_map.contains_key(&identifier) {
-            return Err(InternalError::IdentifierInUse);
-        }
-        // Set the presign map internally
-        let _ = self
-            .presign_map
-            .insert(identifier, (auxinfo_identifier, keyshare_identifier));
-
-        let message = Message::new(
-            MessageType::Presign(PresignMessageType::Ready),
-            identifier,
-            self.id,
-            self.id,
-            &[],
-        );
-        Ok(message)
     }
 
     /// Presign: Round One
@@ -692,20 +674,6 @@ impl PresignParticipant {
         .try_into()?;
 
         Ok(presign_record)
-    }
-
-    ///`presign_identifier` corresponds to a unique session identifier for
-    /// presigning.
-    pub(crate) fn get_associated_identifiers(
-        &self,
-        presign_identifier: &Identifier,
-    ) -> Result<(Identifier, Identifier)> {
-        let (id1, id2) = self
-            .presign_map
-            .get(presign_identifier)
-            .ok_or(InternalInvariantFailed)?;
-
-        Ok((*id1, *id2))
     }
 
     #[cfg_attr(feature = "flame_it", flame("presign"))]

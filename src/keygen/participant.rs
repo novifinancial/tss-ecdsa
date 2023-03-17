@@ -15,8 +15,8 @@ use crate::{
     },
     local_storage::LocalStorage,
     messages::{KeygenMessageType, Message, MessageType},
-    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
-    protocol::ParticipantIdentifier,
+    participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
+    protocol::{ParticipantIdentifier, ProtocolType},
     run_only_once,
     utils::k256_order,
     zkp::pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
@@ -61,8 +61,9 @@ mod storage {
     }
 }
 
+/// A participant that runs the key generation protocol.
 #[derive(Debug)]
-pub(crate) struct KeygenParticipant {
+pub struct KeygenParticipant {
     /// A unique identifier for this participant.
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -79,25 +80,24 @@ impl ProtocolParticipant for KeygenParticipant {
     // The output type includes public key shares `KeySharePublic` for all
     // participants (including ourselves) and `KeySharePrivate` for ourselves.
     type Output = (Vec<KeySharePublic>, KeySharePrivate);
-    type Context = ();
-    fn local_storage(&self) -> &LocalStorage {
-        &self.local_storage
+
+    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+        Self {
+            id,
+            other_participant_ids: other_participant_ids.clone(),
+            local_storage: Default::default(),
+            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+        }
     }
 
-    fn local_storage_mut(&mut self) -> &mut LocalStorage {
-        &mut self.local_storage
+    fn ready_type() -> MessageType {
+        MessageType::Keygen(KeygenMessageType::Ready)
     }
 
-    fn id(&self) -> ParticipantIdentifier {
-        self.id
+    fn protocol_type() -> ProtocolType {
+        ProtocolType::Keygen
     }
 
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
-        &self.other_participant_ids
-    }
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
-    }
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
     #[instrument(skip_all)]
     fn process_message<R: RngCore + CryptoRng>(
@@ -128,6 +128,30 @@ impl ProtocolParticipant for KeygenParticipant {
     }
 }
 
+impl InnerProtocolParticipant for KeygenParticipant {
+    type Context = ();
+
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
+
+    fn local_storage(&self) -> &LocalStorage {
+        &self.local_storage
+    }
+
+    fn local_storage_mut(&mut self) -> &mut LocalStorage {
+        &mut self.local_storage
+    }
+
+    fn id(&self) -> ParticipantIdentifier {
+        self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
+    }
+}
+
 impl Broadcast for KeygenParticipant {
     fn broadcast_participant(&mut self) -> &mut BroadcastParticipant {
         &mut self.broadcast_participant
@@ -135,18 +159,6 @@ impl Broadcast for KeygenParticipant {
 }
 
 impl KeygenParticipant {
-    pub(crate) fn from_ids(
-        id: ParticipantIdentifier,
-        other_participant_ids: Vec<ParticipantIdentifier>,
-    ) -> Self {
-        Self {
-            id,
-            other_participant_ids: other_participant_ids.clone(),
-            local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
     #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
@@ -553,7 +565,7 @@ mod tests {
                             other_ids.push(id);
                         }
                     }
-                    Self::from_ids(participant_id, other_ids)
+                    Self::new(participant_id, other_ids)
                 })
                 .collect::<Vec<KeygenParticipant>>();
             Ok(participants)

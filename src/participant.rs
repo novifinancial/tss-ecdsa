@@ -11,7 +11,7 @@ use crate::{
     errors::{InternalError, Result},
     local_storage::{storage as local_storage, LocalStorage, TypeTag},
     messages::{Message, MessageType},
-    protocol::ParticipantIdentifier,
+    protocol::{ParticipantIdentifier, ProtocolType},
     Identifier,
 };
 use rand::{CryptoRng, RngCore};
@@ -32,7 +32,7 @@ pub(crate) struct ProgressIndex {
 /// without completing the protocol round. Alternately, it can trigger
 /// completion of a protocol round, which may produce messages to be sent to
 /// other participants, an output (if the round was the final round), or both.
-pub(crate) enum ProcessOutcome<O> {
+pub enum ProcessOutcome<O> {
     /// The message was not fully processed; we need more inputs to continue.
     Incomplete,
     /// The message was processed successfully but the subprotocol isn't done.
@@ -78,8 +78,9 @@ where
     /// - messages are copied as-is into the returned outcome
     /// - if there's an output, it's processed by the handler function
     ///
-    /// The handler function must be a method on a `ProtocolParticipant`, and
-    /// must produce an outcome for that `ProtocolParticipant`.
+    /// The handler function must be a method on an
+    /// [`InnerProtocolParticipant`], and must produce the correct outcome
+    /// type for that [`InnerProtocolParticipant`].
     pub(crate) fn convert<P, F, R>(
         self,
         participant: &mut P,
@@ -88,7 +89,7 @@ where
         storage: &P::Input,
     ) -> Result<ProcessOutcome<P::Output>>
     where
-        P: ProtocolParticipant,
+        P: InnerProtocolParticipant,
         F: FnMut(&mut P, &mut R, &O, &P::Input) -> Result<ProcessOutcome<P::Output>>,
         R: CryptoRng + RngCore,
     {
@@ -168,24 +169,23 @@ where
     }
 }
 
-pub(crate) trait ProtocolParticipant {
-    /// Input type used to process incoming messages.
-    type Input;
+/// These are the public-facing methods that must be implemented for a given
+/// protocol.
+pub trait ProtocolParticipant {
+    /// Input type for a new protocol instance.
+    type Input: Debug;
     /// Output type of a successful protocol execution.
     type Output: Debug;
-    /// Context type that captures all relevant auxiliary information to the
-    /// proof.
-    type Context;
-    /// Returns a reference to the [`LocalStorage`] associated with this
-    /// protocol.
-    fn local_storage(&self) -> &LocalStorage;
-    /// Returns a mutable reference to the [`LocalStorage`] associated with this
-    /// protocol.
-    fn local_storage_mut(&mut self) -> &mut LocalStorage;
-    fn id(&self) -> ParticipantIdentifier;
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier>;
-    /// Returns a reference to the participant's context.
-    fn retrieve_context(&self) -> &Self::Context;
+
+    /// Get the type of a "ready" message, signalling that a participant
+    /// is ready to begin protocol execution.
+    fn ready_type() -> MessageType;
+
+    /// Define which protocol this implements.
+    fn protocol_type() -> ProtocolType;
+
+    /// Create a new [`ProtocolParticipant`] from the given ids.
+    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self;
 
     /// Process an incoming message.
     ///
@@ -198,9 +198,8 @@ pub(crate) trait ProtocolParticipant {
     /// messages.
     ///
     /// Potential failure cases:
-    /// - `Storage` did not contain the necessary preliminary artifacts (TODO
-    ///   #180: pass inputs as parameters, instead)
     /// - The message was not parseable
+    /// - The message does not belong to this participant or session
     /// - The message contained invalid values and a protocol check failed
     fn process_message<R: RngCore + CryptoRng>(
         &mut self,
@@ -208,6 +207,24 @@ pub(crate) trait ProtocolParticipant {
         message: &Message,
         input: &Self::Input,
     ) -> Result<ProcessOutcome<Self::Output>>;
+}
+
+pub(crate) trait InnerProtocolParticipant: ProtocolParticipant {
+    /// Context type that captures all relevant auxiliary information to the
+    /// proof.
+    type Context;
+
+    /// Returns a reference to the participant's context.
+    fn retrieve_context(&self) -> &Self::Context;
+
+    /// Returns a reference to the [`LocalStorage`] associated with this
+    /// protocol.
+    fn local_storage(&self) -> &LocalStorage;
+    /// Returns a mutable reference to the [`LocalStorage`] associated with this
+    /// protocol.
+    fn local_storage_mut(&mut self) -> &mut LocalStorage;
+    fn id(&self) -> ParticipantIdentifier;
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier>;
 
     /// Returns a list of all participant IDs, including `self`'s.
     fn all_participants(&self) -> Vec<ParticipantIdentifier> {

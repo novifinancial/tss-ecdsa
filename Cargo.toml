@@ -8,6 +8,7 @@ edition = "2021"
 keywords = ["cryptography", "crypto", "signatures", "threshold", "ECDSA"]
 categories = ["cryptography"]
 readme = "README.md"
+autoexamples = false
 
 [features]
 default = []

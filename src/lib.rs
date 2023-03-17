@@ -62,12 +62,18 @@ mod participant;
 mod presign;
 mod protocol;
 mod ring_pedersen;
-mod storage;
 mod utils;
 mod zkp;
 mod zkstar;
 
+pub use auxinfo::participant::AuxInfoParticipant;
+pub use keygen::participant::KeygenParticipant;
 pub use messages::Message;
+pub use participant::ProtocolParticipant;
+pub use presign::{
+    participant::{Input as PresignInput, PresignParticipant},
+    record::PresignRecord,
+};
 pub use protocol::{
     Identifier, Output, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
 };

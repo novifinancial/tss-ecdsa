@@ -52,7 +52,7 @@ impl Debug for AuxInfoDecommit {
             .field("sender", &self.sender)
             .field("rid", &"[redacted]")
             .field("u_i", &"[redacted]")
-            .field("public keys", &self.public_keys)
+            .field("public keys", &"[redacted -- tooooo long]") //self.public_keys)
             .finish()
     }
 }

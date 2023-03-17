@@ -17,8 +17,8 @@ use crate::{
     local_storage::LocalStorage,
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
-    participant::{Broadcast, ProcessOutcome, ProtocolParticipant},
-    protocol::ParticipantIdentifier,
+    participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
+    protocol::{ParticipantIdentifier, ProtocolType},
     ring_pedersen::VerifiedRingPedersen,
     run_only_once,
 };
@@ -60,8 +60,12 @@ mod storage {
     }
 }
 
+/// A participant that runs the auxiliary information protocol.
+///
+/// Note that this does not include the key-refresh steps included in the
+/// original paper specification.
 #[derive(Debug)]
-pub(crate) struct AuxInfoParticipant {
+pub struct AuxInfoParticipant {
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -78,25 +82,24 @@ impl ProtocolParticipant for AuxInfoParticipant {
     // The output type includes `AuxInfoPublic` material for all participants
     // (including ourselves) and `AuxInfoPrivate` for ourselves.
     type Output = (Vec<AuxInfoPublic>, AuxInfoPrivate);
-    type Context = ();
-    fn local_storage(&self) -> &LocalStorage {
-        &self.local_storage
+
+    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+        Self {
+            id,
+            other_participant_ids: other_participant_ids.clone(),
+            local_storage: Default::default(),
+            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+        }
     }
 
-    fn local_storage_mut(&mut self) -> &mut LocalStorage {
-        &mut self.local_storage
+    fn ready_type() -> MessageType {
+        MessageType::Auxinfo(AuxinfoMessageType::Ready)
     }
 
-    fn id(&self) -> ParticipantIdentifier {
-        self.id
+    fn protocol_type() -> ProtocolType {
+        ProtocolType::AuxInfo
     }
 
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
-        &self.other_participant_ids
-    }
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
-    }
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
@@ -127,6 +130,30 @@ impl ProtocolParticipant for AuxInfoParticipant {
     }
 }
 
+impl InnerProtocolParticipant for AuxInfoParticipant {
+    type Context = ();
+
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
+
+    fn local_storage(&self) -> &LocalStorage {
+        &self.local_storage
+    }
+
+    fn local_storage_mut(&mut self) -> &mut LocalStorage {
+        &mut self.local_storage
+    }
+
+    fn id(&self) -> ParticipantIdentifier {
+        self.id
+    }
+
+    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+        &self.other_participant_ids
+    }
+}
+
 impl Broadcast for AuxInfoParticipant {
     fn broadcast_participant(&mut self) -> &mut BroadcastParticipant {
         &mut self.broadcast_participant
@@ -134,18 +161,6 @@ impl Broadcast for AuxInfoParticipant {
 }
 
 impl AuxInfoParticipant {
-    pub(crate) fn from_ids(
-        id: ParticipantIdentifier,
-        other_participant_ids: Vec<ParticipantIdentifier>,
-    ) -> Self {
-        Self {
-            id,
-            other_participant_ids: other_participant_ids.clone(),
-            local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::from_ids(id, other_participant_ids),
-        }
-    }
-
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     #[instrument(skip_all, err(Debug))]
     fn handle_ready_msg<R: RngCore + CryptoRng>(
@@ -533,7 +548,7 @@ mod tests {
                             other_ids.push(id);
                         }
                     }
-                    Self::from_ids(participant_id, other_ids)
+                    Self::new(participant_id, other_ids)
                 })
                 .collect::<Vec<AuxInfoParticipant>>();
             Ok(participants)
