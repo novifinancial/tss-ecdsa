@@ -6,32 +6,87 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-//! Implementation of the CMP threshold ECDSA signature protocol
+//! # tss-ecdsa: A library for full-threshold ECDSA key generation and signing
 //!
-//! In a threshold signature scheme, a subset t of n signers, each
-//! of whom hold a share of a private signing key, can
-//! communicate to produce a valid signature for a message, while
-//! any subset of t-1 signers will be unable to forge signatures.
+//! This work is based on the threshold ECDSA signature scheme described by
+//! Canetti et al.[^cite], using `secp256k1`[^curve] as the elliptic curve. The
+//! implementation is more limited than the cited protocol in several important
+//! ways:
 //!
-//! A threshold ECDSA signature scheme is specific to the ECDSA
-//! signature scheme, where the signatures can be validated by a
-//! regular (non-threshold) ECDSA verification function. In fact,
+//! 1. It is full-threshold: _all_ participants holding a share of
+//! the private key must collaborate to produce a signature.
+//!
+//! 2. It does not implement key refresh. The paper ties this into the aux-info
+//! protocol, but we removed the components that are only used to update the
+//! participants' private key shares.
+//!
+//! 3. It does not implement identifiable abort. That is, the protocol will
+//! abort if a party misbehaves, but we did not implement the procedures for
+//! identifying which party was responsible.
+//!
+//!
+//! ## Background
+//! In a threshold signature scheme, a set of participants derive an asymmetric
+//! key pair such that each of them holds only a share of the private signing
+//! key, corresponding to a single public verification key.
+//! To produce a signature, a group of size at least `t` of the signers can
+//! collaborate to produce a valid signature for a message, while
+//! any subset of `t-1` signers will be unable to do so (or to forge a valid
+//! signature).
+//!
+//! With the cited threshold ECDSA protocol, signatures are validated by a
+//! regular (non-threshold) ECDSA verification function.  In fact,
 //! signatures generated in this threshold manner are indistinguishable
 //! from signatures generated using a normal ECDSA signing method.
 //!
-//! In this implementation, we instantiate the threshold ECDSA
-//! signature scheme described in [CGGMP'21](https://eprint.iacr.org/2021/060),
-//! using [secp256k1](https://en.bitcoin.it/wiki/Secp256k1) as the elliptic curve.
 //!
-//! Note that this library only provides the low-level interfaces for executing
-//! each of the rounds of the protocol, notably without handling communication
-//! and parallel execution. The main interfaces allow for a [Participant] to
+//!
+//! ## Architecture
+//!
+//! The main interfaces allow a [`Participant`] to
 //! process a message from another participant, producing a set of outgoing
-//! messages that in turn must be delivered to other participants.
+//! messages and, if the protocol completed, an output.
+//! The library handles
+//! - out-of-order messaging
+//! - protocol round execution
 //!
-//! For an example of how to actually integrate this library into a higher-level
-//! application that handles the communication between participants in parallel,
-//! take a look at the provided [network example](./examples/network/README.md).
+//! # Requirements of the calling application
+//! This library **does not** implement the complete protocol. There are several
+//! security-critical steps that must be handled by the calling application. We
+//! leave these undone intentionally, to allow increased flexibility in
+//! deploying the library, but this does mean that it requires cryptographic
+//! expertise to advise on security of the remaining components.
+//!
+//! 1. Networking. The protocol requires point-to-point channels between
+//! individual participants, as well as a UC-secure, synchronous broadcast
+//! mechanism. This library currently supports broadcast using
+//! the echo-broadcast protocol described by Goldwasser and Lindell[^echo], so
+//! the calling application only has to implement point-to-point channels.
+//! However, this will likely change.
+//!
+//! 2. Secure persistent storage. The protocol is composed of four subprotocols,
+//! each taking input and returning output. The calling application must persist
+//! this output and provide it at subsequent protocol executions. Some of the
+//! outputs are private values that should be stored securely.
+//!
+//!
+//! # ⚠️ Security warning
+//! The implementation in this crate has not been independently audited for
+//! security! We have also not released a version that we have finished
+//! internally auditing.
+//!
+//! At this time, we do not recommend use for security-critical applications.
+//! Use at your own risk.
+//!
+//!
+//! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos Makriyannis, and Udi Peled.
+//! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
+//! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
+//!
+//! [^curve]: Secp256k1. [Bitcoin Wiki, 2019](https://en.bitcoin.it/wiki/Secp256k1).
+//!
+//! [^echo]: Shafi Goldwasser and Yehuda Lindell. Secure Multi-Party Computation without Agreement.
+//! [Journal of Cryptology, 2005](https://link.springer.com/content/pdf/10.1007/s00145-005-0319-z.pdf).
 
 #![allow(non_snake_case)] // FIXME: To be removed in the future
 #![warn(missing_docs)]
