@@ -161,7 +161,7 @@ impl Input {
 impl ProtocolParticipant for PresignParticipant {
     type Input = Input;
     type Output = PresignRecord;
-
+    type Context = ();
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
     }
@@ -177,7 +177,9 @@ impl ProtocolParticipant for PresignParticipant {
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
     }
-
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
     /// Processes the incoming message given the storage from the protocol
     /// participant (containing auxinfo and keygen artifacts). Optionally
     /// produces a [PresignRecord] once presigning is complete.

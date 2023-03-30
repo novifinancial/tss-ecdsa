@@ -65,7 +65,7 @@ pub(crate) struct BroadcastOutput {
 impl ProtocolParticipant for BroadcastParticipant {
     type Input = ();
     type Output = BroadcastOutput;
-
+    type Context = ();
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
     }
@@ -81,7 +81,9 @@ impl ProtocolParticipant for BroadcastParticipant {
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
     }
-
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
         &mut self,

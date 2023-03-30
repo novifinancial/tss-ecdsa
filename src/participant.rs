@@ -173,7 +173,9 @@ pub(crate) trait ProtocolParticipant {
     type Input;
     /// Output type of a successful protocol execution.
     type Output: Debug;
-
+    /// Context type that captures all relevant auxiliary information to the
+    /// proof.
+    type Context;
     /// Returns a reference to the [`LocalStorage`] associated with this
     /// protocol.
     fn local_storage(&self) -> &LocalStorage;
@@ -182,6 +184,8 @@ pub(crate) trait ProtocolParticipant {
     fn local_storage_mut(&mut self) -> &mut LocalStorage;
     fn id(&self) -> ParticipantIdentifier;
     fn other_ids(&self) -> &Vec<ParticipantIdentifier>;
+    /// Returns a reference to the participant's context.
+    fn retrieve_context(&self) -> &Self::Context;
 
     /// Process an incoming message.
     ///

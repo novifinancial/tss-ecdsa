@@ -79,7 +79,7 @@ impl ProtocolParticipant for KeygenParticipant {
     // The output type includes public key shares `KeySharePublic` for all
     // participants (including ourselves) and `KeySharePrivate` for ourselves.
     type Output = (Vec<KeySharePublic>, KeySharePrivate);
-
+    type Context = ();
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
     }
@@ -95,7 +95,9 @@ impl ProtocolParticipant for KeygenParticipant {
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
     }
-
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
     #[instrument(skip_all)]
     fn process_message<R: RngCore + CryptoRng>(
