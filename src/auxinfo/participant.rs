@@ -78,7 +78,7 @@ impl ProtocolParticipant for AuxInfoParticipant {
     // The output type includes `AuxInfoPublic` material for all participants
     // (including ourselves) and `AuxInfoPrivate` for ourselves.
     type Output = (Vec<AuxInfoPublic>, AuxInfoPrivate);
-
+    type Context = ();
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
     }
@@ -94,7 +94,9 @@ impl ProtocolParticipant for AuxInfoParticipant {
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
     }
-
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
+    }
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
     #[instrument(skip_all, err(Debug))]
     fn process_message<R: RngCore + CryptoRng>(
