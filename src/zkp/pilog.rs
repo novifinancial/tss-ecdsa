@@ -17,7 +17,6 @@
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
 
-use super::Proof;
 use crate::{
     errors::*,
     paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
@@ -26,13 +25,16 @@ use crate::{
     utils::{
         self, plusminus_bn_random_from_transcript, random_plusminus_by_size, within_bound_by_size,
     },
+    zkp::Proof,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
 use utils::CurvePoint;
+use zeroize::ZeroizeOnDrop;
 
 /// Proof of knowledge that:
 /// 1. the committed value in a discrete log commitment and the plaintext value
@@ -107,11 +109,21 @@ impl CommonInput {
 }
 
 /// The prover's secret knowledge.
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct ProverSecret {
     /// The secret plaintext (`x` in the paper).
     plaintext: BigNumber,
     /// The corresponding secret nonce (`ρ` in the paper).
     nonce: Nonce,
+}
+
+impl Debug for ProverSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("pilog::ProverSecret")
+            .field("plaintext", &"[redacted]")
+            .field("nonce", &"[redacted]")
+            .finish()
+    }
 }
 
 impl ProverSecret {

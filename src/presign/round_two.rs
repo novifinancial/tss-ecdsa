@@ -23,11 +23,22 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub(crate) struct Private {
     pub beta: BigNumber,
     pub beta_hat: BigNumber,
+}
+
+impl Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("presign::round_two::Private")
+            .field("beta", &"[redacted]")
+            .field("beta_hat", &"[redacted]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

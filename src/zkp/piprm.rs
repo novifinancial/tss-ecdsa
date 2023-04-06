@@ -22,13 +22,14 @@
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
 
-use super::Proof;
-use crate::{errors::*, ring_pedersen::RingPedersen, utils::*};
+use crate::{errors::*, ring_pedersen::RingPedersen, utils::*, zkp::Proof};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
+use zeroize::ZeroizeOnDrop;
 
 // Soundness parameter.
 const SOUNDNESS: usize = crate::parameters::SOUNDNESS_PARAMETER;
@@ -50,12 +51,22 @@ pub(crate) struct PiPrmProof {
 /// This is comprised of two components:
 /// 1. The secret exponent used when generating the [`RingPedersen`] parameters.
 /// 2. Euler's totient of [`RingPedersen::modulus`].
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiPrmSecret {
     /// The secret exponent that correlates [`RingPedersen`] parameters
     /// [`s`](RingPedersen::s) and [`t`](RingPedersen::t).
     exponent: BigNumber,
     /// Euler's totient of [`RingPedersen::modulus`].
     totient: BigNumber,
+}
+
+impl Debug for PiPrmSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("piprm::PiPrmSecret")
+            .field("exponent", &"[redacted]")
+            .field("totient", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiPrmSecret {

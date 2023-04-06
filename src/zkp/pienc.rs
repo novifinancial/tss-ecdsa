@@ -26,19 +26,21 @@
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
 
-use super::Proof;
 use crate::{
     errors::*,
     paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
     parameters::{ELL, EPSILON},
     ring_pedersen::{Commitment, MaskedRandomness, VerifiedRingPedersen},
     utils::{k256_order, plusminus_bn_random_from_transcript, random_plusminus_by_size},
+    zkp::Proof,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
+use zeroize::ZeroizeOnDrop;
 
 /// Proof of knowledge of the plaintext value of a ciphertext, where the value
 /// is within a desired range.
@@ -93,9 +95,19 @@ impl PiEncInput {
 
 /// The prover's secret knowledge: the in-range plaintext value of the
 /// ciphertext and its corresponding nonce.
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiEncSecret {
     plaintext: BigNumber,
     nonce: Nonce,
+}
+
+impl Debug for PiEncSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("pienc::Secret")
+            .field("plaintext", &"[redacted]")
+            .field("nonce", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiEncSecret {

@@ -6,8 +6,6 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::fmt::Debug;
-
 use crate::{
     auxinfo::info::AuxInfoPublic,
     errors::{InternalError, Result},
@@ -17,6 +15,7 @@ use crate::{
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::{error, instrument};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

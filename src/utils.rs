@@ -20,12 +20,17 @@ use merlin::Transcript;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Debug;
+use zeroize::Zeroize;
 
 pub(crate) const CRYPTOGRAPHIC_RETRY_MAX: usize = 500usize;
 
 /// Wrapper around k256::ProjectivePoint so that we can define our own
 /// serialization/deserialization for it
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+///
+/// Note that this type derives [`Debug`]; if a [`CurvePoint`] is used in a
+/// private type, `Debug` should be manually implemented with the field of this
+/// type explicitly redacted!
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Zeroize)]
 pub struct CurvePoint(pub k256::ProjectivePoint);
 
 impl CurvePoint {

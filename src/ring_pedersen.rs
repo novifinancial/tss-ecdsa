@@ -26,6 +26,8 @@ use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
 /// A commitment scheme based on a ring-variant of the Pedersen commitment
 /// scheme.
@@ -68,9 +70,15 @@ impl Commitment {
 }
 
 /// The randomness generated as part of [`RingPedersen::commit`].
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TransparentWrapper)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TransparentWrapper, ZeroizeOnDrop)]
 #[repr(transparent)]
 pub(crate) struct CommitmentRandomness(BigNumber);
+
+impl Debug for CommitmentRandomness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CommitmentRandomness([redacted])")
+    }
+}
 
 impl CommitmentRandomness {
     pub(crate) fn to_bytes(&self) -> Vec<u8> {
@@ -109,9 +117,15 @@ impl CommitmentRandomness {
 
 /// The randomness generated as part of [`RingPedersen::commit`] and masked
 /// by [`CommitmentRandomness::mask`] or [`CommitmentRandomness::mask_neg`].
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TransparentWrapper)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, TransparentWrapper, ZeroizeOnDrop)]
 #[repr(transparent)]
 pub(crate) struct MaskedRandomness(BigNumber);
+
+impl Debug for MaskedRandomness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MaskedRandomness([redacted])")
+    }
+}
 
 impl MaskedRandomness {
     /// (Re)masks value with `mask` and `challenge`.

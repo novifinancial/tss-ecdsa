@@ -33,7 +33,7 @@ impl KeygenCommit {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct KeygenDecommit {
     ///`sid` corresponds to a unique session identifier.
     pub sid: Identifier,

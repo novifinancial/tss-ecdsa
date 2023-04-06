@@ -17,16 +17,34 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub(crate) struct Private {
     pub k: BigNumber,
     pub rho: Nonce,
     pub gamma: BigNumber,
     pub nu: Nonce,
+    #[zeroize(skip)]
     pub G: Ciphertext, // Technically can be public but is only one per party
+    #[zeroize(skip)]
     pub K: Ciphertext, // Technically can be public but is only one per party
 }
+
+impl Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("presign::round_one::Private")
+            .field("k", &"[redacted]")
+            .field("rho", &"[redacted]")
+            .field("gamma", &"[redacted]")
+            .field("nu", &"[redacted]")
+            .field("G", &self.G)
+            .field("K", &self.K)
+            .finish()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Public {
     pub proof: PiEncProof,

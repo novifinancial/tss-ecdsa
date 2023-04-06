@@ -8,19 +8,21 @@
 
 //! Implements the ZKP from Figure 28 of <https://eprint.iacr.org/2021/060.pdf>
 
-use super::Proof;
 use crate::{
     errors::*,
     parameters::{ELL, EPSILON},
     ring_pedersen::{Commitment, CommitmentRandomness, MaskedRandomness, VerifiedRingPedersen},
     utils::{k256_order, plusminus_bn_random_from_transcript, random_plusminus_scaled},
+    zkp::Proof,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use num_bigint::{BigInt, Sign};
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct PiFacProof {
@@ -52,9 +54,19 @@ impl PiFacInput {
     }
 }
 
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiFacSecret {
     p: BigNumber,
     q: BigNumber,
+}
+
+impl Debug for PiFacSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("pifac::Secret")
+            .field("p", &"[redacted]")
+            .field("q", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiFacSecret {

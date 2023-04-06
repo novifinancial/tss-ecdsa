@@ -13,6 +13,7 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use thiserror::Error;
 use zeroize::ZeroizeOnDrop;
 
@@ -41,12 +42,23 @@ pub enum Error {
 /// A nonce generated as part of [`EncryptionKey::encrypt()`].
 /// A nonce is drawn from the multiplicative group of integers modulo `n`, where
 /// `n` is the modulus from the associated [`EncryptionKey`].
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, ZeroizeOnDrop)]
 pub(crate) struct Nonce(BigNumber);
+impl Debug for Nonce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Nonce([redacted])")
+    }
+}
 
 /// A masked version of [`Nonce`] produced by [`EncryptionKey::mask()`].
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, ZeroizeOnDrop)]
 pub(crate) struct MaskedNonce(BigNumber);
+
+impl Debug for MaskedNonce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MaskedNonce([redacted])")
+    }
+}
 
 #[cfg(test)]
 impl MaskedNonce {
@@ -192,6 +204,12 @@ impl EncryptionKey {
 
 #[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub(crate) struct DecryptionKey(libpaillier::DecryptionKey);
+
+impl Debug for DecryptionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DecryptionKey([redacted])")
+    }
+}
 
 impl DecryptionKey {
     /// Compute the floor of `n/2` for the modulus `n`.

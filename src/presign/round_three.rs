@@ -24,14 +24,33 @@ use k256::Scalar;
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub(crate) struct Private {
     pub k: BigNumber,
     pub chi: Scalar,
+    #[zeroize(skip)]
     pub Gamma: CurvePoint,
+    #[zeroize(skip)]
     pub delta: Scalar,
+    #[zeroize(skip)]
     pub Delta: CurvePoint,
+}
+
+impl Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Note: delta, Gamma, and Delta are all sent over the network to other
+        // parties so I assume they are not actually private data.
+        f.debug_struct("presign::round_three::Private")
+            .field("k", &"[redacted]")
+            .field("chi", &"[redacted]")
+            .field("delta", &self.delta)
+            .field("Gamma", &self.Gamma)
+            .field("Delta", &self.Delta)
+            .finish()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

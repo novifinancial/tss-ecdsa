@@ -6,22 +6,23 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::fmt::Debug;
-
 use crate::{
     errors::{
         InternalError::{CouldNotConvertToScalar, CouldNotInvertScalar, InternalInvariantFailed},
         Result,
     },
+    presign::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic},
     utils::bn_to_scalar,
     CurvePoint,
 };
-use k256::Scalar;
+use k256::{
+    elliptic_curve::{AffineXCoordinate, PrimeField},
+    Scalar,
+};
 use libpaillier::unknown_order::BigNumber;
 use sha2::Digest;
-
-use super::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic};
-use k256::elliptic_curve::{AffineXCoordinate, PrimeField};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
 pub(crate) struct RecordPair {
     pub(crate) private: RoundThreePrivate,
@@ -35,6 +36,7 @@ pub(crate) struct RecordPair {
 ///
 /// # 🔒 Lifetime requirements
 /// This type must only be used _once_.
+#[derive(ZeroizeOnDrop)]
 pub struct PresignRecord {
     R: CurvePoint,
     k: BigNumber,
@@ -74,7 +76,7 @@ impl TryFrom<RecordPair> for PresignRecord {
 
         Ok(PresignRecord {
             R,
-            k: private.k,
+            k: private.k.clone(),
             chi: private.chi,
         })
     }

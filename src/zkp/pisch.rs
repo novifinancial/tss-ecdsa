@@ -8,18 +8,20 @@
 
 //! Implements the ZKP from Figure 22 of <https://eprint.iacr.org/2021/060.pdf>
 
-use super::Proof;
 use crate::{
     errors::*,
     messages::{KeygenMessageType, Message, MessageType},
     utils::{self, positive_bn_random_from_transcript},
+    zkp::Proof,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
 use utils::CurvePoint;
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchProof {
@@ -56,8 +58,17 @@ impl PiSchInput {
     }
 }
 
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiSchSecret {
     x: BigNumber,
+}
+
+impl Debug for PiSchSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("pisch::PiSchSecret")
+            .field("x", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiSchSecret {

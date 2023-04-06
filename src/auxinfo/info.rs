@@ -6,8 +6,6 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use std::fmt::Debug;
-
 use crate::{
     errors::{InternalError, Result},
     paillier::{DecryptionKey, EncryptionKey},
@@ -17,6 +15,7 @@ use crate::{
 use k256::elliptic_curve::zeroize::ZeroizeOnDrop;
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::{error, instrument};
 
 /// The private key corresponding to a given Participant's [`AuxInfoPublic`].
@@ -48,7 +47,7 @@ impl From<DecryptionKey> for AuxInfoPrivate {
 impl Debug for AuxInfoPrivate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuxInfoPrivate")
-            .field("decryption key", &"[redacted]")
+            .field("decryption_key", &"[redacted]")
             .finish()
     }
 }
@@ -104,4 +103,13 @@ impl AuxInfoPublic {
 pub(crate) struct AuxInfoWitnesses {
     pub(crate) p: BigNumber,
     pub(crate) q: BigNumber,
+}
+
+impl Debug for AuxInfoWitnesses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuxInfoWitnesses")
+            .field("p", &"[redacted]")
+            .field("q", &"[redacted]")
+            .finish()
+    }
 }

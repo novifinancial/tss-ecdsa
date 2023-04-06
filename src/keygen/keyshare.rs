@@ -9,15 +9,23 @@
 use crate::{utils::CurvePoint, ParticipantIdentifier};
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use zeroize::ZeroizeOnDrop;
 
 /// Private key corresponding to a given [`Participant`](crate::Participant)'s
 /// [`KeySharePublic`].
 ///
 /// # 🔒 Storage requirements
 /// This type must be stored securely by the calling application.
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
 pub struct KeySharePrivate {
     pub(crate) x: BigNumber, // in the range [1, q)
+}
+
+impl Debug for KeySharePrivate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KeySharePrivate([redacted])")
+    }
 }
 
 /// A [`CurvePoint`] representing a given [`Participant`](crate::Participant)'s

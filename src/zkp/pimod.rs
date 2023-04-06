@@ -8,15 +8,14 @@
 
 //! Implements the ZKP from Figure 16 of <https://eprint.iacr.org/2021/060.pdf>
 
-use std::cmp::Ordering;
-
-use super::Proof;
-use crate::{errors::*, utils::*};
+use crate::{errors::*, utils::*, zkp::Proof};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, fmt::Debug};
 use tracing::{error, warn};
+use zeroize::ZeroizeOnDrop;
 
 // Soundness parameter lambda
 static LAMBDA: usize = crate::parameters::SOUNDNESS_PARAMETER;
@@ -48,9 +47,19 @@ impl PiModInput {
     }
 }
 
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiModSecret {
     p: BigNumber,
     q: BigNumber,
+}
+
+impl Debug for PiModSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("pimod::PiModSecret")
+            .field("p", &"[redacted]")
+            .field("q", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiModSecret {

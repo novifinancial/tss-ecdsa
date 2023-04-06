@@ -11,20 +11,22 @@
 //! Proves that the prover knows an x and y where X = g^x and y is the
 //! plaintext of a Paillier ciphertext
 
-use super::Proof;
 use crate::{
     errors::*,
     paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
     parameters::{ELL, ELL_PRIME, EPSILON},
     ring_pedersen::{Commitment, MaskedRandomness, VerifiedRingPedersen},
     utils::{self, k256_order, plusminus_bn_random_from_transcript, random_plusminus_by_size},
+    zkp::Proof,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use tracing::warn;
 use utils::CurvePoint;
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PiAffgProof {
@@ -85,11 +87,23 @@ impl PiAffgInput {
     }
 }
 
+#[derive(ZeroizeOnDrop)]
 pub(crate) struct PiAffgSecret {
     x: BigNumber,
     y: BigNumber,
     rho: Nonce,
     rho_y: Nonce,
+}
+
+impl Debug for PiAffgSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("piaffg::Secret")
+            .field("x", &"[redacted]")
+            .field("y", &"[redacted]")
+            .field("rho", &"[redacted]")
+            .field("rho_y", &"[redacted]")
+            .finish()
+    }
 }
 
 impl PiAffgSecret {
