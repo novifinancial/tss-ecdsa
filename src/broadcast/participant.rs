@@ -31,6 +31,27 @@ mod storage {
     }
 }
 
+/// Protocol status for [`BroadcastParticipant`].
+#[derive(Debug, PartialEq)]
+pub enum Status {
+    /// The protocol has been initialized, but no participants have completed a
+    /// broadcast.
+    Initialized,
+    /// A vector of participants that have completed a broadcast.
+    ///
+    /// This vector does _not_ correspond to those participants that have
+    /// _initialized_ (and hence successfully completed) a broadcast, but rather
+    /// the participants who, when either sending a message or _forwarding_ a
+    /// message, resulted in the completion of the broadcast. Since all
+    /// participants broadcast messages at the same time, this is used to track
+    /// termination of the protocol by tracking the vector _size_: If the size
+    /// is equal to the number of other participants then the broadcast has
+    /// completed (as this equates to this participant receiving the broadcasts
+    /// of all other participants, regardless of which participant was the one
+    /// who sent the final message "completing" a given broadcast).
+    ParticipantCompletedBroadcast(Vec<ParticipantIdentifier>),
+}
+
 #[derive(Debug)]
 pub(crate) struct BroadcastParticipant {
     /// A unique identifier for this participant
@@ -40,6 +61,8 @@ pub(crate) struct BroadcastParticipant {
     other_participant_ids: Vec<ParticipantIdentifier>,
     /// Local storage for this participant to store secrets
     local_storage: LocalStorage,
+    /// Status of the protocol execution
+    status: Status,
 }
 
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
@@ -65,12 +88,14 @@ pub(crate) struct BroadcastOutput {
 impl ProtocolParticipant for BroadcastParticipant {
     type Input = ();
     type Output = BroadcastOutput;
+    type Status = Status;
 
     fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
         Self {
             id,
             other_participant_ids,
             local_storage: Default::default(),
+            status: Status::Initialized,
         }
     }
 
@@ -94,6 +119,15 @@ impl ProtocolParticipant for BroadcastParticipant {
     ) -> Result<ProcessOutcome<Self::Output>> {
         info!("Processing broadcast message.");
 
+        if let Status::ParticipantCompletedBroadcast(participants) = self.status() {
+            // The protocol has terminated if the number of participants who
+            // have completed a broadcast equals the total number of other
+            // participants.
+            if participants.len() == self.other_participant_ids.len() {
+                return Err(InternalError::ProtocolAlreadyTerminated);
+            }
+        }
+
         match message.message_type() {
             MessageType::Broadcast(BroadcastMessageType::Disperse) => {
                 self.handle_round_one_msg(rng, message)
@@ -103,6 +137,10 @@ impl ProtocolParticipant for BroadcastParticipant {
             }
             _ => Err(InternalError::MisroutedMessage),
         }
+    }
+
+    fn status(&self) -> &Self::Status {
+        &self.status
     }
 }
 
@@ -188,7 +226,6 @@ impl BroadcastParticipant {
             message.id(),
             &tag
         )?;
-
         Ok(redisperse_outcome.with_messages(disperse_messages))
     }
 
@@ -240,8 +277,17 @@ impl BroadcastParticipant {
         // output if every node voted for the same message
         for (k, v) in tally.iter() {
             if *v == self.other_participant_ids.len() {
-                let msg = Message::new(data.message_type, sid, data.leader, self.id(), k);
+                let msg = Message::new(data.message_type, sid, data.leader, self.id, k);
                 let out = BroadcastOutput { tag: data.tag, msg };
+                match &mut self.status {
+                    Status::Initialized => {
+                        self.status = Status::ParticipantCompletedBroadcast(vec![voter]);
+                    }
+                    Status::ParticipantCompletedBroadcast(participants) => {
+                        participants.push(voter);
+                    }
+                }
+
                 return Ok(ProcessOutcome::Terminated(out));
             }
         }

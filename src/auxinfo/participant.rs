@@ -60,6 +60,13 @@ mod storage {
     }
 }
 
+/// Protocol status for [`AuxInfoParticipant`].
+#[derive(Debug, PartialEq)]
+pub enum Status {
+    Initialized,
+    TerminatedSuccessfully,
+}
+
 /// A participant that runs the auxiliary information protocol.
 ///
 /// Note that this does not include the key-refresh steps included in the
@@ -75,6 +82,8 @@ pub struct AuxInfoParticipant {
     local_storage: LocalStorage,
     /// Broadcast subprotocol handler
     broadcast_participant: BroadcastParticipant,
+    /// The status of the protocol execution
+    status: Status,
 }
 
 impl ProtocolParticipant for AuxInfoParticipant {
@@ -82,6 +91,7 @@ impl ProtocolParticipant for AuxInfoParticipant {
     // The output type includes `AuxInfoPublic` material for all participants
     // (including ourselves) and `AuxInfoPrivate` for ourselves.
     type Output = (Vec<AuxInfoPublic>, AuxInfoPrivate);
+    type Status = Status;
 
     fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
         Self {
@@ -89,6 +99,7 @@ impl ProtocolParticipant for AuxInfoParticipant {
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
             broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+            status: Status::Initialized,
         }
     }
 
@@ -110,6 +121,10 @@ impl ProtocolParticipant for AuxInfoParticipant {
     ) -> Result<ProcessOutcome<Self::Output>> {
         info!("Processing auxinfo message.");
 
+        if *self.status() == Status::TerminatedSuccessfully {
+            return Err(InternalError::ProtocolAlreadyTerminated);
+        }
+
         match message.message_type() {
             MessageType::Auxinfo(AuxinfoMessageType::R1CommitHash) => {
                 let broadcast_outcome = self.handle_broadcast(rng, message)?;
@@ -127,6 +142,10 @@ impl ProtocolParticipant for AuxInfoParticipant {
             MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted),
             _ => Err(InternalError::MisroutedMessage),
         }
+    }
+
+    fn status(&self) -> &Self::Status {
+        &self.status
     }
 }
 
@@ -474,6 +493,7 @@ impl AuxInfoParticipant {
                 .collect::<Result<Vec<_>>>()?;
             let auxinfo_private = self.local_storage.retrieve::<storage::Private>(self.id)?;
 
+            self.status = Status::TerminatedSuccessfully;
             Ok(ProcessOutcome::Terminated((
                 auxinfo_public,
                 auxinfo_private.clone(),
@@ -545,13 +565,8 @@ mod tests {
                 &[],
             )
         }
-
-        pub fn is_auxinfo_done(&self, _: Identifier) -> bool {
-            self.local_storage
-                .contains_for_all_ids::<storage::Public>(&self.all_participants())
-                && self.local_storage.contains::<storage::Private>(self.id)
-        }
     }
+
     /// Delivers all messages into their respective participant's inboxes
     fn deliver_all(
         messages: &[Message],
@@ -568,16 +583,13 @@ mod tests {
         Ok(())
     }
 
-    fn is_auxinfo_done(
-        quorum: &[AuxInfoParticipant],
-        auxinfo_identifier: Identifier,
-    ) -> Result<bool> {
+    fn is_auxinfo_done(quorum: &[AuxInfoParticipant]) -> bool {
         for participant in quorum {
-            if !participant.is_auxinfo_done(auxinfo_identifier) {
-                return Ok(false);
+            if *participant.status() != Status::TerminatedSuccessfully {
+                return false;
             }
         }
-        Ok(true)
+        true
     }
 
     /// Pick a random participant and process one of the messages in their
@@ -645,7 +657,7 @@ mod tests {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
             inbox.push(participant.initialize_auxinfo_message(keyshare_identifier));
         }
-        while !is_auxinfo_done(&quorum, keyshare_identifier)? {
+        while !is_auxinfo_done(&quorum) {
             // Try processing a message
             let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
                 None => continue,
@@ -672,7 +684,7 @@ mod tests {
         //
         // Every participant should have a public output from every other participant
         // and, for a given participant, they should be the same in every output
-        for party in &quorum {
+        for party in quorum.iter_mut() {
             let pid = party.id;
 
             // Collect the AuxInfoPublic associated with pid from every output
@@ -689,6 +701,16 @@ mod tests {
 
             // Make sure they're all equal
             assert!(publics_for_pid.windows(2).all(|pks| pks[0] == pks[1]));
+
+            // Check that each participant fully completed its broadcast portion.
+            if let crate::broadcast::participant::Status::ParticipantCompletedBroadcast(
+                participants,
+            ) = party.broadcast_participant().status()
+            {
+                assert_eq!(participants.len(), party.other_participant_ids.len());
+            } else {
+                panic!("Broadcast not completed!");
+            }
         }
 
         // Check that private outputs are consistent

@@ -147,6 +147,11 @@ impl<P: ProtocolParticipant> Participant<P> {
         Message::new(P::ready_type(), self.sid, self.id, self.id, &[])
     }
 
+    /// Return the protocol status.
+    pub fn status(&self) -> &P::Status {
+        self.participant.status()
+    }
+
     /// Generate a signature share on the given `digest` with the
     /// `PresignRecord`.
     ///
@@ -474,6 +479,10 @@ mod tests {
 
         // Auxinfo is done! Make sure there are no more messages.
         assert!(inboxes_are_empty(&inboxes));
+        // And make sure all participants have successfully terminated.
+        assert!(auxinfo_quorum
+            .iter()
+            .all(|p| *p.status() == crate::auxinfo::participant::Status::TerminatedSuccessfully));
 
         // Set up keygen participants
         let keygen_sid = Identifier::random(&mut rng);
@@ -505,6 +514,10 @@ mod tests {
 
         // Keygen is done! Makre sure there are no more messages.
         assert!(inboxes_are_empty(&inboxes));
+        // And make sure all participants have successfully terminated.
+        assert!(keygen_quorum
+            .iter()
+            .all(|p| *p.status() == crate::keygen::participant::Status::TerminatedSuccessfully));
 
         // Hideously save the list of public keys for later
         let public_keyshares = keygen_outputs
@@ -564,6 +577,10 @@ mod tests {
 
         // Presigning is done! Make sure there are no more messages.
         assert!(inboxes_are_empty(&inboxes));
+        // And make sure all participants have successfully terminated.
+        assert!(presign_quorum
+            .iter()
+            .all(|p| *p.status() == crate::presign::participant::Status::TerminatedSuccessfully));
 
         // Now, produce a valid signature
         let mut hasher = Sha256::new();
