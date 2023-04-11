@@ -77,3 +77,5 @@ For generating benchmarks related to the bignumber operations, run:
 Please refer to flamegraphs if you want to see the relative costs of some function calls in a given test. Information to run that can be found in stats/README.md.
 
 ## Examples
+
+An example can be found in the `examples` folder. Please navigate to the `network` folder under it. There are instructions for running the example. 
