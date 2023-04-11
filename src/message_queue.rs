@@ -6,88 +6,64 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
+//! The `MessageQueue` type for storing and retrieving a queue of messages.
+//!
+//! [`MessageQueue`] provides a simple means of storing and retrieving messages
+//! associated with a given [`MessageType`]. Messages can be retrieved either
+//! all at once using [`MessageQueue::retrieve_all`] or associated with a given
+//! [`ParticipantIdentifier`] using [`MessageQueue::retrieve`].
+
 use crate::{
     errors::Result,
     messages::{Message, MessageType},
-    protocol::Identifier,
     ParticipantIdentifier,
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MessageIndex {
-    message_type: MessageType,
-    /// `identifier` corresponds to a unique session identifier.
-    identifier: Identifier,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub(crate) struct MessageQueue(HashMap<Vec<u8>, Vec<Message>>);
-
-impl Default for MessageQueue {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// A type for storing a queue of [`Message`]s by [`MessageType`].
+#[derive(Clone, Default)]
+pub(crate) struct MessageQueue(HashMap<MessageType, Vec<Message>>);
 
 impl MessageQueue {
-    pub(crate) fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    /// Store a message in the MessageQueue.
-    ///
-    /// `identifier` corresponds to a unique session identifier.
-    pub(crate) fn store(
-        &mut self,
-        message_type: MessageType,
-        identifier: Identifier,
-        message: Message,
-    ) -> Result<()> {
-        let key = Self::get_key(message_type, identifier)?;
-        self.0.entry(key).or_default().push(message);
+    /// Store a message by its [`MessageType`].
+    pub(crate) fn store(&mut self, message: Message) -> Result<()> {
+        self.0
+            .entry(message.message_type())
+            .or_default()
+            .push(message);
         Ok(())
     }
 
-    /// Retrieve (and remove) all messages of a given type from the
-    /// MessageQueue.
+    /// Retrieve (and remove) all messages of a given [`MessageType`].
     ///
-    /// `identifier` corresponds to a unique session identifier.
-    pub(crate) fn retrieve_all(
-        &mut self,
-        message_type: MessageType,
-        identifier: Identifier,
-    ) -> Result<Vec<Message>> {
-        self.do_retrieve(message_type, identifier, None)
+    /// If the given [`MessageType`] is not found, an empty [`Vec`] is returned.
+    pub(crate) fn retrieve_all(&mut self, message_type: MessageType) -> Vec<Message> {
+        self.do_retrieve(message_type, None)
     }
 
-    /// Retrieve (and remove) all messages of a given type from a given sender
-    /// from the MessageQueue.
+    /// Retrieve (and remove) all messages of a given [`MessageType`] associated
+    /// with the given [`ParticipantIdentifier`].
     ///
-    ///`identifier` corresponds to a unique session identifier.
+    /// If the given [`MessageType`] is not found, an empty [`Vec`] is returned.
     pub(crate) fn retrieve(
         &mut self,
         message_type: MessageType,
-        identifier: Identifier,
         sender: ParticipantIdentifier,
-    ) -> Result<Vec<Message>> {
-        self.do_retrieve(message_type, identifier, Some(sender))
+    ) -> Vec<Message> {
+        self.do_retrieve(message_type, Some(sender))
     }
-    ///`identifier` corresponds to a unique session identifier.
+
     fn do_retrieve(
         &mut self,
         message_type: MessageType,
-        identifier: Identifier,
         sender: Option<ParticipantIdentifier>,
-    ) -> Result<Vec<Message>> {
-        let key = Self::get_key(message_type, identifier)?;
+    ) -> Vec<Message> {
         // delete retrieved messages from storage so that they aren't accidentally
         // processed again.
-        let queue = self.0.remove(&key).unwrap_or_default();
+        let queue = self.0.remove(&message_type).unwrap_or_default();
 
         match sender {
-            None => Ok(queue),
+            None => queue,
             Some(sender) => {
                 // separate messages we want to retrieve
                 let (out, new_queue): (Vec<_>, Vec<_>) =
@@ -95,18 +71,10 @@ impl MessageQueue {
 
                 // re-add updated queue
                 if !new_queue.is_empty() {
-                    let _ = self.0.insert(key, new_queue);
+                    let _ = self.0.insert(message_type, new_queue);
                 }
-                Ok(out)
+                out
             }
         }
-    }
-
-    fn get_key(message_type: MessageType, identifier: Identifier) -> Result<Vec<u8>> {
-        let message_index = MessageIndex {
-            message_type,
-            identifier,
-        };
-        Ok(serialize!(&message_index)?)
     }
 }
