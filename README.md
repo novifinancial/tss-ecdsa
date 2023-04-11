@@ -13,7 +13,12 @@ This codebase is generally intended to be network-agnostic. Programs take messag
 ## Project Dependencies
 This project relies on the `libpaillier` Rust crate using the GMP backend. GMP should be available during build-time.  
 
-##  What's Implemented
+## Rust Dependencies and Versions
+
+The preferred Rust version is cargo 1.68.2. 
+The preferred GMP version is 6.2.1.
+
+###  What's Implemented
 
 ### Key Generation (Figure 5 of CGGMP20)
 
@@ -21,7 +26,7 @@ KeyGen generates a threshold signing key, shares of which are distributed to eac
 
 ### Auxinfo (CGGMP20 Figure 6, minus the key refreshing)
 
-Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxilary information. This is run after KeyGen and only needs to be run once.
+Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxillary information. This is run after KeyGen and only needs to be run once.
 
 ### Three Round Pre-signing (Figure 7 of CGGMP20)
 
@@ -42,3 +47,33 @@ Additionally, no notions of Identifiable Aborts are implemented. If a node crash
 Furthermore, the Key Refreshing portion of Auxilary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
 
 While some thought has been put into handling invalid messages (duplicate messages are ignored, as are some malformed ones), this has not been evaluated fully. Additionally, message authenticity (i.e. that a given message is actually coming from the sender in the "sender" field) is currently assumed to be handled outside of the protocol, by whatever networking code is shuttling messages around.
+
+
+## How to Build and Run
+
+You should try to build and run using the stable version of Rust instead of nightly. You can switch using the following:
+
+`rustup default stable` 
+`rustup update`
+
+If you want to build the library, then do:
+
+`cargo build`
+
+If you want to run the basic tests, then do:
+
+`cargo make ci`
+
+## Benchmarks
+
+The benchmarks are found in the benches folder. The end to end benchmarks are situated inside that folder at e2e_benchmark.rs. Benchmarks on different components in the main protocol like keygen, auxinfo, pre-sign and sign can be run seperately. You should type the following for generating the actual benchmarks:
+
+`cargo bench e2e_benchmark`
+
+For generating benchmarks related to the bignumber operations, run:
+
+`cargo bench bignumber_benchmark`
+
+Please refer to flamegraphs if you want to see the relative costs of some function calls in a given test. Information to run that can be found in stats/README.md.
+
+## Examples
