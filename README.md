@@ -13,12 +13,12 @@ This codebase is generally intended to be network-agnostic. Programs take messag
 ## Project Dependencies
 This project relies on the `libpaillier` Rust crate using the GMP backend. GMP should be available during build-time.  
 
-## Rust Dependencies and Versions
+### Rust Dependencies and Versions
 
 The preferred Rust version is cargo 1.68.2. 
 The preferred GMP version is 6.2.1.
 
-###  What's Implemented
+##  What's Implemented
 
 ### Key Generation (Figure 5 of CGGMP20)
 
@@ -26,7 +26,7 @@ KeyGen generates a threshold signing key, shares of which are distributed to eac
 
 ### Auxinfo (CGGMP20 Figure 6, minus the key refreshing)
 
-Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxillary information. This is run after KeyGen and only needs to be run once.
+Auxinfo generates the auxiliary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxiliary information. This is run after KeyGen and only needs to be run once.
 
 ### Three Round Pre-signing (Figure 7 of CGGMP20)
 
@@ -44,7 +44,7 @@ Currently, the codebase only implements n-out-of-n sharing. While t-out-of-n sha
 
 Additionally, no notions of Identifiable Aborts are implemented. If a node crashes, the protocol will halt until that node comes back online. In addition to implementing the necessary cryptographic checks to identify and attribute malicious behavior, some notion of synchronous timeouts is also required.
 
-Furthermore, the Key Refreshing portion of Auxilary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
+Furthermore, the Key Refreshing portion of Auxiliary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
 
 While some thought has been put into handling invalid messages (duplicate messages are ignored, as are some malformed ones), this has not been evaluated fully. Additionally, message authenticity (i.e. that a given message is actually coming from the sender in the "sender" field) is currently assumed to be handled outside of the protocol, by whatever networking code is shuttling messages around.
 
