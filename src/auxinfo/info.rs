@@ -21,9 +21,9 @@ use tracing::{error, instrument};
 
 /// The private key corresponding to a given Participant's [`AuxInfoPublic`].
 ///
-/// TODO #169: Let's be more careful about allowing `Clone`, `Serialize`, etc.
-/// here due to this being sensitive data.
-#[derive(Clone, Serialize, Deserialize, ZeroizeOnDrop)]
+/// # 🔒 Storage requirements
+/// This type must be stored securely by the calling application.
+#[derive(Clone, ZeroizeOnDrop)]
 pub struct AuxInfoPrivate {
     decryption_key: DecryptionKey,
 }
