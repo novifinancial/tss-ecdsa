@@ -15,8 +15,10 @@ This project relies on the `libpaillier` Rust crate using the GMP backend. GMP s
 
 ### Rust Dependencies and Versions
 
-The preferred Rust version is cargo 1.68.2. 
-The preferred GMP version is 6.2.1.
+The minimum supported stable Rust version is cargo 1.68.2. 
+
+This library has been tested with GMP version 6.2.1.
+
 
 ##  What's Implemented
 
@@ -51,31 +53,17 @@ While some thought has been put into handling invalid messages (duplicate messag
 
 ## How to Build and Run
 
-You should try to build and run using the stable version of Rust instead of nightly. You can switch using the following:
+The library requires a recent, stable version of Rust. You can switch to stable releases and update to the latest version using the following:
 
 `rustup default stable` 
 `rustup update`
 
-If you want to build the library, then do:
-
-`cargo build`
-
-If you want to run the basic tests, then do:
+This library also includes a Makefile with our full set of continuous integration checks, including formatting, linting, building, building docs, and running tests. You can run it locally with:
 
 `cargo make ci`
 
 ## Benchmarks
 
-The benchmarks are found in the benches folder. The end to end benchmarks are situated inside that folder at e2e_benchmark.rs. Benchmarks on different components in the main protocol like keygen, auxinfo, pre-sign and sign can be run seperately. You should type the following for generating the actual benchmarks:
-
-`cargo bench e2e_benchmark`
-
-For generating benchmarks related to the bignumber operations, run:
-
-`cargo bench bignumber_benchmark`
+The benchmarks are found in the benches folder. Please refer to the benches/README.md file for information on how to run and obtain the benchmarks.
 
 Please refer to flamegraphs if you want to see the relative costs of some function calls in a given test. Information to run that can be found in stats/README.md.
-
-## Examples
-
-An example can be found in the `examples` folder. Please navigate to the `network` folder under it. There are instructions for running the example. 
