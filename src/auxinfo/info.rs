@@ -10,6 +10,7 @@ use crate::{
     errors::{InternalError, Result},
     paillier::{DecryptionKey, EncryptionKey},
     ring_pedersen::VerifiedRingPedersen,
+    zkp::ProofContext,
     ParticipantIdentifier,
 };
 use k256::elliptic_curve::zeroize::ZeroizeOnDrop;
@@ -62,6 +63,7 @@ pub struct AuxInfoPublic {
 
 impl AuxInfoPublic {
     pub(crate) fn new(
+        context: &impl ProofContext,
         participant: ParticipantIdentifier,
         encryption_key: EncryptionKey,
         params: VerifiedRingPedersen,
@@ -71,7 +73,7 @@ impl AuxInfoPublic {
             pk: encryption_key,
             params,
         };
-        public.verify()?;
+        public.verify(context)?;
         Ok(public)
     }
 
@@ -90,12 +92,12 @@ impl AuxInfoPublic {
     /// Verifies that the public key's modulus matches the ZKSetupParameters
     /// modulus N, and that the parameters have appropriate s and t values.
     #[instrument(skip_all, err(Debug))]
-    pub(crate) fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self, context: &impl ProofContext) -> Result<()> {
         if self.pk.modulus() != self.params.scheme().modulus() {
             error!("Mismatch between public key modulus and setup parameters modulus");
             return Err(InternalError::Serialization);
         }
-        self.params.verify()
+        self.params.verify(context)
     }
 }
 

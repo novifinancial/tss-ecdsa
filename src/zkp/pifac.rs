@@ -13,7 +13,7 @@ use crate::{
     parameters::{ELL, EPSILON},
     ring_pedersen::{Commitment, CommitmentRandomness, MaskedRandomness, VerifiedRingPedersen},
     utils::{k256_order, plusminus_bn_random_from_transcript, random_plusminus_scaled},
-    zkp::Proof,
+    zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -81,11 +81,11 @@ impl PiFacSecret {
 impl Proof for PiFacProof {
     type CommonInput = PiFacInput;
     type ProverSecret = PiFacSecret;
-
     #[cfg_attr(feature = "flame_it", flame("PiFacProof"))]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -118,19 +118,7 @@ impl Proof for PiFacProof {
             rng,
         );
 
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(
-            b"(P, Q, A, B, T, sigma)",
-            &[
-                P.to_bytes(),
-                Q.to_bytes(),
-                A.to_bytes(),
-                B.to_bytes(),
-                T.to_bytes(),
-                sigma.to_bytes(),
-            ]
-            .concat(),
-        );
+        Self::fill_out_transcript(transcript, context, input, &P, &Q, &A, &B, &T, &sigma);
 
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
@@ -158,20 +146,24 @@ impl Proof for PiFacProof {
         Ok(proof)
     }
 
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(
-            b"(P, Q, A, B, T, sigma)",
-            &[
-                self.P.to_bytes(),
-                self.Q.to_bytes(),
-                self.A.to_bytes(),
-                self.B.to_bytes(),
-                self.T.to_bytes(),
-                self.sigma.to_bytes(),
-            ]
-            .concat(),
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
+        Self::fill_out_transcript(
+            transcript,
+            context,
+            input,
+            &self.P,
+            &self.Q,
+            &self.A,
+            &self.B,
+            &self.T,
+            &self.sigma,
         );
+
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
 
@@ -230,6 +222,36 @@ impl Proof for PiFacProof {
     }
 }
 
+impl PiFacProof {
+    #[allow(clippy::too_many_arguments)]
+    fn fill_out_transcript(
+        transcript: &mut Transcript,
+        context: &impl ProofContext,
+        input: &PiFacInput,
+        P: &Commitment,
+        Q: &Commitment,
+        A: &Commitment,
+        B: &Commitment,
+        T: &Commitment,
+        sigma: &CommitmentRandomness,
+    ) {
+        transcript.append_message(b"PiFac ProofContext", context.as_bytes());
+        transcript.append_message(b"PiFac CommonInput", &serialize!(&input).unwrap());
+        transcript.append_message(
+            b"(P, Q, A, B, T, sigma)",
+            &[
+                P.to_bytes(),
+                Q.to_bytes(),
+                A.to_bytes(),
+                B.to_bytes(),
+                T.to_bytes(),
+                sigma.to_bytes(),
+            ]
+            .concat(),
+        );
+    }
+}
+
 /// Find the square root of a positive BigNumber, rounding down
 fn sqrt(num: &BigNumber) -> BigNumber {
     // convert to a struct with a square root function first
@@ -240,7 +262,7 @@ fn sqrt(num: &BigNumber) -> BigNumber {
 
 #[cfg(test)]
 mod tests {
-    use crate::{paillier::prime_gen, utils::testing::init_testing};
+    use crate::{paillier::prime_gen, utils::testing::init_testing, zkp::BadContext};
 
     use super::*;
 
@@ -249,21 +271,39 @@ mod tests {
     ) -> Result<(PiFacInput, PiFacProof)> {
         let (p0, q0) = prime_gen::get_prime_pair_from_pool_insecure(rng).unwrap();
         let N0 = &p0 * &q0;
-        let setup_params = VerifiedRingPedersen::gen(rng)?;
+        let setup_params = VerifiedRingPedersen::gen(rng, &())?;
 
         let mut transcript = Transcript::new(b"PiFac Test");
         let input = PiFacInput::new(&setup_params, &N0);
-        let proof = PiFacProof::prove(&input, &PiFacSecret::new(&p0, &q0), &mut transcript, rng)?;
+        let proof = PiFacProof::prove(
+            &input,
+            &PiFacSecret::new(&p0, &q0),
+            &(),
+            &mut transcript,
+            rng,
+        )?;
 
         Ok((input, proof))
     }
 
     #[test]
+    fn pifac_proof_context_must_be_correct() -> Result<()> {
+        let mut rng = init_testing();
+
+        let context = BadContext {};
+        let (input, proof) = random_no_small_factors_proof(&mut rng).unwrap();
+        let mut transcript = Transcript::new(b"PiFacProof");
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
+        Ok(())
+    }
+    #[test]
     fn test_no_small_factors_proof() -> Result<()> {
         let mut rng = init_testing();
+
         let (input, proof) = random_no_small_factors_proof(&mut rng)?;
         let mut transcript = Transcript::new(b"PiFac Test");
-        proof.verify(&input, &mut transcript)?;
+        proof.verify(&input, &(), &mut transcript)?;
         Ok(())
     }
 
@@ -278,14 +318,14 @@ mod tests {
                 &prime_gen::try_get_prime_from_pool_insecure(&mut rng).unwrap(),
             );
             let mut transcript = Transcript::new(b"PiFac Test");
-            assert!(proof.verify(&incorrect_N, &mut transcript).is_err());
+            assert!(proof.verify(&incorrect_N, &(), &mut transcript).is_err());
         }
         {
             let incorrect_startup_params =
-                PiFacInput::new(&VerifiedRingPedersen::gen(&mut rng)?, &input.N0);
+                PiFacInput::new(&VerifiedRingPedersen::gen(&mut rng, &())?, &input.N0);
             let mut transcript = Transcript::new(b"PiFac Test");
             assert!(proof
-                .verify(&incorrect_startup_params, &mut transcript)
+                .verify(&incorrect_startup_params, &(), &mut transcript)
                 .is_err());
         }
         {
@@ -294,25 +334,31 @@ mod tests {
             let incorrect_factors = PiFacProof::prove(
                 &input,
                 &PiFacSecret::new(&not_p0, &not_q0),
+                &(),
                 &mut transcript,
                 &mut rng,
             )?;
             let mut transcript = Transcript::new(b"PiFac Test");
-            assert!(incorrect_factors.verify(&input, &mut transcript).is_err());
+            assert!(incorrect_factors
+                .verify(&input, &(), &mut transcript)
+                .is_err());
 
             let mut transcript = Transcript::new(b"PiFac Test");
             let small_p = BigNumber::from(7u64);
             let small_q = BigNumber::from(11u64);
-            let setup_params = VerifiedRingPedersen::gen(&mut rng)?;
+            let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
             let small_input = PiFacInput::new(&setup_params, &(&small_p * &small_q));
             let small_proof = PiFacProof::prove(
                 &input,
                 &PiFacSecret::new(&small_p, &small_q),
+                &(),
                 &mut transcript,
                 &mut rng,
             )?;
             let mut transcript = Transcript::new(b"PiFac Test");
-            assert!(small_proof.verify(&small_input, &mut transcript).is_err());
+            assert!(small_proof
+                .verify(&small_input, &(), &mut transcript)
+                .is_err());
 
             let mut transcript = Transcript::new(b"PiFac Test");
             let regular_sized_q = prime_gen::try_get_prime_from_pool_insecure(&mut rng).unwrap();
@@ -320,11 +366,14 @@ mod tests {
             let mixed_proof = PiFacProof::prove(
                 &input,
                 &PiFacSecret::new(&small_p, &regular_sized_q),
+                &(),
                 &mut transcript,
                 &mut rng,
             )?;
             let mut transcript = Transcript::new(b"PiFac Test");
-            assert!(mixed_proof.verify(&mixed_input, &mut transcript).is_err());
+            assert!(mixed_proof
+                .verify(&mixed_input, &(), &mut transcript)
+                .is_err());
 
             let mut transcript = Transcript::new(b"PiFac Test");
             let small_fac_p = &not_p0 * &BigNumber::from(2u64);
@@ -333,12 +382,13 @@ mod tests {
             let small_fac_proof = PiFacProof::prove(
                 &input,
                 &PiFacSecret::new(&small_fac_p, &regular_sized_q),
+                &(),
                 &mut transcript,
                 &mut rng,
             )?;
             let mut transcript = Transcript::new(b"PiFac Test");
             assert!(small_fac_proof
-                .verify(&small_fac_input, &mut transcript)
+                .verify(&small_fac_input, &(), &mut transcript)
                 .is_err());
         }
 

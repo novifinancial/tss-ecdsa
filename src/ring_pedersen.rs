@@ -17,7 +17,7 @@ use crate::{
     utils::{modpow, random_plusminus_scaled, random_positive_bn},
     zkp::{
         piprm::{PiPrmProof, PiPrmSecret},
-        Proof,
+        Proof, ProofContext,
     },
 };
 use bytemuck::TransparentWrapper;
@@ -151,20 +151,21 @@ impl VerifiedRingPedersen {
     /// constructed.
     pub(crate) fn extract(
         sk: &DecryptionKey,
+        context: &impl ProofContext,
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<Self> {
         let (scheme, lambda, totient) = RingPedersen::extract(sk, rng)?;
         let secrets = PiPrmSecret::new(lambda, totient);
         let mut transcript = Transcript::new(b"PiPrmProof");
-        let proof = PiPrmProof::prove(&scheme, &secrets, &mut transcript, rng)?;
+        let proof = PiPrmProof::prove(&scheme, &secrets, context, &mut transcript, rng)?;
         Ok(Self { scheme, proof })
     }
 
     /// Verifies that the underlying [`RingPedersen`] commitment scheme was
     /// constructed correctly according to the associated [`PiPrmProof`].
-    pub(crate) fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self, context: &impl ProofContext) -> Result<()> {
         let mut transcript = Transcript::new(b"PiPrmProof");
-        self.proof.verify(self.scheme(), &mut transcript)
+        self.proof.verify(self.scheme(), context, &mut transcript)
     }
 
     /// Returns the underlying [`RingPedersen`] commitment scheme associated
@@ -176,9 +177,12 @@ impl VerifiedRingPedersen {
     /// Generates a [`VerifiedRingPedersen`] object from a random number
     /// generator for testing purposes.
     #[cfg(test)]
-    pub(crate) fn gen(rng: &mut (impl RngCore + CryptoRng)) -> Result<Self> {
+    pub(crate) fn gen(
+        rng: &mut (impl RngCore + CryptoRng),
+        context: &impl ProofContext,
+    ) -> Result<Self> {
         let (sk, _, _) = DecryptionKey::new(rng)?;
-        Self::extract(&sk, rng)
+        Self::extract(&sk, context, rng)
     }
 }
 
@@ -331,8 +335,8 @@ mod tests {
     #[test]
     fn verified_ring_pedersen_generation_works() -> Result<()> {
         let mut rng = init_testing();
-        let scheme = VerifiedRingPedersen::gen(&mut rng)?;
-        assert!(scheme.verify().is_ok());
+        let scheme = VerifiedRingPedersen::gen(&mut rng, &())?;
+        assert!(scheme.verify(&()).is_ok());
         Ok(())
     }
 
@@ -340,20 +344,20 @@ mod tests {
     fn mixing_verified_ring_pedersen_scheme_and_proof_fails() -> Result<()> {
         let mut rng = init_testing();
         // Mixing a proof from one scheme with another should fail.
-        let scheme0 = VerifiedRingPedersen::gen(&mut rng)?;
-        let scheme1 = VerifiedRingPedersen::gen(&mut rng)?;
+        let scheme0 = VerifiedRingPedersen::gen(&mut rng, &())?;
+        let scheme1 = VerifiedRingPedersen::gen(&mut rng, &())?;
         let scheme_mixed = VerifiedRingPedersen {
             scheme: scheme0.scheme,
             proof: scheme1.proof,
         };
-        assert!(scheme_mixed.verify().is_err());
+        assert!(scheme_mixed.verify(&()).is_err());
         Ok(())
     }
 
     #[test]
     fn ring_pedersen_commitments_work() -> Result<()> {
         let mut rng = init_testing();
-        let scheme = VerifiedRingPedersen::gen(&mut rng)?;
+        let scheme = VerifiedRingPedersen::gen(&mut rng, &())?;
         let value = random_plusminus_by_size(&mut rng, 256);
         let (c, r) = scheme.scheme().commit(&value, 256, &mut rng);
         let c_ = scheme.scheme().reconstruct(&value, r.as_masked());
@@ -364,7 +368,7 @@ mod tests {
     #[test]
     fn mixing_ring_pedersen_commitments_fails() -> Result<()> {
         let mut rng = init_testing();
-        let scheme = VerifiedRingPedersen::gen(&mut rng)?;
+        let scheme = VerifiedRingPedersen::gen(&mut rng, &())?;
         let value0 = random_plusminus_by_size(&mut rng, 256);
         let value1 = random_plusminus_by_size(&mut rng, 256);
         // This'll be true except with extremely small probability.

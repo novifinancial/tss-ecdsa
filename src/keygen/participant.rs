@@ -168,7 +168,7 @@ impl ProtocolParticipant for KeygenParticipant {
 impl InnerProtocolParticipant for KeygenParticipant {
     type Context = ();
 
-    fn retrieve_context(&self) -> &Self::Context {
+    fn retrieve_context(&self) -> &<Self as InnerProtocolParticipant>::Context {
         &()
     }
 

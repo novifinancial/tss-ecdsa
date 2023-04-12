@@ -33,7 +33,7 @@ use crate::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
         pienc::PiEncProof,
         pilog::{CommonInput, PiLogProof, ProverSecret},
-        Proof,
+        Proof, ProofContext,
     },
     CurvePoint,
 };
@@ -266,7 +266,7 @@ impl ProtocolParticipant for PresignParticipant {
 impl InnerProtocolParticipant for PresignParticipant {
     type Context = ();
 
-    fn retrieve_context(&self) -> &Self::Context {
+    fn retrieve_context(&self) -> &<Self as InnerProtocolParticipant>::Context {
         &()
     }
 
@@ -339,7 +339,7 @@ impl PresignParticipant {
 
         // Run Round One
         let (private, r1_publics, r1_public_broadcast) =
-            keyshare.round_one(rng, &other_public_auxinfo)?;
+            keyshare.round_one(rng, self.retrieve_context(), &other_public_auxinfo)?;
 
         // Store private round one value locally
         self.local_storage
@@ -457,7 +457,6 @@ impl PresignParticipant {
         input: &Input,
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Generating round two presign messages.");
-
         // Reconstruct keyshare and other participants' public keyshares from local
         // storage
         let keyshare = get_keyshare(self.id, input)?;
@@ -479,6 +478,7 @@ impl PresignParticipant {
 
         let r1_public = crate::round_one::Public::from_message(
             message,
+            self.retrieve_context(),
             &keyshare.aux_info_public,
             keyshare_from,
             &r1_public_broadcast,
@@ -488,8 +488,13 @@ impl PresignParticipant {
         self.local_storage
             .store::<storage::RoundOnePublic>(message.from(), r1_public);
 
-        let (r2_priv_ij, r2_pub_ij) =
-            keyshare.round_two(rng, keyshare_from, &r1_priv, &r1_public_broadcast)?;
+        let (r2_priv_ij, r2_pub_ij) = keyshare.round_two(
+            rng,
+            self.retrieve_context(),
+            keyshare_from,
+            &r1_priv,
+            &r1_public_broadcast,
+        )?;
 
         // Store the private value for this round 2 pair
         self.local_storage
@@ -600,7 +605,7 @@ impl PresignParticipant {
             .retrieve::<storage::RoundOnePrivate>(self.id)?;
 
         let (r3_private, r3_publics_map) =
-            keyshare.round_three(rng, r1_priv, &round_three_hashmap)?;
+            keyshare.round_three(rng, self.retrieve_context(), r1_priv, &round_three_hashmap)?;
 
         // Store round 3 private value
         self.local_storage
@@ -716,6 +721,7 @@ impl PresignParticipant {
 
         let round_two_public = crate::round_two::Public::from_message(
             message,
+            self.retrieve_context(),
             receiver_auxinfo_public,
             sender_auxinfo_public,
             sender_keyshare_public,
@@ -743,6 +749,7 @@ impl PresignParticipant {
 
         let public_message = crate::round_three::Public::from_message(
             message,
+            self.retrieve_context(),
             receiver_auxinfo_public,
             sender_auxinfo_public,
             sender_r1_public_broadcast,
@@ -869,6 +876,7 @@ impl PresignKeyShareAndInfo {
     pub(crate) fn round_one<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
+        context: &impl ProofContext,
         public_keys: &[&AuxInfoPublic],
     ) -> Result<(
         RoundOnePrivate,
@@ -898,6 +906,7 @@ impl PresignKeyShareAndInfo {
                     K.clone(),
                 ),
                 &crate::zkp::pienc::PiEncSecret::new(k.clone(), rho.clone()),
+                context,
                 &mut transcript,
                 rng,
             )?;
@@ -929,6 +938,7 @@ impl PresignKeyShareAndInfo {
     pub(crate) fn round_two<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
+        context: &impl ProofContext,
         receiver_aux_info: &AuxInfoPublic,
         sender_r1_priv: &RoundOnePrivate,
         receiver_r1_pub_broadcast: &RoundOnePublicBroadcast,
@@ -969,6 +979,7 @@ impl PresignKeyShareAndInfo {
 
         // Generate three proofs
         let mut transcript = Transcript::new(b"PiAffgProof");
+
         let psi = PiAffgProof::prove(
             &PiAffgInput::new(
                 receiver_aux_info.params(),
@@ -981,10 +992,12 @@ impl PresignKeyShareAndInfo {
                 &Gamma,
             ),
             &PiAffgSecret::new(&sender_r1_priv.gamma, &beta, &s, &r),
+            context,
             &mut transcript,
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiAffgProof");
+
         let psi_hat = PiAffgProof::prove(
             &PiAffgInput::new(
                 receiver_aux_info.params(),
@@ -997,6 +1010,7 @@ impl PresignKeyShareAndInfo {
                 &self.keyshare_public.X,
             ),
             &PiAffgSecret::new(&self.keyshare_private.x, &beta_hat, &s_hat, &r_hat),
+            context,
             &mut transcript,
             rng,
         )?;
@@ -1010,6 +1024,7 @@ impl PresignKeyShareAndInfo {
                 g,
             ),
             &ProverSecret::new(sender_r1_priv.gamma.clone(), sender_r1_priv.nu.clone()),
+            context,
             &mut transcript,
             rng,
         )?;
@@ -1038,6 +1053,7 @@ impl PresignKeyShareAndInfo {
     pub(crate) fn round_three<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
+        context: &impl ProofContext,
         sender_r1_priv: &RoundOnePrivate,
         other_participant_inputs: &HashMap<ParticipantIdentifier, RoundThreeInput>,
     ) -> Result<(
@@ -1086,6 +1102,7 @@ impl PresignKeyShareAndInfo {
                     Gamma,
                 ),
                 &ProverSecret::new(sender_r1_priv.k.clone(), sender_r1_priv.rho.clone()),
+                context,
                 &mut transcript,
                 rng,
             )?;
