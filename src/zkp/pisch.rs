@@ -209,7 +209,7 @@ impl PiSchProof {
         input: &PiSchInput,
         A: &CurvePoint,
     ) {
-        transcript.append_message(b"PiSch ProofContext", context.as_bytes());
+        transcript.append_message(b"PiSch ProofContext", &context.as_bytes());
         transcript.append_message(b"PiSch CommonInput", &serialize!(&input).unwrap());
         transcript.append_message(b"A", &serialize!(A).unwrap());
     }

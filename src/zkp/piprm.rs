@@ -89,7 +89,7 @@ fn generate_challenge_bytes(
     context: &impl ProofContext,
     transcript: &mut Transcript,
 ) -> Result<Vec<u8>> {
-    transcript.append_message(b"PiPrm ProofContext", context.as_bytes());
+    transcript.append_message(b"PiPrm ProofContext", &context.as_bytes());
     transcript.append_message(b"PiPrm Common input", &serialize!(&input)?);
     transcript.append_message(b"PiPrm Commitments", &serialize!(&commitments)?);
     // Extract challenge bytes from the transcript.

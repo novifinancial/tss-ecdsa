@@ -70,7 +70,7 @@ impl AuxInfoDecommit {
         rng.fill_bytes(rid.as_mut_slice());
         rng.fill_bytes(u_i.as_mut_slice());
 
-        public_keys.verify(auxinfo_participant.retrieve_context())?;
+        public_keys.verify(&auxinfo_participant.retrieve_context())?;
         if &auxinfo_participant.id() != public_keys.participant() {
             error!("Created AuxInfoDecommit with different participant IDs in the sender and public_keys fields");
             return Err(InternalError::InternalInvariantFailed);

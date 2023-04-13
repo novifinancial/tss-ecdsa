@@ -50,7 +50,7 @@ impl AuxInfoProof {
         q: &BigNumber,
     ) -> Result<Self> {
         let mut pimod_transcript = Transcript::new(b"PaillierBlumModulusProof");
-        pimod_transcript.append_message(b"PiMod ProofContext", context.as_bytes());
+        pimod_transcript.append_message(b"PiMod ProofContext", &context.as_bytes());
         pimod_transcript.append_message(b"Session Id", &serialize!(&sid)?);
         pimod_transcript.append_message(b"rho", &rho);
         let pimod = PiModProof::prove(
@@ -61,7 +61,7 @@ impl AuxInfoProof {
             rng,
         )?;
         let mut pifac_transcript = Transcript::new(b"PiFacProof");
-        pifac_transcript.append_message(b"PiFac ProofContext", context.as_bytes());
+        pifac_transcript.append_message(b"PiFac ProofContext", &context.as_bytes());
         pifac_transcript.append_message(b"Session Id", &serialize!(&sid)?);
         pifac_transcript.append_message(b"rho", &rho);
         let pifac = PiFacProof::prove(
@@ -85,13 +85,13 @@ impl AuxInfoProof {
         N: &BigNumber,
     ) -> Result<()> {
         let mut pimod_transcript = Transcript::new(b"PaillierBlumModulusProof");
-        pimod_transcript.append_message(b"PiMod ProofContext", context.as_bytes());
+        pimod_transcript.append_message(b"PiMod ProofContext", &context.as_bytes());
         pimod_transcript.append_message(b"Session Id", &serialize!(&sid)?);
         pimod_transcript.append_message(b"rho", &rho);
         self.pimod
             .verify(&PiModInput::new(N), context, &mut pimod_transcript)?;
         let mut pifac_transcript = Transcript::new(b"PiFacProof");
-        pifac_transcript.append_message(b"PiFac ProofContext", context.as_bytes());
+        pifac_transcript.append_message(b"PiFac ProofContext", &context.as_bytes());
         pifac_transcript.append_message(b"Session Id", &serialize!(&sid)?);
         pifac_transcript.append_message(b"rho", &rho);
         self.pifac

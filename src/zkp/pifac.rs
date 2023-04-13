@@ -235,7 +235,7 @@ impl PiFacProof {
         T: &Commitment,
         sigma: &CommitmentRandomness,
     ) {
-        transcript.append_message(b"PiFac ProofContext", context.as_bytes());
+        transcript.append_message(b"PiFac ProofContext", &context.as_bytes());
         transcript.append_message(b"PiFac CommonInput", &serialize!(&input).unwrap());
         transcript.append_message(
             b"(P, Q, A, B, T, sigma)",

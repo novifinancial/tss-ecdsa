@@ -268,7 +268,7 @@ impl PiEncProof {
         ciphertext_mask: &Ciphertext,
         plaintext_mask_commit: &Commitment,
     ) -> Result<()> {
-        transcript.append_message(b"PiEnc Context", context.as_bytes());
+        transcript.append_message(b"PiEnc Context", &context.as_bytes());
         transcript.append_message(b"PiEnc CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, A, C)",
