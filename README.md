@@ -13,6 +13,15 @@ This codebase is generally intended to be network-agnostic. Programs take messag
 ## Project Dependencies
 This project relies on the `libpaillier` Rust crate using the GMP backend. GMP should be available during build-time.  
 
+### Rust Dependencies and Versions
+
+The minimum supported stable Rust version is cargo 1.68.2. 
+
+This library has been tested with GMP version 6.2.1.
+
+You can build GMP from [source](https://gmplib.org/manual/Installing-GMP) or using a [package manager on linux](http://www.mathemagix.org/www/mmdoc/doc/html/external/gmp.en.html) or [OSX](https://formulae.brew.sh/formula/gmp). The GMP website has [additional notes for other systems](https://gmplib.org/manual/Notes-for-Particular-Systems).
+
+
 ##  What's Implemented
 
 ### Key Generation (Figure 5 of CGGMP20)
@@ -21,7 +30,7 @@ KeyGen generates a threshold signing key, shares of which are distributed to eac
 
 ### Auxinfo (CGGMP20 Figure 6, minus the key refreshing)
 
-Auxinfo generates the auxilary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxilary information. This is run after KeyGen and only needs to be run once.
+Auxinfo generates the auxiliary information (Paillier keys and ring-Pedersen parameters) needed in order to compute presignatures. In CGGMP20, this is done in parallel with key refreshing, however this codebase currently only implements the generation of auxiliary information. This is run after KeyGen and only needs to be run once.
 
 ### Three Round Pre-signing (Figure 7 of CGGMP20)
 
@@ -39,6 +48,24 @@ Currently, the codebase only implements n-out-of-n sharing. While t-out-of-n sha
 
 Additionally, no notions of Identifiable Aborts are implemented. If a node crashes, the protocol will halt until that node comes back online. In addition to implementing the necessary cryptographic checks to identify and attribute malicious behavior, some notion of synchronous timeouts is also required.
 
-Furthermore, the Key Refreshing portion of Auxilary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
+Furthermore, the Key Refreshing portion of Auxiliary Info & Key Refresh (CGGMP20 Figure 6) is not yet implemented.
 
 While some thought has been put into handling invalid messages (duplicate messages are ignored, as are some malformed ones), this has not been evaluated fully. Additionally, message authenticity (i.e. that a given message is actually coming from the sender in the "sender" field) is currently assumed to be handled outside of the protocol, by whatever networking code is shuttling messages around.
+
+
+## How to Build and Run
+
+The library requires a recent, stable version of Rust. You can switch to stable releases and update to the latest version using the following:
+
+`rustup default stable` 
+`rustup update`
+
+This library also includes a Makefile with our full set of continuous integration checks, including formatting, linting, building, building docs, and running tests. You can run it locally with:
+
+`cargo make ci`
+
+## Benchmarks
+
+The benchmarks are found in the benches folder. Please refer to the benches/README.md file for information on how to run and obtain the benchmarks.
+
+Please refer to flamegraphs if you want to see the relative costs of some function calls in a given test. Information to run that can be found in stats/README.md.
