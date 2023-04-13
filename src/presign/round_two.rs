@@ -16,7 +16,7 @@ use crate::{
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof},
         pilog::{CommonInput, PiLogProof},
-        Proof,
+        Proof, ProofContext,
     },
     CurvePoint,
 };
@@ -56,6 +56,7 @@ pub(crate) struct Public {
 impl Public {
     fn verify(
         &self,
+        context: &impl ProofContext,
         receiver_auxinfo_public: &AuxInfoPublic,
         sender_auxinfo_public: &AuxInfoPublic,
         sender_keyshare_public: &KeySharePublic,
@@ -76,7 +77,8 @@ impl Public {
             &self.Gamma,
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
-        self.psi.verify(&psi_input, &mut transcript)?;
+
+        self.psi.verify(&psi_input, context, &mut transcript)?;
 
         // Verify the psi_hat proof
         let psi_hat_input = PiAffgInput::new(
@@ -90,7 +92,8 @@ impl Public {
             &sender_keyshare_public.X,
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
-        self.psi_hat.verify(&psi_hat_input, &mut transcript)?;
+        self.psi_hat
+            .verify(&psi_hat_input, context, &mut transcript)?;
 
         // Verify the psi_prime proof
         let psi_prime_input = CommonInput::new(
@@ -101,13 +104,15 @@ impl Public {
             g,
         );
         let mut transcript = Transcript::new(b"PiLogProof");
-        self.psi_prime.verify(&psi_prime_input, &mut transcript)?;
+        self.psi_prime
+            .verify(&psi_prime_input, context, &mut transcript)?;
 
         Ok(())
     }
 
     pub(crate) fn from_message(
         message: &Message,
+        context: &impl ProofContext,
         receiver_auxinfo_public: &AuxInfoPublic,
         sender_auxinfo_public: &AuxInfoPublic,
         sender_keyshare_public: &KeySharePublic,
@@ -120,6 +125,7 @@ impl Public {
         let round_two_public: Self = deserialize!(&message.unverified_bytes)?;
 
         round_two_public.verify(
+            context,
             receiver_auxinfo_public,
             sender_auxinfo_public,
             sender_keyshare_public,

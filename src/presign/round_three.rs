@@ -16,7 +16,7 @@ use crate::{
     },
     zkp::{
         pilog::{CommonInput, PiLogProof},
-        Proof,
+        Proof, ProofContext,
     },
     CurvePoint,
 };
@@ -65,6 +65,7 @@ pub(crate) struct Public {
 impl Public {
     pub(crate) fn verify(
         &self,
+        context: &impl ProofContext,
         receiver_keygen_public: &AuxInfoPublic,
         sender_keygen_public: &AuxInfoPublic,
         sender_r1_public_broadcast: &RoundOnePublicBroadcast,
@@ -78,13 +79,14 @@ impl Public {
             self.Gamma,
         );
         self.psi_double_prime
-            .verify(&psi_double_prime_input, &mut transcript)?;
+            .verify(&psi_double_prime_input, context, &mut transcript)?;
 
         Ok(())
     }
 
     pub(crate) fn from_message(
         message: &Message,
+        context: &impl ProofContext,
         receiver_auxinfo_public: &AuxInfoPublic,
         sender_auxinfo_public: &AuxInfoPublic,
         sender_r1_public_broadcast: &RoundOnePublicBroadcast,
@@ -96,6 +98,7 @@ impl Public {
         let round_three_public: Self = deserialize!(&message.unverified_bytes)?;
 
         round_three_public.verify(
+            context,
             receiver_auxinfo_public,
             sender_auxinfo_public,
             sender_r1_public_broadcast,

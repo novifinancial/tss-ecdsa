@@ -17,7 +17,7 @@ use crate::{
     parameters::{ELL, ELL_PRIME, EPSILON},
     ring_pedersen::{Commitment, MaskedRandomness, VerifiedRingPedersen},
     utils::{self, k256_order, plusminus_bn_random_from_transcript, random_plusminus_by_size},
-    zkp::Proof,
+    zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -124,13 +124,13 @@ impl PiAffgSecret {
 impl Proof for PiAffgProof {
     type CommonInput = PiAffgInput;
     type ProverSecret = PiAffgSecret;
-
     // N0: modulus, K: Paillier ciphertext
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
     #[allow(clippy::many_single_char_names)]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -154,20 +154,7 @@ impl Proof for PiAffgProof {
             .commit(&beta, ELL + EPSILON, rng);
         let (T, mu) = input.setup_params.scheme().commit(&secret.y, ELL, rng);
 
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(
-            b"(S, T, A, B_x, B_y, E, F)",
-            &[
-                S.to_bytes(),
-                T.to_bytes(),
-                A.to_bytes(),
-                serialize!(&B_x)?,
-                B_y.to_bytes(),
-                E.to_bytes(),
-                F.to_bytes(),
-            ]
-            .concat(),
-        );
+        Self::fill_out_transcript(transcript, context, input, &S, &T, &A, &B_x, &B_y, &E, &F);
 
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
@@ -202,24 +189,16 @@ impl Proof for PiAffgProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
-        // First, do Fiat-Shamir consistency check
-
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(
-            b"(S, T, A, B_x, B_y, E, F)",
-            &[
-                self.S.to_bytes(),
-                self.T.to_bytes(),
-                self.A.to_bytes(),
-                serialize!(&self.B_x)?,
-                self.B_y.to_bytes(),
-                self.E.to_bytes(),
-                self.F.to_bytes(),
-            ]
-            .concat(),
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
+        Self::fill_out_transcript(
+            transcript, context, input, &self.S, &self.T, &self.A, &self.B_x, &self.B_y, &self.E,
+            &self.F,
         );
-
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
 
@@ -305,19 +284,52 @@ impl Proof for PiAffgProof {
     }
 }
 
+impl PiAffgProof {
+    #[allow(clippy::too_many_arguments)]
+    fn fill_out_transcript(
+        transcript: &mut Transcript,
+        context: &impl ProofContext,
+        input: &PiAffgInput,
+        S: &Commitment,
+        T: &Commitment,
+        A: &Ciphertext,
+        B_x: &CurvePoint,
+        B_y: &Ciphertext,
+        E: &Commitment,
+        F: &Commitment,
+    ) {
+        // First, do Fiat-Shamir consistency check
+        transcript.append_message(b"PiAffg ProofContext", context.as_bytes());
+        transcript.append_message(b"PiAffg CommonInput", &serialize!(&input).unwrap());
+        transcript.append_message(
+            b"(S, T, A, B_x, B_y, E, F)",
+            &[
+                S.to_bytes(),
+                T.to_bytes(),
+                A.to_bytes(),
+                serialize!(&B_x).unwrap(),
+                B_y.to_bytes(),
+                E.to_bytes(),
+                F.to_bytes(),
+            ]
+            .concat(),
+        );
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         paillier::DecryptionKey,
         utils::{random_plusminus_by_size_with_minimum, testing::init_testing},
+        zkp::BadContext,
     };
 
     fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         x: &BigNumber,
         y: &BigNumber,
-    ) -> Result<()> {
+    ) -> Result<(PiAffgProof, PiAffgInput, Transcript)> {
         let (decryption_key_0, _, _) = DecryptionKey::new(rng)?;
         let pk0 = decryption_key_0.encryption_key();
 
@@ -326,7 +338,7 @@ mod tests {
 
         let g = k256::ProjectivePoint::GENERATOR;
 
-        let X = CurvePoint(g * utils::bn_to_scalar(x).unwrap());
+        let X = CurvePoint(g * utils::bn_to_scalar(x)?);
         let (Y, rho_y) = pk1.encrypt(rng, y)?;
 
         let C = pk0.random_ciphertext(rng);
@@ -338,17 +350,28 @@ mod tests {
             (D, rho)
         };
 
-        let setup_params = VerifiedRingPedersen::gen(rng)?;
+        let setup_params = VerifiedRingPedersen::gen(rng, &())?;
         let mut transcript = Transcript::new(b"random_paillier_affg_proof");
         let input = PiAffgInput::new(&setup_params, &CurvePoint(g), &pk0, &pk1, &C, &D, &Y, &X);
+
         let proof = PiAffgProof::prove(
             &input,
             &PiAffgSecret::new(x, y, &rho, &rho_y),
+            &(),
             &mut transcript,
             rng,
         )?;
-        let mut transcript = Transcript::new(b"random_paillier_affg_proof");
-        proof.verify(&input, &mut transcript)
+        let transcript = Transcript::new(b"random_paillier_affg_proof");
+        Ok((proof, input, transcript))
+    }
+
+    fn random_paillier_affg_verified_proof<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        x: &BigNumber,
+        y: &BigNumber,
+    ) -> Result<()> {
+        let (proof, input, mut transcript) = random_paillier_affg_proof(rng, x, y)?;
+        proof.verify(&input, &(), &mut transcript)
     }
 
     #[test]
@@ -366,13 +389,28 @@ mod tests {
         )?;
 
         // Sampling x in 2^ELL and y in 2^{ELL_PRIME} should always succeed
-        random_paillier_affg_proof(&mut rng, &x_small, &y_small)?;
+        random_paillier_affg_verified_proof(&mut rng, &x_small, &y_small)?;
 
         // All other combinations should fail
-        assert!(random_paillier_affg_proof(&mut rng, &x_small, &y_large).is_err());
-        assert!(random_paillier_affg_proof(&mut rng, &x_large, &y_small).is_err());
-        assert!(random_paillier_affg_proof(&mut rng, &x_large, &y_large).is_err());
+        assert!(random_paillier_affg_verified_proof(&mut rng, &x_small, &y_large).is_err());
+        assert!(random_paillier_affg_verified_proof(&mut rng, &x_large, &y_small).is_err());
+        assert!(random_paillier_affg_verified_proof(&mut rng, &x_large, &y_large).is_err());
 
+        Ok(())
+    }
+
+    #[test]
+    fn piaffg_proof_context_must_be_correct() -> Result<()> {
+        let mut rng = init_testing();
+
+        let x_small = random_plusminus_by_size(&mut rng, ELL);
+        let y_small = random_plusminus_by_size(&mut rng, ELL_PRIME);
+
+        let context = BadContext {};
+        let (proof, input, mut transcript) =
+            random_paillier_affg_proof(&mut rng, &x_small, &y_small).unwrap();
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
         Ok(())
     }
 }

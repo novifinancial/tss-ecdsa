@@ -32,7 +32,7 @@ use crate::{
     parameters::{ELL, EPSILON},
     ring_pedersen::{Commitment, MaskedRandomness, VerifiedRingPedersen},
     utils::{k256_order, plusminus_bn_random_from_transcript, random_plusminus_by_size},
-    zkp::Proof,
+    zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -123,11 +123,11 @@ impl PiEncSecret {
 impl Proof for PiEncProof {
     type CommonInput = PiEncInput;
     type ProverSecret = PiEncSecret;
-
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -152,6 +152,7 @@ impl Proof for PiEncProof {
         // Fill out the transcript with our fresh commitments...
         Self::fill_out_transcript(
             transcript,
+            context,
             input,
             &plaintext_commit,
             &ciphertext_mask,
@@ -183,11 +184,17 @@ impl Proof for PiEncProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
         // Check Fiat-Shamir challenge consistency: update the transcript with
         // commitments...
         Self::fill_out_transcript(
             transcript,
+            context,
             input,
             &self.plaintext_commit,
             &self.ciphertext_mask,
@@ -255,11 +262,13 @@ impl PiEncProof {
     /// proof.
     fn fill_out_transcript(
         transcript: &mut Transcript,
+        context: &impl ProofContext,
         input: &PiEncInput,
         plaintext_commit: &Commitment,
         ciphertext_mask: &Ciphertext,
         plaintext_mask_commit: &Commitment,
     ) -> Result<()> {
+        transcript.append_message(b"PiEnc Context", context.as_bytes());
         transcript.append_message(b"PiEnc CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, A, C)",
@@ -283,6 +292,7 @@ mod tests {
             random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn,
             testing::init_testing,
         },
+        zkp::BadContext,
     };
 
     fn build_random_proof<R: RngCore + CryptoRng>(
@@ -293,23 +303,37 @@ mod tests {
         let encryption_key = decryption_key.encryption_key();
 
         let (ciphertext, nonce) = encryption_key.encrypt(rng, &plaintext)?;
-        let setup_params = VerifiedRingPedersen::gen(rng)?;
+        let setup_params = VerifiedRingPedersen::gen(rng, &())?;
 
         let input = PiEncInput {
             setup_params,
             encryption_key,
             ciphertext,
         };
-
         let mut transcript = Transcript::new(b"PiEncProof");
         let proof = PiEncProof::prove(
             &input,
             &PiEncSecret { plaintext, nonce },
+            &(),
             &mut transcript,
             rng,
         )?;
 
         Ok((proof, input))
+    }
+
+    #[test]
+    fn pienc_proof_context_must_be_correct() -> Result<()> {
+        let mut rng = init_testing();
+
+        let plaintext = random_plusminus_by_size(&mut rng, ELL);
+
+        let context = BadContext {};
+        let (proof, input) = build_random_proof(&mut rng, plaintext).unwrap();
+        let mut transcript = Transcript::new(b"PiEncProof");
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
+        Ok(())
     }
 
     #[test]
@@ -325,9 +349,9 @@ mod tests {
 
         assert_eq!(proof_bytes, roundtrip_proof_bytes);
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(roundtrip_proof.verify(&input, &mut transcript).is_ok());
+        assert!(roundtrip_proof.verify(&input, &(), &mut transcript).is_ok());
 
         Ok(())
     }
@@ -340,7 +364,8 @@ mod tests {
         let in_range = random_plusminus_by_size(&mut rng, ELL);
         let (proof, input) = build_random_proof(&mut rng, in_range)?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         // A plaintext in range for encryption but larger (absolute value) than 2^ELL
         // should fail
@@ -348,13 +373,13 @@ mod tests {
             random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
         let (proof, input) = build_random_proof(&mut rng, too_large.clone())?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         // Ditto with the opposite sign for the too-large plaintext
         let too_small = -too_large;
         let (proof, input) = build_random_proof(&mut rng, too_small)?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         // PiEnc expects an input in the range ±2^ELL. The proof can guarantee this
         // range up to the slackness parameter -- that is, that the input is in
@@ -365,19 +390,19 @@ mod tests {
         let lower_bound = BigNumber::one() << ELL;
         let (proof, input) = build_random_proof(&mut rng, lower_bound.clone())?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
         let (proof, input) = build_random_proof(&mut rng, -lower_bound)?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         // The higher edge case fails (2^ELL+EPSILON)
         let upper_bound = BigNumber::one() << (ELL + EPSILON);
         let (proof, input) = build_random_proof(&mut rng, upper_bound.clone())?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
         let (proof, input) = build_random_proof(&mut rng, -upper_bound)?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         Ok(())
     }
@@ -402,7 +427,7 @@ mod tests {
             bad_proof.plaintext_commit = scheme.commit(&plaintext, ELL, rng).0;
             assert_ne!(&bad_proof.plaintext_commit, &proof.plaintext_commit);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad ciphertext mask (encryption of wrong value with wrong nonce)
@@ -411,7 +436,7 @@ mod tests {
             bad_proof.ciphertext_mask = input.encryption_key.encrypt(rng, &random_mask).unwrap().0;
             assert_ne!(bad_proof.ciphertext_mask, proof.ciphertext_mask);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad plaintext mask commitment (commitment to wrong value with wrong
@@ -421,7 +446,7 @@ mod tests {
             bad_proof.plaintext_mask_commit = bad_plaintext_mask;
             assert_ne!(bad_proof.plaintext_mask_commit, proof.plaintext_mask_commit);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad challenge fails
@@ -430,7 +455,7 @@ mod tests {
             bad_proof.challenge = random_plusminus(rng, &k256_order());
             assert_ne!(bad_proof.challenge, proof.challenge);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad plaintext response fails (this can be an arbitrary integer, using
@@ -440,7 +465,7 @@ mod tests {
             bad_proof.plaintext_response = random_positive_bn(rng, scheme.modulus());
             assert_ne!(bad_proof.plaintext_response, proof.plaintext_response);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad nonce response fails
@@ -449,7 +474,7 @@ mod tests {
             bad_proof.nonce_response = MaskedNonce::random(rng, input.encryption_key.modulus());
             assert_ne!(bad_proof.nonce_response, proof.nonce_response);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // Bad randomness response fails (ditto on arbitrary integer)
@@ -458,12 +483,12 @@ mod tests {
             bad_proof.randomness_response = bad_randomness.as_masked().to_owned();
             assert_ne!(bad_proof.randomness_response, proof.randomness_response);
             let mut transcript = Transcript::new(b"PiEncProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
 
         // The original proof itself verifies correctly, though!
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
     }
 
     #[test]
@@ -477,7 +502,7 @@ mod tests {
         // Form secret input
         let plaintext = random_plusminus_by_size(rng, ELL);
         let (ciphertext, nonce) = encryption_key.encrypt(rng, &plaintext)?;
-        let setup_params = VerifiedRingPedersen::extract(&decryption_key, rng)?;
+        let setup_params = VerifiedRingPedersen::extract(&decryption_key, &(), rng)?;
 
         let input = PiEncInput {
             setup_params,
@@ -493,11 +518,12 @@ mod tests {
                 plaintext: plaintext.clone(),
                 nonce: nonce.clone(),
             },
+            &(),
             &mut transcript,
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         // Forming with the wrong plaintext fails
         let wrong_plaintext = random_plusminus_by_size(rng, ELL);
@@ -509,11 +535,12 @@ mod tests {
                 plaintext: wrong_plaintext,
                 nonce: nonce.clone(),
             },
+            &(),
             &mut transcript,
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         // Forming with the wrong nonce fails
         let (_, wrong_nonce) = encryption_key.encrypt(rng, &plaintext)?;
@@ -525,11 +552,12 @@ mod tests {
                 plaintext,
                 nonce: wrong_nonce,
             },
+            &(),
             &mut transcript,
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         Ok(())
     }
@@ -545,15 +573,15 @@ mod tests {
 
         // Verification works on the original input
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         // Verification fails with the wrong setup params
         let (bad_decryption_key, _, _) = DecryptionKey::new(&mut rng)?;
-        let bad_setup_params = VerifiedRingPedersen::extract(&bad_decryption_key, &mut rng)?;
+        let bad_setup_params = VerifiedRingPedersen::extract(&bad_decryption_key, &(), &mut rng)?;
         let setup_params = input.setup_params;
         input.setup_params = bad_setup_params;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
         input.setup_params = setup_params;
 
         // Verification fails with the wrong encryption key
@@ -561,7 +589,7 @@ mod tests {
         let encryption_key = input.encryption_key;
         input.encryption_key = bad_encryption_key;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
         input.encryption_key = encryption_key;
 
         // Verification fails with the wrong ciphertext
@@ -569,12 +597,12 @@ mod tests {
         let ciphertext = input.ciphertext;
         input.ciphertext = bad_ciphertext;
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
         input.ciphertext = ciphertext;
 
         // Proof still works (as in, it wasn't just failing due to bad transcripts)
         let mut transcript = Transcript::new(b"PiEncProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         Ok(())
     }

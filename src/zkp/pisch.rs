@@ -12,7 +12,7 @@ use crate::{
     errors::*,
     messages::{KeygenMessageType, Message, MessageType},
     utils::{self, positive_bn_random_from_transcript},
-    zkp::Proof,
+    zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -80,11 +80,11 @@ impl PiSchSecret {
 impl Proof for PiSchProof {
     type CommonInput = PiSchInput;
     type ProverSecret = PiSchSecret;
-
     #[cfg_attr(feature = "flame_it", flame("PiSchProof"))]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -92,8 +92,7 @@ impl Proof for PiSchProof {
         let alpha = crate::utils::random_positive_bn(rng, &input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
 
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"A", &serialize!(&A)?);
+        Self::fill_transcript(transcript, context, input, &A);
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(transcript, &input.q);
@@ -105,11 +104,14 @@ impl Proof for PiSchProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
-
-        transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        transcript.append_message(b"A", &serialize!(&self.A)?);
+        Self::fill_transcript(transcript, context, input, &self.A);
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(transcript, &input.q);
@@ -153,8 +155,8 @@ impl PiSchProof {
     ) -> Result<Self> {
         let A = com.A;
         let mut local_transcript = transcript.clone();
-        local_transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        local_transcript.append_message(b"A", &serialize!(&A)?);
+
+        Self::fill_transcript(&mut local_transcript, &(), input, &A);
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
@@ -170,8 +172,8 @@ impl PiSchProof {
         transcript: &Transcript,
     ) -> Result<()> {
         let mut local_transcript = transcript.clone();
-        local_transcript.append_message(b"CommonInput", &serialize!(&input)?);
-        local_transcript.append_message(b"A", &serialize!(&self.A)?);
+
+        Self::fill_transcript(&mut local_transcript, &(), input, &self.A);
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
@@ -201,12 +203,22 @@ impl PiSchProof {
         let keygen_decommit: PiSchProof = deserialize!(&message.unverified_bytes)?;
         Ok(keygen_decommit)
     }
+    fn fill_transcript(
+        transcript: &mut Transcript,
+        context: &impl ProofContext,
+        input: &PiSchInput,
+        A: &CurvePoint,
+    ) {
+        transcript.append_message(b"PiSch ProofContext", context.as_bytes());
+        transcript.append_message(b"PiSch CommonInput", &serialize!(&input).unwrap());
+        transcript.append_message(b"A", &serialize!(A).unwrap());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::testing::init_testing;
+    use crate::{utils::testing::init_testing, zkp::BadContext};
 
     fn random_schnorr_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
@@ -223,7 +235,8 @@ mod tests {
 
         let input = PiSchInput::new(&g, &q, &X);
         let mut transcript = Transcript::new(b"PiSchProof Test");
-        let proof = PiSchProof::prove(&input, &PiSchSecret::new(&x), &mut transcript, rng)?;
+
+        let proof = PiSchProof::prove(&input, &PiSchSecret::new(&x), &(), &mut transcript, rng)?;
 
         Ok((input, proof))
     }
@@ -234,15 +247,25 @@ mod tests {
 
         let (input, proof) = random_schnorr_proof(&mut rng, false)?;
         let mut transcript = Transcript::new(b"PiSchProof Test");
-        proof.verify(&input, &mut transcript)?;
+        proof.verify(&input, &(), &mut transcript)?;
 
         let (input, proof) = random_schnorr_proof(&mut rng, true)?;
         let mut transcript = Transcript::new(b"PiSchProof Test");
-        assert!(proof.verify(&input, &mut transcript).is_err());
+        assert!(proof.verify(&input, &(), &mut transcript).is_err());
 
         Ok(())
     }
+    #[test]
+    fn pisch_proof_context_must_be_correct() -> Result<()> {
+        let context = BadContext {};
+        let mut rng = init_testing();
 
+        let (input, proof) = random_schnorr_proof(&mut rng, false)?;
+        let mut transcript = Transcript::new(b"PiSchProof Test");
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
+        Ok(())
+    }
     #[test]
     fn test_precommit_proof() -> Result<()> {
         let mut rng = init_testing();

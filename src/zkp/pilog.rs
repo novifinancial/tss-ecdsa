@@ -25,7 +25,7 @@ use crate::{
     utils::{
         self, plusminus_bn_random_from_transcript, random_plusminus_by_size, within_bound_by_size,
     },
-    zkp::Proof,
+    zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -137,13 +137,15 @@ impl ProverSecret {
 /// proof.
 fn generate_challenge(
     transcript: &mut Transcript,
+    context: &dyn ProofContext,
     common_input: &CommonInput,
     plaintext_commit: &Commitment,
     mask_encryption: &Ciphertext,
     mask_dlog_commit: &CurvePoint,
     mask_commit: &Commitment,
 ) -> Result<BigNumber> {
-    transcript.append_message(b"Common input", &serialize!(&common_input)?);
+    transcript.append_message(b"PiLog ProofContext", context.as_bytes());
+    transcript.append_message(b"PiLog Common input", &serialize!(&common_input)?);
     transcript.append_message(
         b"(plaintext commit, mask encryption, mask dlog commit, mask commit)",
         &[
@@ -163,11 +165,11 @@ fn generate_challenge(
 impl Proof for PiLogProof {
     type CommonInput = CommonInput;
     type ProverSecret = ProverSecret;
-
     #[cfg_attr(feature = "flame_it", flame("PiLogProof"))]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -228,6 +230,7 @@ impl Proof for PiLogProof {
         // Generate verifier's challenge via Fiat-Shamir (`e` in the paper).
         let challenge = generate_challenge(
             transcript,
+            context,
             input,
             &plaintext_commit,
             &mask_ciphertext,
@@ -258,13 +261,19 @@ impl Proof for PiLogProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiLogProof"))]
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
         // See the comment in `prove` for a high-level description of how the protocol
         // works.
 
         // Generate verifier's challenge via Fiat-Shamir...
         let challenge = generate_challenge(
             transcript,
+            context,
             input,
             &self.plaintext_commit,
             &self.mask_ciphertext,
@@ -342,29 +351,55 @@ mod tests {
         paillier::DecryptionKey,
         ring_pedersen::VerifiedRingPedersen,
         utils::{random_plusminus_by_size_with_minimum, testing::init_testing},
+        zkp::BadContext,
     };
 
-    fn random_paillier_log_proof<R: RngCore + CryptoRng>(rng: &mut R, x: &BigNumber) -> Result<()> {
+    fn random_paillier_log_proof<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        x: &BigNumber,
+    ) -> Result<(PiLogProof, CommonInput, Transcript)> {
         let (decryption_key, _, _) = DecryptionKey::new(rng)?;
         let pk = decryption_key.encryption_key();
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
-        let X = CurvePoint(g.0 * utils::bn_to_scalar(x).unwrap());
+        let X = CurvePoint(g.0 * utils::bn_to_scalar(x)?);
         let (C, rho) = pk.encrypt(rng, x)?;
 
-        let setup_params = VerifiedRingPedersen::gen(rng)?;
+        let setup_params = VerifiedRingPedersen::gen(rng, &())?;
 
         let input = CommonInput::new(C, X, setup_params.scheme().clone(), pk, g);
         let mut transcript = Transcript::new(b"PiLogProof Test");
+
         let proof = PiLogProof::prove(
             &input,
             &ProverSecret::new(x.clone(), rho),
+            &(),
             &mut transcript,
             rng,
         )?;
-        let mut transcript = Transcript::new(b"PiLogProof Test");
-        proof.verify(&input, &mut transcript)
+        let transcript = Transcript::new(b"PiLogProof Test");
+        Ok((proof, input, transcript))
+    }
+
+    fn random_paillier_log_proof_verification<R: RngCore + CryptoRng>(
+        rng: &mut R,
+        x: &BigNumber,
+    ) -> Result<()> {
+        let (proof, input, mut transcript) = random_paillier_log_proof(rng, x).unwrap();
+        proof.verify(&input, &(), &mut transcript)
+    }
+
+    #[test]
+    fn pifac_proof_context_must_be_correct() -> Result<()> {
+        let mut rng = init_testing();
+
+        let context = BadContext {};
+        let x_small = random_plusminus_by_size(&mut rng, ELL);
+        let (proof, input, mut transcript) = random_paillier_log_proof(&mut rng, &x_small).unwrap();
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
+        Ok(())
     }
 
     #[test]
@@ -376,11 +411,11 @@ mod tests {
             random_plusminus_by_size_with_minimum(&mut rng, ELL + EPSILON + 1, ELL + EPSILON)?;
 
         // Sampling x in the range 2^ELL should always succeed
-        random_paillier_log_proof(&mut rng, &x_small)?;
+        assert!(random_paillier_log_proof_verification(&mut rng, &x_small).is_ok());
 
         // Sampling x in the range (2^{ELL + EPSILON}, 2^{ELL + EPSILON + 1}] should
         // fail
-        assert!(random_paillier_log_proof(&mut rng, &x_large).is_err());
+        assert!(random_paillier_log_proof_verification(&mut rng, &x_large).is_err());
 
         Ok(())
     }

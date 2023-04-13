@@ -26,6 +26,30 @@ use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
 use serde::{de::DeserializeOwned, Serialize};
 
+/// A trait for constructing arbitrary system context.
+///
+/// This context can be turned into bytes and appended to a [`Transcript`].
+pub(crate) trait ProofContext {
+    fn as_bytes(&self) -> &[u8];
+}
+
+/// This is a temporary preliminary implementation that will be modified by
+/// issue #240.
+impl ProofContext for () {
+    fn as_bytes(&self) -> &[u8] {
+        &[]
+    }
+}
+
+#[cfg(test)]
+struct BadContext {}
+#[cfg(test)]
+impl ProofContext for BadContext {
+    fn as_bytes(&self) -> &[u8] {
+        &[8u8]
+    }
+}
+
 /// A trait for constructing zero knowledge proofs.
 ///
 /// The associated type [`Proof::CommonInput`] denotes the data known the both
@@ -39,10 +63,16 @@ pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self>;
     /// Verifies a zero knowledge proof using the provided
     /// [`Proof::CommonInput`] and [`Transcript`].
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()>;
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()>;
 }

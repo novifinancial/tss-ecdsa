@@ -12,7 +12,7 @@ use crate::{
     messages::{Message, MessageType, PresignMessageType},
     paillier::{Ciphertext, EncryptionKey, Nonce},
     ring_pedersen::VerifiedRingPedersen,
-    zkp::{pienc::PiEncProof, Proof},
+    zkp::{pienc::PiEncProof, Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -62,17 +62,19 @@ impl Public {
     /// the modulus N should be the sending party's modulus N
     fn verify(
         &self,
+        context: &impl ProofContext,
         receiver_setup_params: &VerifiedRingPedersen,
         sender_pk: EncryptionKey,
         K: Ciphertext,
     ) -> Result<()> {
         let mut transcript = Transcript::new(b"PiEncProof");
         let input = crate::zkp::pienc::PiEncInput::new(receiver_setup_params.clone(), sender_pk, K);
-        self.proof.verify(&input, &mut transcript)
+        self.proof.verify(&input, context, &mut transcript)
     }
 
     pub(crate) fn from_message(
         message: &Message,
+        context: &impl ProofContext,
         receiver_keygen_public: &AuxInfoPublic,
         sender_keygen_public: &AuxInfoPublic,
         broadcasted_params: &PublicBroadcast,
@@ -83,6 +85,7 @@ impl Public {
         let round_one_public: Self = deserialize!(&message.unverified_bytes)?;
 
         round_one_public.verify(
+            context,
             receiver_keygen_public.params(),
             sender_keygen_public.pk().clone(),
             broadcasted_params.K.clone(),

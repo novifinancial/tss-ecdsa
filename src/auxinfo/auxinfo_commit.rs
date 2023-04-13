@@ -7,9 +7,10 @@
 // of this source tree.
 
 use crate::{
-    auxinfo::info::AuxInfoPublic,
+    auxinfo::{info::AuxInfoPublic, participant::AuxInfoParticipant},
     errors::{InternalError, Result},
     messages::{AuxinfoMessageType, Message, MessageType},
+    participant::InnerProtocolParticipant,
     protocol::{Identifier, ParticipantIdentifier},
 };
 use merlin::Transcript;
@@ -59,9 +60,9 @@ impl Debug for AuxInfoDecommit {
 impl AuxInfoDecommit {
     ///`sid` corresponds to a unique session identifier.
     pub(crate) fn new<R: RngCore + CryptoRng>(
+        auxinfo_participant: &AuxInfoParticipant,
         rng: &mut R,
         sid: &Identifier,
-        sender: &ParticipantIdentifier,
         public_keys: AuxInfoPublic,
     ) -> Result<Self> {
         let mut rid = [0u8; 32];
@@ -69,29 +70,32 @@ impl AuxInfoDecommit {
         rng.fill_bytes(rid.as_mut_slice());
         rng.fill_bytes(u_i.as_mut_slice());
 
-        public_keys.verify()?;
-        if sender != public_keys.participant() {
+        public_keys.verify(auxinfo_participant.retrieve_context())?;
+        if &auxinfo_participant.id() != public_keys.participant() {
             error!("Created AuxInfoDecommit with different participant IDs in the sender and public_keys fields");
             return Err(InternalError::InternalInvariantFailed);
         }
 
         Ok(Self {
             sid: *sid,
-            sender: *sender,
+            sender: auxinfo_participant.id(),
             rid,
             u_i,
             public_keys,
         })
     }
 
-    pub(crate) fn from_message(message: &Message) -> Result<Self> {
+    pub(crate) fn from_message(
+        message: &Message,
+        context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
+    ) -> Result<Self> {
         if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R2Decommit) {
             return Err(InternalError::MisroutedMessage);
         }
         let auxinfo_decommit: AuxInfoDecommit = deserialize!(&message.unverified_bytes)?;
 
         // Public parameters in this decommit must be consistent with each other
-        auxinfo_decommit.public_keys.verify()?;
+        auxinfo_decommit.public_keys.verify(context)?;
 
         // Owner must be consistent across message, public keys, and decommit
         if *auxinfo_decommit.public_keys.participant() != auxinfo_decommit.sender {

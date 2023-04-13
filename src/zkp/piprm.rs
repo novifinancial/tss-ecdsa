@@ -22,7 +22,12 @@
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
 
-use crate::{errors::*, ring_pedersen::RingPedersen, utils::*, zkp::Proof};
+use crate::{
+    errors::*,
+    ring_pedersen::RingPedersen,
+    utils::*,
+    zkp::{Proof, ProofContext},
+};
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
@@ -81,10 +86,12 @@ impl PiPrmSecret {
 fn generate_challenge_bytes(
     input: &RingPedersen,
     commitments: &[BigNumber],
+    context: &impl ProofContext,
     transcript: &mut Transcript,
 ) -> Result<Vec<u8>> {
-    transcript.append_message(b"Common input", &serialize!(&input)?);
-    transcript.append_message(b"Commitments", &serialize!(&commitments)?);
+    transcript.append_message(b"PiPrm ProofContext", context.as_bytes());
+    transcript.append_message(b"PiPrm Common input", &serialize!(&input)?);
+    transcript.append_message(b"PiPrm Commitments", &serialize!(&commitments)?);
     // Extract challenge bytes from the transcript.
     let mut challenges = [0u8; SOUNDNESS];
     transcript.challenge_bytes(b"Challenges", challenges.as_mut_slice());
@@ -94,11 +101,11 @@ fn generate_challenge_bytes(
 impl Proof for PiPrmProof {
     type CommonInput = RingPedersen;
     type ProverSecret = PiPrmSecret;
-
     #[cfg_attr(feature = "flame_it", flame("PiPrmProof"))]
     fn prove<R: RngCore + CryptoRng>(
         input: &Self::CommonInput,
         secret: &Self::ProverSecret,
+        context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
@@ -112,7 +119,7 @@ impl Proof for PiPrmProof {
             .iter()
             .map(|a| modpow(input.t(), a, input.modulus()))
             .collect::<Vec<_>>();
-        let challenge_bytes = generate_challenge_bytes(input, &commitments, transcript)?;
+        let challenge_bytes = generate_challenge_bytes(input, &commitments, context, transcript)?;
         // Compute challenge responses `z_i = a_i + e_i λ mod ɸ(N)`.
         let responses = challenge_bytes
             .iter()
@@ -134,7 +141,12 @@ impl Proof for PiPrmProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiPrmProof"))]
-    fn verify(&self, input: &Self::CommonInput, transcript: &mut Transcript) -> Result<()> {
+    fn verify(
+        &self,
+        input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()> {
         // Check that all the lengths equal the soundness parameter.
         if self.commitments.len() != SOUNDNESS
             || self.challenge_bytes.len() != SOUNDNESS
@@ -143,7 +155,7 @@ impl Proof for PiPrmProof {
             warn!("length of values provided does not match soundness parameter");
             return Err(InternalError::FailedToVerifyProof);
         }
-        let challenges = generate_challenge_bytes(input, &self.commitments, transcript)?;
+        let challenges = generate_challenge_bytes(input, &self.commitments, context, transcript)?;
         // Check Fiat-Shamir consistency.
         if challenges != self.challenge_bytes.as_slice() {
             warn!("Fiat-Shamir does not verify");
@@ -178,7 +190,7 @@ impl Proof for PiPrmProof {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{paillier::DecryptionKey, utils::testing::init_testing};
+    use crate::{paillier::DecryptionKey, utils::testing::init_testing, zkp::BadContext};
     use rand::Rng;
 
     fn random_ring_pedersen_proof<R: RngCore + CryptoRng>(
@@ -188,7 +200,8 @@ mod tests {
         let (scheme, lambda, totient) = RingPedersen::extract(&sk, rng)?;
         let secrets = PiPrmSecret::new(lambda.clone(), totient.clone());
         let mut transcript = Transcript::new(b"PiPrmProof");
-        let proof = PiPrmProof::prove(&scheme, &secrets, &mut transcript, rng)?;
+
+        let proof = PiPrmProof::prove(&scheme, &secrets, &(), &mut transcript, rng)?;
         Ok((scheme, proof, lambda, totient))
     }
 
@@ -197,9 +210,21 @@ mod tests {
         let mut rng = init_testing();
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let mut transcript = Transcript::new(b"PiPrmProof");
-        proof.verify(&input, &mut transcript)
+
+        proof.verify(&input, &(), &mut transcript)
     }
 
+    #[test]
+    fn piprm_proof_context_must_be_correct() -> Result<()> {
+        let context = BadContext {};
+        let mut rng = init_testing();
+        let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
+        let mut transcript = Transcript::new(b"PiPrmProof");
+
+        let result = proof.verify(&input, &context, &mut transcript);
+        assert!(result.is_err());
+        Ok(())
+    }
     #[test]
     fn piprm_proof_serializes() -> Result<()> {
         let mut rng = init_testing();
@@ -208,7 +233,8 @@ mod tests {
         let deserialized: PiPrmProof = bincode::deserialize(&serialized).unwrap();
         assert_eq!(serialized, bincode::serialize(&deserialized).unwrap());
         let mut transcript = Transcript::new(b"PiPrmProof");
-        deserialized.verify(&input, &mut transcript)
+
+        deserialized.verify(&input, &(), &mut transcript)
     }
 
     #[test]
@@ -217,7 +243,8 @@ mod tests {
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         // Validate that the proof is okay.
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
         // Test that too short vectors fail.
         {
             let mut bad_proof = proof.clone();
@@ -227,7 +254,7 @@ mod tests {
                 .take(SOUNDNESS - 1)
                 .collect();
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         {
             let mut bad_proof = proof.clone();
@@ -237,7 +264,7 @@ mod tests {
                 .take(SOUNDNESS - 1)
                 .collect();
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         {
             let mut bad_proof = proof.clone();
@@ -247,7 +274,7 @@ mod tests {
                 .take(SOUNDNESS - 1)
                 .collect();
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         // Test that too long vectors fail.
         {
@@ -256,13 +283,13 @@ mod tests {
                 .commitments
                 .push(random_positive_bn(&mut rng, input.modulus()));
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         {
             let mut bad_proof = proof.clone();
             bad_proof.challenge_bytes.push(rng.gen::<u8>());
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         {
             let mut bad_proof = proof;
@@ -270,7 +297,7 @@ mod tests {
                 .responses
                 .push(random_positive_bn(&mut rng, input.modulus()));
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         Ok(())
     }
@@ -282,12 +309,13 @@ mod tests {
         let bad_lambda = random_positive_bn(&mut rng, &totient);
         let secrets = PiPrmSecret::new(bad_lambda, totient);
         let mut transcript = Transcript::new(b"PiPrmProof");
-        let bad_proof = PiPrmProof::prove(&input, &secrets, &mut transcript, &mut rng)?;
+
+        let bad_proof = PiPrmProof::prove(&input, &secrets, &(), &mut transcript, &mut rng)?;
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(bad_proof.verify(&input, &mut transcript).is_err());
+        assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         // Validate that the original proof is okay.
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         Ok(())
     }
@@ -299,10 +327,11 @@ mod tests {
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let (bad_input, _, _, _) = random_ring_pedersen_proof(&mut rng)?;
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&bad_input, &mut transcript).is_err());
+
+        assert!(proof.verify(&bad_input, &(), &mut transcript).is_err());
         // Validate that the original proof is okay.
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
         Ok(())
     }
 
@@ -311,11 +340,12 @@ mod tests {
         let mut rng = init_testing();
 
         let (input, proof, _, _) = random_ring_pedersen_proof(&mut rng)?;
+
         for i in 0..SOUNDNESS {
             let mut bad_proof = proof.clone();
             bad_proof.commitments[i] = random_positive_bn(&mut rng, input.modulus());
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         for i in 0..SOUNDNESS {
             let mut bad_proof = proof.clone();
@@ -324,17 +354,17 @@ mod tests {
                 bad_proof.challenge_bytes[i] = rng.gen::<u8>();
             }
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         for i in 0..SOUNDNESS {
             let mut bad_proof = proof.clone();
             bad_proof.responses[i] = random_positive_bn(&mut rng, input.modulus());
             let mut transcript = Transcript::new(b"PiPrmProof");
-            assert!(bad_proof.verify(&input, &mut transcript).is_err());
+            assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
         }
         // Validate that the original proof is okay.
         let mut transcript = Transcript::new(b"PiPrmProof");
-        assert!(proof.verify(&input, &mut transcript).is_ok());
+        assert!(proof.verify(&input, &(), &mut transcript).is_ok());
 
         Ok(())
     }

@@ -227,7 +227,7 @@ impl AuxInfoParticipant {
     ) -> Result<Vec<Message>> {
         info!("Generating round one auxinfo messages.");
 
-        let (auxinfo_private, auxinfo_public, auxinfo_witnesses) = new_auxinfo(self.id(), rng)?;
+        let (auxinfo_private, auxinfo_public, auxinfo_witnesses) = self.new_auxinfo(rng)?;
         self.local_storage
             .store::<storage::Private>(self.id, auxinfo_private);
         self.local_storage
@@ -235,7 +235,7 @@ impl AuxInfoParticipant {
         self.local_storage
             .store::<storage::Witnesses>(self.id, auxinfo_witnesses);
 
-        let decom = AuxInfoDecommit::new(rng, &message.id(), &self.id, auxinfo_public)?;
+        let decom = AuxInfoDecommit::new(self, rng, &message.id(), auxinfo_public)?;
         let com = decom.commit()?;
 
         self.local_storage
@@ -350,7 +350,7 @@ impl AuxInfoParticipant {
             self.stash_message(message)?;
             return Ok(ProcessOutcome::Incomplete);
         }
-        let decom = AuxInfoDecommit::from_message(message)?;
+        let decom = AuxInfoDecommit::from_message(message, self.retrieve_context())?;
         let com = self
             .local_storage
             .retrieve::<storage::Commit>(message.from())?;
@@ -419,6 +419,7 @@ impl AuxInfoParticipant {
 
         let proof = AuxInfoProof::prove(
             rng,
+            self.retrieve_context(),
             message.id(),
             global_rid,
             my_public.params(),
@@ -475,6 +476,7 @@ impl AuxInfoParticipant {
 
         let proof = AuxInfoProof::from_message(message)?;
         proof.verify(
+            self.retrieve_context(),
             message.id(),
             *global_rid,
             auxinfo_pub.params(),
@@ -511,25 +513,24 @@ impl AuxInfoParticipant {
             Ok(ProcessOutcome::Incomplete)
         }
     }
-}
+    #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
+    #[instrument(skip_all, err(Debug))]
+    fn new_auxinfo<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+    ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
+        debug!("Creating new auxinfo.");
 
-#[cfg_attr(feature = "flame_it", flame("auxinfo"))]
-#[instrument(skip_all, err(Debug))]
-fn new_auxinfo<R: RngCore + CryptoRng>(
-    participant: ParticipantIdentifier,
-    rng: &mut R,
-) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
-    debug!("Creating new auxinfo.");
+        let (decryption_key, p, q) = DecryptionKey::new(rng)?;
+        let params = VerifiedRingPedersen::extract(&decryption_key, &(), rng)?;
+        let encryption_key = decryption_key.encryption_key();
 
-    let (decryption_key, p, q) = DecryptionKey::new(rng)?;
-    let params = VerifiedRingPedersen::extract(&decryption_key, rng)?;
-    let encryption_key = decryption_key.encryption_key();
-
-    Ok((
-        decryption_key.into(),
-        AuxInfoPublic::new(participant, encryption_key, params)?,
-        AuxInfoWitnesses { p, q },
-    ))
+        Ok((
+            decryption_key.into(),
+            AuxInfoPublic::new(self.retrieve_context(), self.id(), encryption_key, params)?,
+            AuxInfoWitnesses { p, q },
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -703,7 +704,7 @@ mod tests {
                     .find(|public_key| *public_key.participant() == pid);
                 assert!(public_key.is_some());
                 // Check that it's valid while we're here.
-                assert!(public_key.unwrap().verify().is_ok());
+                assert!(public_key.unwrap().verify(&()).is_ok());
                 publics_for_pid.push(public_key.unwrap());
             }
 

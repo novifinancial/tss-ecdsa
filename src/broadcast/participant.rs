@@ -147,10 +147,6 @@ impl ProtocolParticipant for BroadcastParticipant {
 impl InnerProtocolParticipant for BroadcastParticipant {
     type Context = ();
 
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
-    }
-
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
     }
@@ -165,6 +161,9 @@ impl InnerProtocolParticipant for BroadcastParticipant {
 
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
+    }
+    fn retrieve_context(&self) -> &Self::Context {
+        &()
     }
 }
 
