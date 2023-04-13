@@ -19,6 +19,8 @@ The minimum supported stable Rust version is cargo 1.68.2.
 
 This library has been tested with GMP version 6.2.1.
 
+You can build GMP from [source](https://gmplib.org/manual/Installing-GMP) or using a [package manager on linux](http://www.mathemagix.org/www/mmdoc/doc/html/external/gmp.en.html) or [OSX](https://formulae.brew.sh/formula/gmp). The GMP website has [additional notes for other systems](https://gmplib.org/manual/Notes-for-Particular-Systems).
+
 
 ##  What's Implemented
 
