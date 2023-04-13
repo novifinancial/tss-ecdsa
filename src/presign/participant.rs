@@ -129,7 +129,7 @@ pub struct PresignParticipant {
 }
 
 /// Input needed for [`PresignParticipant`] to run.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Input {
     /// The private keyshare of this participant.
     keyshare_private: KeySharePrivate,

@@ -51,9 +51,11 @@ fn process_messages<R: RngCore + CryptoRng, P: ProtocolParticipant>(
 }
 
 fn run_subprotocol<P: ProtocolParticipant>(
-    quorum: &mut [Participant<P>],
-    inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
+    sid: Identifier,
+    inputs: Vec<P::Input>,
 ) -> Result<Vec<P::Output>> {
+    let (mut quorum, mut inboxes) = init_new_player_set::<P>(sid, inputs);
+
     let mut rng = rand::thread_rng();
     for participant in quorum.iter() {
         let inbox = inboxes.get_mut(&participant.id()).unwrap();
@@ -62,7 +64,7 @@ fn run_subprotocol<P: ProtocolParticipant>(
 
     let mut outputs = Vec::with_capacity(quorum.len());
     while outputs.len() < quorum.len() {
-        if let Some(output) = process_messages(quorum, inboxes, &mut rng)? {
+        if let Some(output) = process_messages(&mut quorum, &mut inboxes, &mut rng)? {
             outputs.push(output)
         }
     }
@@ -70,7 +72,6 @@ fn run_subprotocol<P: ProtocolParticipant>(
 }
 
 fn init_new_player_set<P: ProtocolParticipant>(
-    num_players: usize,
     sid: Identifier,
     inputs: Vec<P::Input>,
 ) -> (
@@ -78,6 +79,7 @@ fn init_new_player_set<P: ProtocolParticipant>(
     HashMap<ParticipantIdentifier, Vec<Message>>,
 ) {
     let mut rng = rand::thread_rng();
+    let num_players = inputs.len();
 
     // Get the sets of mine/other ids for each party
     let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(&mut rng))
@@ -110,40 +112,32 @@ fn init_new_player_set<P: ProtocolParticipant>(
 fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
     let mut rng = OsRng;
 
-    // Note: Inboxes are specifically created out here so we don't benchmark the
-    // allocation time to make them.
+    // Note: Inboxes and participants are created in the `run_subprotocol` method,
+    // so we're sadly benchmarking the time it takes to do that generation.
 
     // Benchmark keygen
-    let keygen_identifier = Identifier::random(&mut rng);
-    let keygen_inputs = std::iter::repeat(()).take(num_players).collect();
-    let (mut players, mut inboxes) =
-        init_new_player_set(num_players, keygen_identifier, keygen_inputs);
+    let keygen_sid = Identifier::random(&mut rng);
+    let keygen_inputs = std::iter::repeat(()).take(num_players).collect::<Vec<_>>();
     c.bench_function(&format!("Keygen with {num_players} nodes"), |b| {
-        b.iter(|| run_subprotocol::<KeygenParticipant>(&mut players, &mut inboxes))
+        b.iter(|| run_subprotocol::<KeygenParticipant>(keygen_sid, keygen_inputs.clone()))
     });
 
     // Benchmark auxinfo
-    let auxinfo_identifier = Identifier::random(&mut rng);
-    let auxinfo_inputs = std::iter::repeat(()).take(num_players).collect();
-    let (mut players, mut inboxes) =
-        init_new_player_set(num_players, auxinfo_identifier, auxinfo_inputs);
+    let auxinfo_sid = Identifier::random(&mut rng);
+    let auxinfo_inputs = std::iter::repeat(()).take(num_players).collect::<Vec<_>>();
     c.bench_function(&format!("Auxinfo with {num_players} nodes"), |b| {
-        b.iter(|| run_subprotocol::<AuxInfoParticipant>(&mut players, &mut inboxes))
+        b.iter(|| run_subprotocol::<AuxInfoParticipant>(auxinfo_sid, auxinfo_inputs.clone()))
     });
 
     // Prepare to benchmark presign:
     // 1. Run keygen and get outputs
     let keygen_inputs = std::iter::repeat(()).take(num_players).collect();
-    let (mut players, mut inboxes) =
-        init_new_player_set(num_players, keygen_identifier, keygen_inputs);
-    let keygen_outputs = run_subprotocol::<KeygenParticipant>(&mut players, &mut inboxes).unwrap();
+    let keygen_outputs = run_subprotocol::<KeygenParticipant>(keygen_sid, keygen_inputs).unwrap();
 
     // 2. Run auxinfo and get outputs
     let auxinfo_inputs = std::iter::repeat(()).take(num_players).collect();
-    let (mut players, mut inboxes) =
-        init_new_player_set(num_players, auxinfo_identifier, auxinfo_inputs);
     let auxinfo_outputs =
-        run_subprotocol::<AuxInfoParticipant>(&mut players, &mut inboxes).unwrap();
+        run_subprotocol::<AuxInfoParticipant>(auxinfo_sid, auxinfo_inputs).unwrap();
 
     // 3. Assemble presign input from keygen and auxinfo.
     let presign_inputs = auxinfo_outputs
@@ -156,10 +150,8 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
 
     // Benchmark presign
     let presign_identifier = Identifier::random(&mut rng);
-    let (mut players, mut inboxes) =
-        init_new_player_set(num_players, presign_identifier, presign_inputs);
     c.bench_function(&format!("Presign with {num_players} nodes"), |b| {
-        b.iter(|| run_subprotocol::<PresignParticipant>(&mut players, &mut inboxes))
+        b.iter(|| run_subprotocol::<PresignParticipant>(presign_identifier, presign_inputs.clone()))
     });
 }
 
