@@ -90,6 +90,11 @@ impl<P: ProtocolParticipant> Participant<P> {
     pub fn from_config(config: &ParticipantConfig, sid: Identifier, input: P::Input) -> Self {
         info!("Initializing participant from config.");
 
+        if config.other_ids.len() == 0 {
+            error!("Not enough participants in other_participants_ids in Config");
+            Err(InternalError::ParticipantConfigError)
+        }
+
         Participant {
             id: config.id,
             sid,
@@ -273,6 +278,10 @@ impl ParticipantConfig {
     /// generates the IDs; that's why it's only available for testing right
     /// now.
     fn random_quorum<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> Vec<ParticipantConfig> {
+        if size == 1{
+            error!("Not enough participants in Participant Config!");
+            Err(InternalError::ParticipantConfigError)    
+        }
         let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size)
             .collect::<Vec<_>>();

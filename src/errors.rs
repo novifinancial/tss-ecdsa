@@ -78,6 +78,8 @@ pub enum CallerError {
     WrongSessionId,
     #[error("Recieved a message with the wrong protocol type for this participant (malicious behavior suspected)")]
     WrongProtocol,
+    #[error("Participant Config Size Error")],
+    ParticipantConfigError
 }
 
 macro_rules! serialize {
