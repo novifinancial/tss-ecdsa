@@ -287,7 +287,23 @@ impl ParticipantConfig {
     }
 }
 
-/// An identifier corresponding to a [`Participant`].
+/// An identifier for a [`Participant`].
+///
+/// All [`Participant`]s in a session must agree on the
+/// [`ParticipantIdentifier`]s. That is, these are not local identifiers
+/// controlled by a single `Participant`; they are unique, agreed-upon
+/// identifiers for the `Participant`s in a session. Each entity participating
+/// in a session should have a different `ParticipantIdentifier`.
+///
+/// `ParticipantIdentifier`s can be used across multiple sessions. For
+/// example, if a set of participants run keygen, auxinfo, and then compute
+/// several signatures, they can use the same set of identifiers for each of
+/// those sessions. However, a single `ParticipantIdentifier` should not be used
+/// to represent different entities (even in different sessions with
+/// non-overlapping participant sets!).
+///
+/// `ParticipantIdentifier`s should be unique within a deployment, but they
+/// don't necessarily have to be globally unique.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ParticipantIdentifier(u128);
 
@@ -313,42 +329,69 @@ impl std::fmt::Display for ParticipantIdentifier {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 
-/// An [`Identifier`] is a session identifier that uniquely identifies a single
+/// A session [`Identifier`] uniquely identifies a single
 /// instance of a protocol and all messages associated with it.
 ///
-/// [`Identifier`] are globally unique identifiers that allow parties to
-/// distinguish between different sessions. The "globally unique" property
-/// of these identifiers forces parties to avoid any collisions between
-/// different sessions and any kind of replay attack by associating messages,
-/// parameters, proofs and commitments with their corresponding sessions.
+/// Session identifiers have two roles in the protocol: they tag messages
+/// and they are incorporated as context into zero-knowledge proofs.
+/// They must be _globally unique_; this allows participants to distinguish
+/// messages belonging to different, concurrent protocol runs,
+/// prevents collisions between messages belonging to
+/// different sessions, and prevents replay attacks by associating messages and
+/// zero-knowledge proofs
+/// with the session, fixed parameters, and previous subprotocols to which
+/// they correspond. Global uniqueness is required in order to achieve
+/// universally-composable (UC) security, the paradigm used by the paper to
+/// prove security of the protocol.
+///
+/// 🔒 It is the responsibility of the calling application to pick session
+/// identifiers. The calling application must select a protocol with
+/// appropriate trust assumptions for its deployment to ensure the chosen
+/// [`Identifier`] is unique and that all parties have the same one.
+/// Sample protocols (with varying trust models!) could include:
+/// - A trusted party randomly samples a unique identifier with
+///   `Identifier::random()` and sends it to all parties;
+/// - The participants run a Byzantine agreement protocol.
 ///
 /// # Discrepancies with the paper with respect to session identifiers:
+/// The paper defines session identifiers, denoted `sid` and `ssid`, somewhat
+/// differently that we implement them in this codebase. We believe the
+/// implementation achieves the same guarantees that the paper describes.
 ///
-/// Discrepancy (A): The paper distinguishes between the Session identifiers
-/// (sid) which are created from shared parameters in the protocol at the
-/// beginning of key generation and the Sub-Session identifiers (ssid) that are
-/// created from sid and other post key generation shared parameters for the
-/// purpose of pre/signing. The codebase does not make this kind of distinction
-/// relying instead on a single type for all session identifiers. The
-/// distinction between sessions and sub-sessions is inherently enforced by the
-/// order of inputs and outputs to different stages in the protocol.
+/// 1. The paper incorporates many types of data into its session and
+/// sub-session identifiers, including fixed parameters, the participant set,
+/// and key- and party-specific parameters that the calling application
+/// persists[^outs]; these identifiers are used both to tag
+/// messages and incorporate context into proofs. The codebase defines a single
+/// `Identifier` type; this is a global, unique identifier
+/// used to tag messages. The other fields (as well as
+/// the `Identifier`) are incorporated into proofs using a different mechanism
+/// to define the proof context.
 ///
-/// Discrepancy (B): The codebase  instantiates [`Identifier`]s in three
-/// different ways: (1) as a session identifier for keygen, that are created at
-/// the start of a key generation instance; (2) as a session identifier for
-/// pre-signing, (3) as a session identifier for auxiliary information
-/// generation sessions; The paper itself only distinguishes between sessions
-/// and sub-sessions and combine (2) and (3).
+/// 2. The paper distinguishes between identifiers for sessions (keygen) and
+/// sub-sessions (auxinfo and presign)[^bug].
+/// The codebase requires the calling application to select a new, unique
+/// session [`Identifier`]s at three points:
+/// (1) immediately before starting a new keygen session;
+/// (2) immediately before starting a new auxinfo session;
+/// (3) immediately before starting a new presigning session (for use in
+/// presigning and the subsequent signature).
 ///
-/// Discrepancy (C): In the paper ssid is periodically refreshed with the
-/// session key and auxiliary information. The codebase does not do that and
-/// instead relies on the calling application to generate and refresh these
-/// identifiers by randomly sampling a new and unique 32 bytes identifier using
-/// `Identifier::random()`. This assumes that the participants initiating a
-/// protocol run are honestly generating globally unique identifiers and
-/// distributing them to the correct set of parties.
 ///
-/// TODO: Discrepancy (C) needs to be further addressed by issue #218.
+/// 3. 🔒 In the paper, `ssid` is updated each time the participants run the
+/// key-refresh subprotocol.
+/// The codebase relies on the calling application to generate a new, unique
+/// `Identifier` for each new session.
+///
+/// [^outs]: These can include public key shares and shared randomness that were returned as output from
+/// a previous run of keygen and public commitment parameters that were returned
+/// as output from a previous run of auxinfo.
+///
+/// [^bug]: In fact, we think there is a minor bug in Figure 6 of the paper, since
+/// the definition of `ssid` includes outputs of auxinfo, and thus cannot be
+/// passed as input to auxinfo. We believe the correct instantiation of the
+/// `ssid` for auxinfo is in Figure 3, which includes fixed parameters (`sid`)
+/// and outputs from keygen, but _not_ outputs from auxinfo.
 pub struct Identifier(u128);
 
 impl Debug for Identifier {
