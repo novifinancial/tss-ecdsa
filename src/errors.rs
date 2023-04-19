@@ -61,6 +61,8 @@ pub enum InternalError {
     IdentifierInUse,
     #[error("Protocol has already terminated")]
     ProtocolAlreadyTerminated,
+    #[error("Participant Config Size Error")]
+    ParticipantConfigError,
 }
 
 /// Errors that are caused by incorrect behavior by the calling application.
@@ -78,8 +80,6 @@ pub enum CallerError {
     WrongSessionId,
     #[error("Recieved a message with the wrong protocol type for this participant (malicious behavior suspected)")]
     WrongProtocol,
-    #[error("Participant Config Size Error")],
-    ParticipantConfigError
 }
 
 macro_rules! serialize {

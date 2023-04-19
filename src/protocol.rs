@@ -278,9 +278,9 @@ impl ParticipantConfig {
     /// generates the IDs; that's why it's only available for testing right
     /// now.
     fn random_quorum<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> Vec<ParticipantConfig> {
-        if size == 1{
+        if size == 1 {
             error!("Not enough participants in Participant Config!");
-            Err(InternalError::ParticipantConfigError)    
+            Err(InternalError::ParticipantConfigError)
         }
         let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size)
