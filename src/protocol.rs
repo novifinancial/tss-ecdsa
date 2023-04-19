@@ -459,6 +459,11 @@ mod tests {
     use std::collections::HashMap;
     use tracing::debug;
 
+    fn participant_config_has_enough_participants() -> Result<()>{
+        
+        Ok(())
+    }
+
     /// Delivers all messages into their respective participant's inboxes   
     fn deliver_all(
         messages: &[Message],
