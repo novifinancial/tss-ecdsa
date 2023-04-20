@@ -90,9 +90,9 @@ impl<P: ProtocolParticipant> Participant<P> {
     pub fn from_config(config: &ParticipantConfig, sid: Identifier, input: P::Input) -> Self {
         info!("Initializing participant from config.");
 
-        if config.other_ids.len() == 0 {
+        if config.other_ids.is_empty() {
             error!("Not enough participants in other_participants_ids in Config");
-            Err(InternalError::ParticipantConfigError)
+            Err(InternalError::ParticipantConfigError).unwrap()
         }
 
         Participant {
@@ -280,7 +280,7 @@ impl ParticipantConfig {
     fn random_quorum<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> Vec<ParticipantConfig> {
         if size == 1 {
             error!("Not enough participants in Participant Config!");
-            Err(InternalError::ParticipantConfigError)
+            Err(InternalError::ParticipantConfigError).unwrap()
         }
         let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size)
@@ -458,11 +458,6 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     use tracing::debug;
-
-    fn participant_config_has_enough_participants() -> Result<()>{
-        
-        Ok(())
-    }
 
     /// Delivers all messages into their respective participant's inboxes   
     fn deliver_all(
