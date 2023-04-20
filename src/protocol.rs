@@ -24,6 +24,7 @@ use k256::elliptic_curve::{Field, IsHigh};
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
+use std::panic;
 use tracing::{error, info, instrument, trace};
 
 /// The set of subprotocols that a [`Participant`] can execute.
@@ -90,10 +91,9 @@ impl<P: ProtocolParticipant> Participant<P> {
     pub fn from_config(config: &ParticipantConfig, sid: Identifier, input: P::Input) -> Self {
         info!("Initializing participant from config.");
 
-        if config.other_ids.is_empty() {
-            error!("Not enough participants in other_participants_ids in Config");
+        /*if config.other_ids.is_empty() {
             Err(InternalError::ParticipantConfigError).unwrap()
-        }
+        }*/
 
         Participant {
             id: config.id,
@@ -279,8 +279,7 @@ impl ParticipantConfig {
     /// now.
     fn random_quorum<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> Vec<ParticipantConfig> {
         if size == 1 {
-            error!("Not enough participants in Participant Config!");
-            Err(InternalError::ParticipantConfigError).unwrap()
+            panic!("Participant Config Size Error");
         }
         let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size)
@@ -449,15 +448,51 @@ pub enum Output {
 mod tests {
     use super::*;
     use crate::{
-        auxinfo::participant::AuxInfoParticipant, keygen::participant::KeygenParticipant,
-        presign::participant::Input as PresignInput, utils::testing::init_testing, CurvePoint,
-        PresignParticipant,
+        auxinfo::participant::{self, AuxInfoParticipant},
+        keygen::participant::KeygenParticipant,
+        presign::participant::Input as PresignInput,
+        utils::testing::init_testing,
+        CurvePoint, PresignParticipant,
     };
     use k256::ecdsa::signature::DigestVerifier;
     use rand::seq::IteratorRandom;
     use sha2::{Digest, Sha256};
-    use std::collections::HashMap;
+    use std::{collections::HashMap, result};
     use tracing::debug;
+
+    #[test]
+    fn participant_config_has_more_than_one_participant() {
+        let result = panic::catch_unwind(|| {
+            let mut rng = init_testing();
+            let QUORUM_SIZE = 1;
+            ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng);
+        });
+
+        match result {
+            Ok(_) => {
+                println!("No panic occurred.");
+            }
+            Err(panic) => {
+                if let Some(s) = panic.downcast_ref::<String>() {
+                    println!("Panic occurred: {}", s);
+                    assert_eq!(s, "Participant Config Size Error");
+                }
+            }
+        }
+    }
+
+    /*#[test]
+    fn participant_does_not_have_empty_set_of_other_participants() {
+        let mut rng = init_testing();
+        let QUORUM_SIZE = 1;
+
+        let configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng);
+
+        // Set up auxinfo participants
+        let auxinfo_sid = Identifier::random(&mut rng);
+
+        let participant = Participant::from_config(config, auxinfo_sid, input);
+    }*/
 
     /// Delivers all messages into their respective participant's inboxes   
     fn deliver_all(
