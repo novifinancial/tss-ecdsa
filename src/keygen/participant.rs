@@ -180,10 +180,12 @@ impl ProtocolParticipant for KeygenParticipant {
 }
 
 impl InnerProtocolParticipant for KeygenParticipant {
-    type Context = ();
+    type Context = Vec<ParticipantIdentifier>;
 
-    fn retrieve_context(&self) -> &<Self as InnerProtocolParticipant>::Context {
-        &()
+    fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
+        let mut ids = self.all_participants();
+        ids.sort();
+        ids
     }
 
     fn local_storage(&self) -> &LocalStorage {

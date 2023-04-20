@@ -144,7 +144,7 @@ fn generate_challenge(
     mask_dlog_commit: &CurvePoint,
     mask_commit: &Commitment,
 ) -> Result<BigNumber> {
-    transcript.append_message(b"PiLog ProofContext", context.as_bytes());
+    transcript.append_message(b"PiLog ProofContext", &context.as_bytes());
     transcript.append_message(b"PiLog Common input", &serialize!(&common_input)?);
     transcript.append_message(
         b"(plaintext commit, mask encryption, mask dlog commit, mask commit)",

@@ -168,10 +168,12 @@ impl ProtocolParticipant for AuxInfoParticipant {
 }
 
 impl InnerProtocolParticipant for AuxInfoParticipant {
-    type Context = ();
+    type Context = Vec<ParticipantIdentifier>;
 
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
+    fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
+        let mut ids = self.all_participants();
+        ids.sort();
+        ids
     }
 
     fn local_storage(&self) -> &LocalStorage {
@@ -350,7 +352,7 @@ impl AuxInfoParticipant {
             self.stash_message(message)?;
             return Ok(ProcessOutcome::Incomplete);
         }
-        let decom = AuxInfoDecommit::from_message(message, self.retrieve_context())?;
+        let decom = AuxInfoDecommit::from_message(message, &self.retrieve_context())?;
         let com = self
             .local_storage
             .retrieve::<storage::Commit>(message.from())?;
@@ -419,7 +421,7 @@ impl AuxInfoParticipant {
 
         let proof = AuxInfoProof::prove(
             rng,
-            self.retrieve_context(),
+            &self.retrieve_context(),
             message.id(),
             global_rid,
             my_public.params(),
@@ -476,7 +478,7 @@ impl AuxInfoParticipant {
 
         let proof = AuxInfoProof::from_message(message)?;
         proof.verify(
-            self.retrieve_context(),
+            &self.retrieve_context(),
             message.id(),
             *global_rid,
             auxinfo_pub.params(),
@@ -522,12 +524,12 @@ impl AuxInfoParticipant {
         debug!("Creating new auxinfo.");
 
         let (decryption_key, p, q) = DecryptionKey::new(rng)?;
-        let params = VerifiedRingPedersen::extract(&decryption_key, &(), rng)?;
+        let params = VerifiedRingPedersen::extract(&decryption_key, &self.retrieve_context(), rng)?;
         let encryption_key = decryption_key.encryption_key();
 
         Ok((
             decryption_key.into(),
-            AuxInfoPublic::new(self.retrieve_context(), self.id(), encryption_key, params)?,
+            AuxInfoPublic::new(&self.retrieve_context(), self.id(), encryption_key, params)?,
             AuxInfoWitnesses { p, q },
         ))
     }
@@ -666,6 +668,8 @@ mod tests {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
             inbox.push(participant.initialize_auxinfo_message(keyshare_identifier));
         }
+        let mut participant_ids = quorum[0].all_participants();
+        participant_ids.sort();
         while !is_auxinfo_done(&quorum) {
             // Try processing a message
             let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
@@ -704,7 +708,7 @@ mod tests {
                     .find(|public_key| *public_key.participant() == pid);
                 assert!(public_key.is_some());
                 // Check that it's valid while we're here.
-                assert!(public_key.unwrap().verify(&()).is_ok());
+                assert!(public_key.unwrap().verify(&participant_ids).is_ok());
                 publics_for_pid.push(public_key.unwrap());
             }
 

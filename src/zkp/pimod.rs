@@ -206,7 +206,7 @@ impl PiModProof {
         input: &PiModInput,
         w: &BigNumber,
     ) {
-        transcript.append_message(b"PiMod ProofContext", context.as_bytes());
+        transcript.append_message(b"PiMod ProofContext", &context.as_bytes());
         transcript.append_message(b"PiMod CommonInput", &serialize!(&input).unwrap());
         transcript.append_message(b"w", &w.to_bytes());
     }

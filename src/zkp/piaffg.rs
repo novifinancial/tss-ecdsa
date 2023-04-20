@@ -299,7 +299,7 @@ impl PiAffgProof {
         F: &Commitment,
     ) {
         // First, do Fiat-Shamir consistency check
-        transcript.append_message(b"PiAffg ProofContext", context.as_bytes());
+        transcript.append_message(b"PiAffg ProofContext", &context.as_bytes());
         transcript.append_message(b"PiAffg CommonInput", &serialize!(&input).unwrap());
         transcript.append_message(
             b"(S, T, A, B_x, B_y, E, F)",

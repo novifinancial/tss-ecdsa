@@ -18,12 +18,16 @@ use crate::{
     messages::MessageType,
     participant::ProtocolParticipant,
     presign::record::PresignRecord,
+    zkp::ProofContext,
     Message,
 };
 use k256::elliptic_curve::{Field, IsHigh};
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter};
+use std::{
+    cmp::{Ord, PartialOrd},
+    fmt::{Debug, Formatter},
+};
 use tracing::{error, info, instrument, trace};
 
 /// The set of subprotocols that a [`Participant`] can execute.
@@ -304,7 +308,7 @@ impl ParticipantConfig {
 ///
 /// `ParticipantIdentifier`s should be unique within a deployment, but they
 /// don't necessarily have to be globally unique.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ParticipantIdentifier(u128);
 
 impl ParticipantIdentifier {
@@ -314,6 +318,12 @@ impl ParticipantIdentifier {
         let random_bytes = rng.gen::<u128>();
         trace!("Created new Participant Identifier({random_bytes})");
         Self(random_bytes)
+    }
+}
+
+impl ProofContext for Vec<ParticipantIdentifier> {
+    fn as_bytes(&self) -> Vec<u8> {
+        self.iter().flat_map(|pid| pid.0.to_le_bytes()).collect()
     }
 }
 

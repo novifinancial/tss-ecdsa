@@ -30,14 +30,14 @@ use serde::{de::DeserializeOwned, Serialize};
 ///
 /// This context can be turned into bytes and appended to a [`Transcript`].
 pub(crate) trait ProofContext {
-    fn as_bytes(&self) -> &[u8];
+    fn as_bytes(&self) -> Vec<u8>;
 }
 
 /// This is a temporary preliminary implementation that will be modified by
 /// issue #240.
 impl ProofContext for () {
-    fn as_bytes(&self) -> &[u8] {
-        &[]
+    fn as_bytes(&self) -> Vec<u8> {
+        vec![]
     }
 }
 
@@ -45,8 +45,8 @@ impl ProofContext for () {
 struct BadContext {}
 #[cfg(test)]
 impl ProofContext for BadContext {
-    fn as_bytes(&self) -> &[u8] {
-        &[8u8]
+    fn as_bytes(&self) -> Vec<u8> {
+        vec![8u8]
     }
 }
 

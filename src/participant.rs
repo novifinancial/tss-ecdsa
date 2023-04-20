@@ -224,7 +224,7 @@ pub(crate) trait InnerProtocolParticipant: ProtocolParticipant {
     type Context;
 
     /// Returns a reference to the participant's context.
-    fn retrieve_context(&self) -> &Self::Context;
+    fn retrieve_context(&self) -> Self::Context;
 
     /// Returns a reference to the [`LocalStorage`] associated with this
     /// protocol.

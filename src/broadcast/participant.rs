@@ -145,7 +145,14 @@ impl ProtocolParticipant for BroadcastParticipant {
 }
 
 impl InnerProtocolParticipant for BroadcastParticipant {
-    type Context = ();
+    type Context = Vec<ParticipantIdentifier>;
+
+    /// This method is never used.
+    fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
+        let mut ids = self.all_participants();
+        ids.sort();
+        ids
+    }
 
     fn local_storage(&self) -> &LocalStorage {
         &self.local_storage
@@ -161,9 +168,6 @@ impl InnerProtocolParticipant for BroadcastParticipant {
 
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
-    }
-    fn retrieve_context(&self) -> &Self::Context {
-        &()
     }
 }
 
