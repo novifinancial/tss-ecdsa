@@ -132,16 +132,16 @@ extern crate flamer;
 #[macro_use]
 pub mod errors;
 
-mod auxinfo;
-mod broadcast;
-mod keygen;
+pub mod auxinfo;
+pub mod broadcast;
+pub mod keygen;
 mod local_storage;
 mod message_queue;
 mod messages;
 mod paillier;
 mod parameters;
 mod participant;
-mod presign;
+pub mod presign;
 mod protocol;
 mod ring_pedersen;
 mod utils;

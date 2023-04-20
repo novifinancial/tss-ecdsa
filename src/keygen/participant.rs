@@ -1,3 +1,5 @@
+//! Types and functions related to the key generation sub-protocol Participant.
+
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
 //

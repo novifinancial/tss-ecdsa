@@ -10,5 +10,5 @@
 
 pub(crate) mod auxinfo_commit;
 pub(crate) mod info;
-pub(crate) mod participant;
+pub mod participant;
 pub(crate) mod proof;
