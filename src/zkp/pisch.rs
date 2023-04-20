@@ -103,7 +103,7 @@ impl Proof for PiSchProof {
         Ok(proof)
     }
 
-    #[cfg_attr(feature = "flame_it", flame("PiEncProof"))]
+    #[cfg_attr(feature = "flame_it", flame("PiSchProof"))]
     fn verify(
         &self,
         input: &Self::CommonInput,
@@ -148,6 +148,7 @@ impl PiSchProof {
     }
 
     pub fn prove_from_precommit(
+        context: &impl ProofContext,
         com: &PiSchPrecommit,
         input: &PiSchInput,
         secret: &PiSchSecret,
@@ -156,7 +157,7 @@ impl PiSchProof {
         let A = com.A;
         let mut local_transcript = transcript.clone();
 
-        Self::fill_transcript(&mut local_transcript, &(), input, &A);
+        Self::fill_transcript(&mut local_transcript, context, input, &A);
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
@@ -165,36 +166,6 @@ impl PiSchProof {
 
         let proof = Self { A, e, z };
         Ok(proof)
-    }
-    pub fn verify_with_transcript(
-        &self,
-        input: &PiSchInput,
-        transcript: &Transcript,
-    ) -> Result<()> {
-        let mut local_transcript = transcript.clone();
-
-        Self::fill_transcript(&mut local_transcript, &(), input, &self.A);
-
-        // Verifier samples e in F_q
-        let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
-        if e != self.e {
-            warn!("Fiat-Shamir consistency check failed");
-            return Err(InternalError::FailedToVerifyProof);
-        }
-
-        // Do equality checks
-
-        let eq_check_1 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z)?);
-            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
-            lhs == rhs
-        };
-        if !eq_check_1 {
-            warn!("eq_check_1 failed");
-            return Err(InternalError::FailedToVerifyProof);
-        }
-
-        Ok(())
     }
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Keygen(KeygenMessageType::R3Proof) {
@@ -278,24 +249,39 @@ mod tests {
 
         let input = PiSchInput::new(&g, &q, &X);
         let com = PiSchProof::precommit(&mut rng, &input)?;
-        let transcript = Transcript::new(b"some external proof stuff");
-        let proof =
-            PiSchProof::prove_from_precommit(&com, &input, &PiSchSecret::new(&x), &transcript)?;
-        proof.verify_with_transcript(&input, &transcript)?;
+        let mut transcript = Transcript::new(b"some external proof stuff");
+        let proof = PiSchProof::prove_from_precommit(
+            &(),
+            &com,
+            &input,
+            &PiSchSecret::new(&x),
+            &transcript,
+        )?;
+        proof.verify(&input, &(), &mut transcript)?;
 
         //test public param mismatch
         let lambda = crate::utils::random_positive_bn(&mut rng, &q);
         let h = CurvePoint(g.0 * utils::bn_to_scalar(&lambda).unwrap());
         let input2 = PiSchInput::new(&h, &q, &X);
-        let proof2 =
-            PiSchProof::prove_from_precommit(&com, &input2, &PiSchSecret::new(&x), &transcript)?;
-        assert!(proof2.verify_with_transcript(&input, &transcript).is_err());
+        let proof2 = PiSchProof::prove_from_precommit(
+            &(),
+            &com,
+            &input2,
+            &PiSchSecret::new(&x),
+            &transcript,
+        )?;
+        assert!(proof2.verify(&input, &(), &mut transcript).is_err());
 
         //test transcript mismatch
         let transcript2 = Transcript::new(b"some other external proof stuff");
-        let proof3 =
-            PiSchProof::prove_from_precommit(&com, &input, &PiSchSecret::new(&x), &transcript2)?;
-        assert!(proof3.verify_with_transcript(&input, &transcript).is_err());
+        let proof3 = PiSchProof::prove_from_precommit(
+            &(),
+            &com,
+            &input,
+            &PiSchSecret::new(&x),
+            &transcript2,
+        )?;
+        assert!(proof3.verify(&input, &(), &mut transcript).is_err());
 
         Ok(())
     }

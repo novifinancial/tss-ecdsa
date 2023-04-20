@@ -19,7 +19,10 @@ use crate::{
     protocol::{ParticipantIdentifier, ProtocolType},
     run_only_once,
     utils::k256_order,
-    zkp::pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
+    zkp::{
+        pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
+        Proof,
+    },
     CurvePoint, Identifier,
 };
 use libpaillier::unknown_order::BigNumber;
@@ -497,6 +500,7 @@ impl KeygenParticipant {
             .retrieve::<storage::PrivateKeyshare>(self.id)?;
 
         let proof = PiSchProof::prove_from_precommit(
+            &self.retrieve_context(),
             precom,
             &input,
             &PiSchSecret::new(&my_sk.x),
@@ -552,8 +556,8 @@ impl KeygenParticipant {
         let g = CurvePoint::GENERATOR;
         let input = PiSchInput::new(&g, &q, &decom.pk.X);
 
-        let transcript = schnorr_proof_transcript(*global_rid)?;
-        proof.verify_with_transcript(&input, &transcript)?;
+        let mut transcript = schnorr_proof_transcript(*global_rid)?;
+        proof.verify(&input, &self.retrieve_context(), &mut transcript)?;
 
         // Only if the proof verifies do we store the participant's public key
         // share. This signals the end of the protocol for the participant.
@@ -747,6 +751,7 @@ mod tests {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
             inbox.push(participant.initialize_keygen_message(keyshare_identifier));
         }
+
         while !is_keygen_done(&quorum) {
             let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
                 None => continue,
