@@ -91,9 +91,9 @@ impl<P: ProtocolParticipant> Participant<P> {
     pub fn from_config(config: &ParticipantConfig, sid: Identifier, input: P::Input) -> Self {
         info!("Initializing participant from config.");
 
-        /*if config.other_ids.is_empty() {
+        if config.other_ids.is_empty() {
             Err(InternalError::ParticipantConfigError).unwrap()
-        }*/
+        }
 
         Participant {
             id: config.id,
@@ -481,18 +481,18 @@ mod tests {
         }
     }
 
-    /*#[test]
+    #[test]
     fn participant_does_not_have_empty_set_of_other_participants() {
         let mut rng = init_testing();
         let QUORUM_SIZE = 1;
 
-        let configs = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng);
+        let config = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng);
 
-        // Set up auxinfo participants
+        // Set up auxinfo participant
         let auxinfo_sid = Identifier::random(&mut rng);
 
-        let participant = Participant::from_config(config, auxinfo_sid, input);
-    }*/
+        let participant = Participant::from_config(config, auxinfo_sid, ());
+    }
 
     /// Delivers all messages into their respective participant's inboxes   
     fn deliver_all(
