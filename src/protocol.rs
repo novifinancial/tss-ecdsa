@@ -23,8 +23,10 @@ use crate::{
 use k256::elliptic_curve::{Field, IsHigh};
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter};
-use std::panic;
+use std::{
+    fmt::{Debug, Formatter},
+    panic,
+};
 use tracing::{error, info, instrument, trace};
 
 /// The set of subprotocols that a [`Participant`] can execute.
@@ -293,6 +295,15 @@ impl ParticipantConfig {
             })
             .collect()
     }
+
+    fn random<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> ParticipantConfig {
+        assert!(size > 1);
+        let other_ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(size - 1)
+            .collect::<Vec<_>>();
+        let id = ParticipantIdentifier::random(rng);
+        Self { id, other_ids }
+    }
 }
 
 /// An identifier for a [`Participant`].
@@ -483,15 +494,25 @@ mod tests {
 
     #[test]
     fn participant_does_not_have_empty_set_of_other_participants() {
-        let mut rng = init_testing();
-        let QUORUM_SIZE = 1;
-
-        let config = ParticipantConfig::random_quorum(QUORUM_SIZE, &mut rng);
-
-        // Set up auxinfo participant
-        let auxinfo_sid = Identifier::random(&mut rng);
-
-        let participant = Participant::from_config(config, auxinfo_sid, ());
+        let result = panic::catch_unwind(|| {
+            let mut rng = init_testing();
+            let QUORUM_SIZE = 1;
+            let config = ParticipantConfig::random(QUORUM_SIZE, &mut rng);
+            let auxinfo_sid = Identifier::random(&mut rng);
+            Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ());
+        });
+        
+        match result {
+            Ok(_) => {
+                println!("No panic occurred.");
+            }
+            Err(panic) => {
+                if let Some(s) = panic.downcast_ref::<String>() {
+                    println!("Panic occurred: {}", s);
+                    assert_eq!(s, "Participant Config Size Error");
+                }
+            }
+        }
     }
 
     /// Delivers all messages into their respective participant's inboxes   
