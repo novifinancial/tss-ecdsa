@@ -33,8 +33,7 @@ pub(crate) trait ProofContext {
     fn as_bytes(&self) -> Vec<u8>;
 }
 
-/// This is a temporary preliminary implementation that will be modified by
-/// issue #240.
+#[cfg(test)]
 impl ProofContext for () {
     fn as_bytes(&self) -> Vec<u8> {
         vec![]
