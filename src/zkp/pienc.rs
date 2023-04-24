@@ -150,7 +150,7 @@ impl Proof for PiEncProof {
                 .commit(&plaintext_mask, ELL + EPSILON, rng);
 
         // Fill out the transcript with our fresh commitments...
-        Self::fill_out_transcript(
+        Self::fill_transcript(
             transcript,
             context,
             input,
@@ -192,7 +192,7 @@ impl Proof for PiEncProof {
     ) -> Result<()> {
         // Check Fiat-Shamir challenge consistency: update the transcript with
         // commitments...
-        Self::fill_out_transcript(
+        Self::fill_transcript(
             transcript,
             context,
             input,
@@ -260,7 +260,7 @@ impl Proof for PiEncProof {
 impl PiEncProof {
     /// Update the [`Transcript`] with all the commitment values used in the
     /// proof.
-    fn fill_out_transcript(
+    fn fill_transcript(
         transcript: &mut Transcript,
         context: &impl ProofContext,
         input: &PiEncInput,
@@ -268,7 +268,7 @@ impl PiEncProof {
         ciphertext_mask: &Ciphertext,
         plaintext_mask_commit: &Commitment,
     ) -> Result<()> {
-        transcript.append_message(b"PiEnc Context", &context.as_bytes());
+        transcript.append_message(b"PiEnc Context", &context.as_bytes()?);
         transcript.append_message(b"PiEnc CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, A, C)",

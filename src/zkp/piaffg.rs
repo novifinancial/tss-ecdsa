@@ -154,7 +154,7 @@ impl Proof for PiAffgProof {
             .commit(&beta, ELL + EPSILON, rng);
         let (T, mu) = input.setup_params.scheme().commit(&secret.y, ELL, rng);
 
-        Self::fill_out_transcript(transcript, context, input, &S, &T, &A, &B_x, &B_y, &E, &F);
+        Self::fill_transcript(transcript, context, input, &S, &T, &A, &B_x, &B_y, &E, &F)?;
 
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
@@ -195,10 +195,10 @@ impl Proof for PiAffgProof {
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()> {
-        Self::fill_out_transcript(
+        Self::fill_transcript(
             transcript, context, input, &self.S, &self.T, &self.A, &self.B_x, &self.B_y, &self.E,
             &self.F,
-        );
+        )?;
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
 
@@ -286,7 +286,7 @@ impl Proof for PiAffgProof {
 
 impl PiAffgProof {
     #[allow(clippy::too_many_arguments)]
-    fn fill_out_transcript(
+    fn fill_transcript(
         transcript: &mut Transcript,
         context: &impl ProofContext,
         input: &PiAffgInput,
@@ -297,10 +297,10 @@ impl PiAffgProof {
         B_y: &Ciphertext,
         E: &Commitment,
         F: &Commitment,
-    ) {
+    ) -> Result<()> {
         // First, do Fiat-Shamir consistency check
-        transcript.append_message(b"PiAffg ProofContext", &context.as_bytes());
-        transcript.append_message(b"PiAffg CommonInput", &serialize!(&input).unwrap());
+        transcript.append_message(b"PiAffg ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"PiAffg CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(S, T, A, B_x, B_y, E, F)",
             &[
@@ -314,6 +314,7 @@ impl PiAffgProof {
             ]
             .concat(),
         );
+        Ok(())
     }
 }
 #[cfg(test)]

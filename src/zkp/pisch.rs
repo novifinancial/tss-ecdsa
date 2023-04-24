@@ -92,7 +92,7 @@ impl Proof for PiSchProof {
         let alpha = crate::utils::random_positive_bn(rng, &input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
 
-        Self::fill_transcript(transcript, context, input, &A);
+        Self::fill_transcript(transcript, context, input, &A)?;
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(transcript, &input.q);
@@ -111,7 +111,7 @@ impl Proof for PiSchProof {
         transcript: &mut Transcript,
     ) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
-        Self::fill_transcript(transcript, context, input, &self.A);
+        Self::fill_transcript(transcript, context, input, &self.A)?;
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(transcript, &input.q);
@@ -157,7 +157,7 @@ impl PiSchProof {
         let A = com.A;
         let mut local_transcript = transcript.clone();
 
-        Self::fill_transcript(&mut local_transcript, context, input, &A);
+        Self::fill_transcript(&mut local_transcript, context, input, &A)?;
 
         // Verifier samples e in F_q
         let e = positive_bn_random_from_transcript(&mut local_transcript, &input.q);
@@ -179,10 +179,11 @@ impl PiSchProof {
         context: &impl ProofContext,
         input: &PiSchInput,
         A: &CurvePoint,
-    ) {
-        transcript.append_message(b"PiSch ProofContext", &context.as_bytes());
-        transcript.append_message(b"PiSch CommonInput", &serialize!(&input).unwrap());
-        transcript.append_message(b"A", &serialize!(A).unwrap());
+    ) -> Result<()> {
+        transcript.append_message(b"PiSch ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"PiSch CommonInput", &serialize!(&input)?);
+        transcript.append_message(b"A", &serialize!(A)?);
+        Ok(())
     }
 }
 

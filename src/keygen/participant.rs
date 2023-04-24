@@ -16,7 +16,7 @@ use crate::{
     local_storage::LocalStorage,
     messages::{KeygenMessageType, Message, MessageType},
     participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
-    protocol::{ParticipantIdentifier, ProtocolType},
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once,
     utils::k256_order,
     zkp::{
@@ -191,12 +191,10 @@ impl ProtocolParticipant for KeygenParticipant {
 }
 
 impl InnerProtocolParticipant for KeygenParticipant {
-    type Context = Vec<ParticipantIdentifier>;
+    type Context = SharedContext;
 
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
-        let mut ids = self.all_participants();
-        ids.sort();
-        ids
+        SharedContext::collect(self)
     }
 
     fn local_storage(&self) -> &LocalStorage {
