@@ -38,16 +38,6 @@
 //! generated in this threshold manner are indistinguishable from signatures
 //! generated using a normal ECDSA signing method.
 //!
-//!
-//!
-//! ## Architecture
-//!
-//! The main interfaces allow a [`Participant`] to process a message from
-//! another participant, producing a set of outgoing messages and, if the
-//! protocol completed, an output. The library handles
-//! - out-of-order messaging
-//! - protocol round execution
-//!
 //! # 🔒 Requirements of the calling application
 //! This library **does not** implement the complete protocol. There are several
 //! security-critical steps that must be handled by the calling application. We
@@ -98,6 +88,20 @@
 //! At this time, we do not recommend use for security-critical applications.
 //! Use at your own risk.
 //!
+//! # Useful features
+//!
+//! A [`Participant`] processes messages received from other [`Participant`]s
+//! and generates [`Message`] for other  [`Participant`]s to process. When the
+//! current sub-protocol finishes, output values are produced.
+//!
+//! Messages may arrive from the network before a [`Participant`] is ready to
+//! process them. [`Participant`]s can be given messages at any time; when
+//! messages are received early, they are stored in memory by the library and
+//! retrieved and processed at the appropriate time.
+//!
+//! A sub-protocol session automatically progresses between rounds; the calling
+//! application does not have to track where within a session the protcool
+//! execution is at a given time.
 //!
 //! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos
 //! Makriyannis, and Udi Peled. UC Non-Interactive, Proactive, Threshold ECDSA
