@@ -16,12 +16,14 @@ use crate::{
     errors::{CallerError, InternalError, Result},
     keygen::keyshare::{KeySharePrivate, KeySharePublic},
     messages::MessageType,
-    participant::ProtocolParticipant,
+    participant::{InnerProtocolParticipant, ProtocolParticipant},
     presign::record::PresignRecord,
+    utils::{k256_order, CurvePoint},
     zkp::ProofContext,
     Message,
 };
 use k256::elliptic_curve::{Field, IsHigh};
+use libpaillier::unknown_order::BigNumber;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -363,9 +365,48 @@ impl ParticipantIdentifier {
     }
 }
 
-impl ProofContext for Vec<ParticipantIdentifier> {
-    fn as_bytes(&self) -> Vec<u8> {
-        self.iter().flat_map(|pid| pid.0.to_le_bytes()).collect()
+/// The SharedContext contains fixed known parameters accross the entire
+/// protocol. It does not however contain the entire protocol context.
+pub struct SharedContext {
+    participants: Vec<ParticipantIdentifier>,
+    generator: CurvePoint,
+    order: BigNumber,
+}
+impl ProofContext for SharedContext {
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        Ok([
+            self.participants
+                .iter()
+                .flat_map(|pid| pid.0.to_le_bytes())
+                .collect(),
+            bincode::serialize(&self.generator)
+                .map_err(|_| InternalError::InternalInvariantFailed)?,
+            self.order.to_bytes(),
+        ]
+        .concat())
+    }
+}
+
+impl SharedContext {
+    pub(crate) fn collect<P: InnerProtocolParticipant>(p: &P) -> Self {
+        let mut participants = p.all_participants();
+        participants.sort();
+        let generator = CurvePoint::GENERATOR;
+        let order = k256_order();
+        SharedContext {
+            participants,
+            generator,
+            order,
+        }
+    }
+    #[cfg(test)]
+    pub fn fill_context(mut participants: Vec<ParticipantIdentifier>) -> Self {
+        participants.sort();
+        SharedContext {
+            participants,
+            generator: CurvePoint::GENERATOR,
+            order: k256_order(),
+        }
     }
 }
 

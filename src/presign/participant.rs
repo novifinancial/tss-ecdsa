@@ -24,7 +24,7 @@ use crate::{
         round_three::{Private as RoundThreePrivate, Public as RoundThreePublic, RoundThreeInput},
         round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
     },
-    protocol::{ParticipantIdentifier, ProtocolType},
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     utils::{bn_to_scalar, k256_order, random_plusminus_by_size, random_positive_bn},
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
@@ -274,12 +274,10 @@ impl ProtocolParticipant for PresignParticipant {
 }
 
 impl InnerProtocolParticipant for PresignParticipant {
-    type Context = Vec<ParticipantIdentifier>;
+    type Context = SharedContext;
 
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
-        let mut ids = self.all_participants();
-        ids.sort();
-        ids
+        SharedContext::collect(self)
     }
 
     fn local_storage(&self) -> &LocalStorage {

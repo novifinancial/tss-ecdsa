@@ -12,7 +12,7 @@ use crate::{
     local_storage::LocalStorage,
     messages::{BroadcastMessageType, Message, MessageType},
     participant::{InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
-    protocol::{ParticipantIdentifier, ProtocolType},
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once_per_tag, Identifier,
 };
 use rand::{CryptoRng, RngCore};
@@ -153,13 +153,11 @@ impl ProtocolParticipant for BroadcastParticipant {
 }
 
 impl InnerProtocolParticipant for BroadcastParticipant {
-    type Context = Vec<ParticipantIdentifier>;
+    type Context = SharedContext;
 
     /// This method is never used.
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
-        let mut ids = self.all_participants();
-        ids.sort();
-        ids
+        SharedContext::collect(self)
     }
 
     fn local_storage(&self) -> &LocalStorage {

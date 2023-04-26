@@ -118,7 +118,7 @@ impl Proof for PiFacProof {
             rng,
         );
 
-        Self::fill_out_transcript(transcript, context, input, &P, &Q, &A, &B, &T, &sigma);
+        Self::fill_transcript(transcript, context, input, &P, &Q, &A, &B, &T, &sigma)?;
 
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
@@ -152,7 +152,7 @@ impl Proof for PiFacProof {
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()> {
-        Self::fill_out_transcript(
+        Self::fill_transcript(
             transcript,
             context,
             input,
@@ -162,7 +162,7 @@ impl Proof for PiFacProof {
             &self.B,
             &self.T,
             &self.sigma,
-        );
+        )?;
 
         // Verifier samples e in +- q (where q is the group order)
         let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
@@ -224,7 +224,7 @@ impl Proof for PiFacProof {
 
 impl PiFacProof {
     #[allow(clippy::too_many_arguments)]
-    fn fill_out_transcript(
+    fn fill_transcript(
         transcript: &mut Transcript,
         context: &impl ProofContext,
         input: &PiFacInput,
@@ -234,9 +234,9 @@ impl PiFacProof {
         B: &Commitment,
         T: &Commitment,
         sigma: &CommitmentRandomness,
-    ) {
-        transcript.append_message(b"PiFac ProofContext", &context.as_bytes());
-        transcript.append_message(b"PiFac CommonInput", &serialize!(&input).unwrap());
+    ) -> Result<()> {
+        transcript.append_message(b"PiFac ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"PiFac CommonInput", &serialize!(&input)?);
         transcript.append_message(
             b"(P, Q, A, B, T, sigma)",
             &[
@@ -249,6 +249,7 @@ impl PiFacProof {
             ]
             .concat(),
         );
+        Ok(())
     }
 }
 

@@ -95,7 +95,7 @@ impl Proof for PiModProof {
             w = random_positive_bn(rng, &input.N);
         }
 
-        Self::fill_transcript(transcript, context, input, &w);
+        Self::fill_transcript(transcript, context, input, &w)?;
 
         let mut elements = vec![];
         for _ in 0..LAMBDA {
@@ -162,7 +162,7 @@ impl Proof for PiModProof {
             warn!("N is not composite");
             return Err(InternalError::FailedToVerifyProof);
         }
-        Self::fill_transcript(transcript, context, input, &self.w);
+        Self::fill_transcript(transcript, context, input, &self.w)?;
 
         for elements in &self.elements {
             // First, check that y came from Fiat-Shamir transcript
@@ -205,10 +205,11 @@ impl PiModProof {
         context: &impl ProofContext,
         input: &PiModInput,
         w: &BigNumber,
-    ) {
-        transcript.append_message(b"PiMod ProofContext", &context.as_bytes());
-        transcript.append_message(b"PiMod CommonInput", &serialize!(&input).unwrap());
+    ) -> Result<()> {
+        transcript.append_message(b"PiMod ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"PiMod CommonInput", &serialize!(&input)?);
         transcript.append_message(b"w", &w.to_bytes());
+        Ok(())
     }
 }
 // Compute regular mod

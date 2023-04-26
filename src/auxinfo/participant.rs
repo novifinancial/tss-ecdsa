@@ -18,7 +18,7 @@ use crate::{
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
     participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
-    protocol::{ParticipantIdentifier, ProtocolType},
+    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     ring_pedersen::VerifiedRingPedersen,
     run_only_once,
 };
@@ -176,12 +176,10 @@ impl ProtocolParticipant for AuxInfoParticipant {
 }
 
 impl InnerProtocolParticipant for AuxInfoParticipant {
-    type Context = Vec<ParticipantIdentifier>;
+    type Context = SharedContext;
 
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
-        let mut ids = self.all_participants();
-        ids.sort();
-        ids
+        SharedContext::collect(self)
     }
 
     fn local_storage(&self) -> &LocalStorage {
@@ -668,8 +666,7 @@ mod tests {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
             inbox.push(participant.initialize_auxinfo_message(keyshare_identifier));
         }
-        let mut participant_ids = quorum[0].all_participants();
-        participant_ids.sort();
+
         while !is_auxinfo_done(&quorum) {
             // Try processing a message
             let (index, outcome) = match process_messages(&mut quorum, &mut inboxes, &mut rng) {
@@ -693,6 +690,8 @@ mod tests {
         let outputs: Vec<_> = outputs.into_iter().flatten().collect();
         assert!(outputs.len() == QUORUM_SIZE);
 
+        let participant_ids = quorum[0].all_participants();
+        let context = SharedContext::fill_context(participant_ids);
         // Check returned outputs
         //
         // Every participant should have a public output from every other participant
@@ -708,7 +707,7 @@ mod tests {
                     .find(|public_key| *public_key.participant() == pid);
                 assert!(public_key.is_some());
                 // Check that it's valid while we're here.
-                assert!(public_key.unwrap().verify(&participant_ids).is_ok());
+                assert!(public_key.unwrap().verify(&context).is_ok());
                 publics_for_pid.push(public_key.unwrap());
             }
 
