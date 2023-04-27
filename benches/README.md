@@ -1,8 +1,6 @@
-## Context
-
 The threshold ECDSA library breaks down the tss-ecdsa protocol by Canetti et. al into its constituent sub-protocols, namely keygen, auxinfo, pre-sign and sign, and benchmarks their running times for each party. 
 
-## Benchmarks
+# Benchmarks
 
 These benchmarks evaluate the keygen, aux-info, and pre-signing  protocols. We did not evaluate the signing step because it’s virtually instantaneous. Each protocol was run 100 times using the criterion Rust package.
 
@@ -49,3 +47,20 @@ It takes < #nodes > * < reported value > seconds for all the nodes to run in ser
 The above benchmarks were measured on December 2022. 
 
 
+# Granular statistics
+
+We also have tools to create a flame graph that highlights the relative cost of function calls across the protocol.
+To create a flame graph for the execution of the full protocol, run:
+```
+$ cargo +nightly test --release --features flame_it --package tss-ecdsa --lib -- protocol::tests::test_run_protocol --exact --nocapture
+```
+
+This will generate a flame graph HTML file at `dev/flame-graph.html`. This file is massive and may be slow to open in a browser.
+For details on how to expand the flame graph, [see the developer's documentation](https://github.com/llogiq/flamer).
+
+We also have a helper script that regroups the flame graph. The default organization puts functions in chronological order on the x-axis. The updated organization groups all invocations of the same subfunction within a given function call together, to more clearly illustrate which functions are bottlenecks.
+
+```
+$ cd dev
+$ python3 flame.py
+```

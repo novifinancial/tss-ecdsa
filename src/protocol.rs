@@ -900,7 +900,7 @@ mod tests {
         assert!(verification_key.verify_digest(hasher, &signature).is_ok());
 
         #[cfg(feature = "flame_it")]
-        flame::dump_html(&mut std::fs::File::create("stats/flame-graph.html").unwrap()).unwrap();
+        flame::dump_html(&mut std::fs::File::create("dev/flame-graph.html").unwrap()).unwrap();
         Ok(())
     }
 }

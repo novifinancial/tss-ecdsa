@@ -66,6 +66,4 @@ This library also includes a Makefile with our full set of continuous integratio
 
 ## Benchmarks
 
-The benchmarks are found in the benches folder. Please refer to the benches/README.md file for information on how to run and obtain the benchmarks.
-
-Please refer to flamegraphs if you want to see the relative costs of some function calls in a given test. Information to run that can be found in stats/README.md.
+The benchmarks are found in the benches folder. Please refer to the benches/README.md file for information on how to run and obtain the benchmarks, as well as how to generate a flame graph showing relative costs of some function calls.
