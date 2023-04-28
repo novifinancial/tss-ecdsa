@@ -24,7 +24,7 @@ use crate::{
         round_three::{Private as RoundThreePrivate, Public as RoundThreePublic, RoundThreeInput},
         round_two::{Private as RoundTwoPrivate, Public as RoundTwoPublic},
     },
-    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
+    protocol::{Identifier, ParticipantIdentifier, ProtocolType, SharedContext},
     utils::{bn_to_scalar, k256_order, random_plusminus_by_size, random_positive_bn},
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
@@ -115,6 +115,10 @@ pub enum Status {
 /// 2021](https://eprint.iacr.org/2021/060.pdf). Figure 7.
 #[derive(Debug)]
 pub struct PresignParticipant {
+    /// The current session identifier
+    sid: Identifier,
+    /// The current protocol input
+    input: Input,
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -201,12 +205,19 @@ impl ProtocolParticipant for PresignParticipant {
     type Output = PresignRecord;
     type Status = Status;
 
-    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+    fn new(
+        sid: Identifier,
+        id: ParticipantIdentifier,
+        other_participant_ids: Vec<ParticipantIdentifier>,
+        input: Self::Input,
+    ) -> Self {
         Self {
+            sid,
+            input,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, ()),
             status: Status::Initialized,
         }
     }
@@ -225,6 +236,14 @@ impl ProtocolParticipant for PresignParticipant {
 
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
+    }
+
+    fn sid(&self) -> Identifier {
+        self.sid
+    }
+
+    fn input(&self) -> &Self::Input {
+        &self.input
     }
 
     /// Processes the incoming message given the storage from the protocol

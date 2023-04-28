@@ -109,6 +109,8 @@ pub enum Status {
 /// 2021](https://eprint.iacr.org/2021/060.pdf). Figure 5.
 #[derive(Debug)]
 pub struct KeygenParticipant {
+    /// The current session identifier
+    sid: Identifier,
     /// A unique identifier for this participant.
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -129,12 +131,18 @@ impl ProtocolParticipant for KeygenParticipant {
     type Output = (Vec<KeySharePublic>, KeySharePrivate);
     type Status = Status;
 
-    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+    fn new(
+        sid: Identifier,
+        id: ParticipantIdentifier,
+        other_participant_ids: Vec<ParticipantIdentifier>,
+        input: Self::Input,
+    ) -> Self {
         Self {
+            sid,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, input),
             status: Status::Initialized,
         }
     }
@@ -153,6 +161,14 @@ impl ProtocolParticipant for KeygenParticipant {
 
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
+    }
+
+    fn sid(&self) -> Identifier {
+        self.sid
+    }
+
+    fn input(&self) -> &Self::Input {
+        &()
     }
 
     #[cfg_attr(feature = "flame_it", flame("keygen"))]
@@ -628,6 +644,7 @@ mod tests {
 
     impl KeygenParticipant {
         pub fn new_quorum<R: RngCore + CryptoRng>(
+            sid: Identifier,
             quorum_size: usize,
             rng: &mut R,
         ) -> Result<Vec<Self>> {
@@ -645,7 +662,7 @@ mod tests {
                             other_ids.push(id);
                         }
                     }
-                    Self::new(participant_id, other_ids)
+                    Self::new(sid, participant_id, other_ids, ())
                 })
                 .collect::<Vec<KeygenParticipant>>();
             Ok(participants)
@@ -734,7 +751,8 @@ mod tests {
     fn keygen_produces_valid_outputs() -> Result<()> {
         let QUORUM_SIZE = 3;
         let mut rng = init_testing();
-        let mut quorum = KeygenParticipant::new_quorum(QUORUM_SIZE, &mut rng)?;
+        let sid = Identifier::random(&mut rng);
+        let mut quorum = KeygenParticipant::new_quorum(sid, QUORUM_SIZE, &mut rng)?;
         let mut inboxes = HashMap::new();
         for participant in &quorum {
             let _ = inboxes.insert(participant.id, vec![]);
