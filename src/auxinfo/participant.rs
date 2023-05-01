@@ -18,7 +18,7 @@ use crate::{
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
     participant::{Broadcast, InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
-    protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
+    protocol::{Identifier, ParticipantIdentifier, ProtocolType, SharedContext},
     ring_pedersen::VerifiedRingPedersen,
     run_only_once,
 };
@@ -91,6 +91,10 @@ pub enum Status {
 
 #[derive(Debug)]
 pub struct AuxInfoParticipant {
+    /// The current session identifier
+    sid: Identifier,
+    /// The current protocol input
+    input: (),
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -111,12 +115,19 @@ impl ProtocolParticipant for AuxInfoParticipant {
     type Output = (Vec<AuxInfoPublic>, AuxInfoPrivate);
     type Status = Status;
 
-    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+    fn new(
+        sid: Identifier,
+        id: ParticipantIdentifier,
+        other_participant_ids: Vec<ParticipantIdentifier>,
+        input: Self::Input,
+    ) -> Self {
         Self {
+            sid,
+            input,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(id, other_participant_ids),
+            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, input),
             status: Status::Initialized,
         }
     }
@@ -135,6 +146,14 @@ impl ProtocolParticipant for AuxInfoParticipant {
 
     fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
         &self.other_participant_ids
+    }
+
+    fn sid(&self) -> Identifier {
+        self.sid
+    }
+
+    fn input(&self) -> &Self::Input {
+        &self.input
     }
 
     #[cfg_attr(feature = "flame_it", flame("auxinfo"))]
@@ -555,6 +574,8 @@ mod tests {
 
     impl AuxInfoParticipant {
         pub fn new_quorum<R: RngCore + CryptoRng>(
+            sid: Identifier,
+            input: (),
             quorum_size: usize,
             rng: &mut R,
         ) -> Result<Vec<Self>> {
@@ -572,7 +593,7 @@ mod tests {
                             other_ids.push(id);
                         }
                     }
-                    Self::new(participant_id, other_ids)
+                    Self::new(sid, participant_id, other_ids, input)
                 })
                 .collect::<Vec<AuxInfoParticipant>>();
             Ok(participants)
@@ -664,7 +685,8 @@ mod tests {
     fn test_run_auxinfo_protocol() -> Result<()> {
         let QUORUM_SIZE = 3;
         let mut rng = init_testing();
-        let mut quorum = AuxInfoParticipant::new_quorum(QUORUM_SIZE, &mut rng)?;
+        let sid = Identifier::random(&mut rng);
+        let mut quorum = AuxInfoParticipant::new_quorum(sid, (), QUORUM_SIZE, &mut rng)?;
         let mut inboxes = HashMap::new();
         for participant in &quorum {
             let _ = inboxes.insert(participant.id, vec![]);

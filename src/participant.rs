@@ -170,7 +170,7 @@ where
 /// protocol.
 pub trait ProtocolParticipant {
     /// Input type for a new protocol instance.
-    type Input: Debug;
+    type Input: Debug + Clone;
     /// Output type of a successful protocol execution.
     type Output: Debug;
     /// Type to determine status of protocol execution.
@@ -184,7 +184,12 @@ pub trait ProtocolParticipant {
     fn protocol_type() -> ProtocolType;
 
     /// Create a new [`ProtocolParticipant`] from the given ids.
-    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self;
+    fn new(
+        sid: Identifier,
+        id: ParticipantIdentifier,
+        other_participant_ids: Vec<ParticipantIdentifier>,
+        input: Self::Input,
+    ) -> Self;
 
     /// Return the participant id
     fn id(&self) -> ParticipantIdentifier;
@@ -229,6 +234,12 @@ pub trait ProtocolParticipant {
 
     /// The status of the protocol execution.
     fn status(&self) -> &Self::Status;
+
+    /// The session identifier for the current session
+    fn sid(&self) -> Identifier;
+
+    /// The input of the current session
+    fn input(&self) -> &Self::Input;
 }
 
 pub(crate) trait InnerProtocolParticipant: ProtocolParticipant {

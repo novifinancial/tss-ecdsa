@@ -54,6 +54,8 @@ pub enum Status {
 
 #[derive(Debug)]
 pub(crate) struct BroadcastParticipant {
+    /// The current session identifier
+    sid: Identifier,
     /// A unique identifier for this participant
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
@@ -90,8 +92,14 @@ impl ProtocolParticipant for BroadcastParticipant {
     type Output = BroadcastOutput;
     type Status = Status;
 
-    fn new(id: ParticipantIdentifier, other_participant_ids: Vec<ParticipantIdentifier>) -> Self {
+    fn new(
+        sid: Identifier,
+        id: ParticipantIdentifier,
+        other_participant_ids: Vec<ParticipantIdentifier>,
+        _input: Self::Input,
+    ) -> Self {
         Self {
+            sid,
             id,
             other_participant_ids,
             local_storage: Default::default(),
@@ -107,6 +115,13 @@ impl ProtocolParticipant for BroadcastParticipant {
         &self.other_participant_ids
     }
 
+    fn sid(&self) -> Identifier {
+        self.sid
+    }
+
+    fn input(&self) -> &Self::Input {
+        &()
+    }
     fn ready_type() -> MessageType {
         // I'm not totally confident since broadcast takes a different shape than the
         // other protocols, but this is definitely the first message in the

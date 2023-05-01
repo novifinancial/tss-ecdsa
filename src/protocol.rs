@@ -104,15 +104,9 @@ where
     /// An identifier for this participant.
     id: ParticipantIdentifier,
 
-    /// A unique identifier for the session this participant is executing.
-    sid: Identifier,
-
     /// The [`ProtocolParticipant`] driver defining the actual protocol
     /// execution.
     participant: P,
-
-    /// External input for the protocol.
-    input: P::Input,
 }
 
 impl<P: ProtocolParticipant> Participant<P> {
@@ -122,9 +116,7 @@ impl<P: ProtocolParticipant> Participant<P> {
 
         Participant {
             id: config.id,
-            sid,
-            participant: P::new(config.id, config.other_ids.clone()),
-            input,
+            participant: P::new(sid, config.id, config.other_ids.clone(), input),
         }
     }
 
@@ -135,7 +127,7 @@ impl<P: ProtocolParticipant> Participant<P> {
 
     /// Retrieve the unique session [`Identifier`] for this `Participant`.
     pub fn sid(&self) -> Identifier {
-        self.sid
+        self.participant.sid()
     }
 
     /// Process the first message from the participant's inbox.
@@ -156,11 +148,11 @@ impl<P: ProtocolParticipant> Participant<P> {
         info!("Processing single message.");
 
         // Check SID
-        if message.id() != self.sid {
+        if message.id() != self.sid() {
             error!(
                 "Message for session {} was routed to the wrong participant (sid: {})!",
                 message.id(),
-                self.sid
+                self.sid()
             );
             Err(CallerError::WrongSessionId)?
         }
@@ -195,9 +187,9 @@ impl<P: ProtocolParticipant> Participant<P> {
         }
 
         // Handle it!
-        let outcome = self
-            .participant
-            .process_message(rng, message, &self.input)?;
+        let outcome =
+            self.participant
+                .process_message(rng, message, &self.participant.input().clone())?;
         let (output, messages) = outcome.into_parts();
         Ok((output, messages))
     }
@@ -207,7 +199,7 @@ impl<P: ProtocolParticipant> Participant<P> {
     #[instrument(skip_all)]
     pub fn initialize_message(&self) -> Message {
         info!("Initializing subprotocol.");
-        Message::new(P::ready_type(), self.sid, self.id, self.id, &[])
+        Message::new(P::ready_type(), self.sid(), self.id, self.id, &[])
     }
 
     /// Return the protocol status.
