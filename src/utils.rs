@@ -6,10 +6,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::errors::{
-    InternalError::{CouldNotConvertToScalar, RetryFailed},
-    Result,
-};
+use crate::errors::{CallerError, InternalError, Result};
 use generic_array::GenericArray;
 use k256::{
     elliptic_curve::{bigint::Encoding, group::ff::PrimeField, AffinePoint, Curve},
@@ -20,6 +17,7 @@ use merlin::Transcript;
 use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::Debug;
+use tracing::error;
 use zeroize::Zeroize;
 
 pub(crate) const CRYPTOGRAPHIC_RETRY_MAX: usize = 500usize;
@@ -136,8 +134,6 @@ pub(crate) fn random_plusminus_by_size_with_minimum<R: RngCore + CryptoRng>(
     max: usize,
     min: usize,
 ) -> crate::errors::Result<BigNumber> {
-    use crate::errors::InternalError;
-
     if min >= max {
         tracing::error!(
             "Can't sample from specified range because lower bound is not smaller
@@ -215,9 +211,12 @@ pub(crate) fn random_bn_in_z_star<R: RngCore + CryptoRng>(
     std::iter::repeat_with(|| BigNumber::from_rng(n, rng))
         .take(CRYPTOGRAPHIC_RETRY_MAX)
         .find(|result| result != &BigNumber::zero() && result.gcd(n) == BigNumber::one())
-        .ok_or(RetryFailed)
+        .ok_or(InternalError::CallingApplicationMistake(
+            CallerError::RetryFailed,
+        ))
 }
 
+// Returns x: BigNumber as a k256::Scalar mod k256_order
 pub(crate) fn bn_to_scalar(x: &BigNumber) -> Result<k256::Scalar> {
     // Take (mod q)
     let order = k256_order();
@@ -230,7 +229,10 @@ pub(crate) fn bn_to_scalar(x: &BigNumber) -> Result<k256::Scalar> {
     let mut ret: k256::Scalar = Option::from(k256::Scalar::from_repr(
         GenericArray::clone_from_slice(&slice),
     ))
-    .ok_or(CouldNotConvertToScalar)?;
+    .ok_or_else(|| {
+        error!("Failed to convert BigNumber into k256::Scalar");
+        InternalError::InternalInvariantFailed
+    })?;
 
     // Make sure to negate the scalar if the original input was negative
     if x < &BigNumber::zero() {

@@ -10,8 +10,6 @@
 use core::fmt::Debug;
 use thiserror::Error;
 
-use crate::paillier;
-
 /// The default Result type used in this crate
 pub type Result<T> = std::result::Result<T, InternalError>;
 
@@ -23,44 +21,12 @@ pub enum InternalError {
     CallingApplicationMistake(#[from] CallerError),
     #[error("Serialization Error")]
     Serialization,
-    #[error("Protocol error")]
+    #[error("Some player sent a message which does not match the protocol specification")]
     ProtocolError,
-    #[error("Could not successfully generate proof")]
-    CouldNotGenerateProof,
-    #[error("Failed to verify proof")]
-    FailedToVerifyProof,
     #[error("Represents some code assumption that was checked at runtime but failed to be true")]
     InternalInvariantFailed,
-    #[error("Paillier error: `{0}`")]
-    PaillierError(#[from] paillier::Error),
-    #[error("Failed to convert BigNumber to k256::Scalar, as BigNumber was not in [0,p)")]
-    CouldNotConvertToScalar,
-    #[error("Could not invert a Scalar")]
-    CouldNotInvertScalar,
-    #[error("Reached the maximum allowed number of retries")]
-    RetryFailed,
-    #[error("This Participant was given a message intended for somebody else")]
-    WrongMessageRecipient,
-    #[error("Encountered a MessageType which was not expected in this context")]
-    MisroutedMessage,
-    #[error("Could not construct signature from provided scalars")]
-    SignatureInstantiationError,
-    #[error("Tried to produce a signature without including shares")]
-    NoChainedShares,
     #[error("Storage does not contain the requested item")]
     StorageItemNotFound,
-    #[error("The provided Broadcast Tag was not the expected tag for this context")]
-    IncorrectBroadcastMessageTag,
-    #[error("Encountered a Message sent directly, when it should have been broadcasted")]
-    MessageMustBeBroadcasted,
-    #[error("Broadcast has irrecoverably failed: `{0}`")]
-    BroadcastFailure(String),
-    #[error(
-        "Tried to start a new protocol instance with an Identifier used in an existing instance"
-    )]
-    IdentifierInUse,
-    #[error("Protocol has already terminated")]
-    ProtocolAlreadyTerminated,
 }
 
 /// Errors that are caused by incorrect behavior by the calling application.
@@ -80,6 +46,10 @@ pub enum CallerError {
     WrongProtocol,
     #[error("Received a message from a sender not included in the list of participants")]
     InvalidMessageSender,
+    #[error("Received a message for a Protocol which has already terminated")]
+    ProtocolAlreadyTerminated,
+    #[error("The provided RNG failed to produce suitable values after a maximum number of attempts. Please check the RNG.")]
+    RetryFailed,
 }
 
 macro_rules! serialize {

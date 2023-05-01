@@ -8,7 +8,7 @@
 
 use crate::{
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
-    errors::{InternalError, Result},
+    errors::{CallerError, InternalError, Result},
     keygen::{
         keygen_commit::{KeygenCommit, KeygenDecommit},
         keyshare::{KeySharePrivate, KeySharePublic},
@@ -28,7 +28,7 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
-use tracing::{info, instrument};
+use tracing::{error, info, instrument};
 
 mod storage {
     use super::*;
@@ -166,7 +166,7 @@ impl ProtocolParticipant for KeygenParticipant {
         info!("Processing keygen message.");
 
         if *self.status() == Status::TerminatedSuccessfully {
-            return Err(InternalError::ProtocolAlreadyTerminated);
+            Err(CallerError::ProtocolAlreadyTerminated)?;
         }
 
         match message.message_type() {
@@ -181,7 +181,13 @@ impl ProtocolParticipant for KeygenParticipant {
                 self.handle_round_two_msg(message)
             }
             MessageType::Keygen(KeygenMessageType::R3Proof) => self.handle_round_three_msg(message),
-            _ => Err(InternalError::MisroutedMessage)?,
+            message_type => {
+                error!(
+                    "Incorrect MessageType given to KeygenParticipant. Got: {:?}",
+                    message_type
+                );
+                Err(InternalError::InternalInvariantFailed)
+            }
         }
     }
 
@@ -304,7 +310,12 @@ impl KeygenParticipant {
         // message _after_ round one is complete? Likewise for all other rounds.
 
         if broadcast_message.tag != BroadcastTag::KeyGenR1CommitHash {
-            return Err(InternalError::IncorrectBroadcastMessageTag);
+            error!(
+                "Incorrect Broadcast Tag on received message. Expected {:?}, got {:?}",
+                BroadcastTag::KeyGenR1CommitHash,
+                broadcast_message.tag
+            );
+            return Err(InternalError::ProtocolError);
         }
         let message = &broadcast_message.msg;
         self.local_storage

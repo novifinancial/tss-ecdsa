@@ -139,10 +139,19 @@ impl Proof for PiAffgProof {
         // Sample beta from 2^{ELL_PRIME + EPSILON}.
         let beta = random_plusminus_by_size(rng, ELL_PRIME + EPSILON);
 
-        let (b, r) = input.pk0.encrypt(rng, &beta)?;
-        let A = input.pk0.multiply_and_add(&alpha, &input.C, &b)?;
+        let (b, r) = input
+            .pk0
+            .encrypt(rng, &beta)
+            .map_err(|_| InternalError::InternalInvariantFailed)?;
+        let A = input
+            .pk0
+            .multiply_and_add(&alpha, &input.C, &b)
+            .map_err(|_| InternalError::InternalInvariantFailed)?;
         let B_x = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
-        let (B_y, r_y) = input.pk1.encrypt(rng, &beta)?;
+        let (B_y, r_y) = input
+            .pk1
+            .encrypt(rng, &beta)
+            .map_err(|_| InternalError::InternalInvariantFailed)?;
         let (E, gamma) = input
             .setup_params
             .scheme()
@@ -204,20 +213,29 @@ impl Proof for PiAffgProof {
 
         if e != self.e {
             warn!("Fiat-Shamir consistency check failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         // Do equality checks
 
         let eq_check_1 = {
-            let a = input.pk0.encrypt_with_nonce(&self.z2, &self.w)?;
-            let lhs = input.pk0.multiply_and_add(&self.z1, &input.C, &a)?;
-            let rhs = input.pk0.multiply_and_add(&self.e, &input.D, &self.A)?;
+            let a = input
+                .pk0
+                .encrypt_with_nonce(&self.z2, &self.w)
+                .map_err(|_| InternalError::ProtocolError)?;
+            let lhs = input
+                .pk0
+                .multiply_and_add(&self.z1, &input.C, &a)
+                .map_err(|_| InternalError::ProtocolError)?;
+            let rhs = input
+                .pk0
+                .multiply_and_add(&self.e, &input.D, &self.A)
+                .map_err(|_| InternalError::ProtocolError)?;
             lhs == rhs
         };
         if !eq_check_1 {
             warn!("eq_check_1 failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         let eq_check_2 = {
@@ -227,18 +245,24 @@ impl Proof for PiAffgProof {
         };
         if !eq_check_2 {
             warn!("eq_check_2 failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         let eq_check_3 = {
-            let lhs = input.pk1.encrypt_with_nonce(&self.z2, &self.w_y)?;
+            let lhs = input
+                .pk1
+                .encrypt_with_nonce(&self.z2, &self.w_y)
+                .map_err(|_| InternalError::ProtocolError)?;
 
-            let rhs = input.pk1.multiply_and_add(&self.e, &input.Y, &self.B_y)?;
+            let rhs = input
+                .pk1
+                .multiply_and_add(&self.e, &input.Y, &self.B_y)
+                .map_err(|_| InternalError::ProtocolError)?;
             lhs == rhs
         };
         if !eq_check_3 {
             warn!("eq_check_3 failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         let eq_check_4 = {
@@ -251,7 +275,7 @@ impl Proof for PiAffgProof {
         };
         if !eq_check_4 {
             warn!("eq_check_4 failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         let eq_check_5 = {
@@ -264,7 +288,7 @@ impl Proof for PiAffgProof {
         };
         if !eq_check_5 {
             warn!("eq_check_5 failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         // Do range check
@@ -273,11 +297,11 @@ impl Proof for PiAffgProof {
         let ell_prime_bound = BigNumber::one() << (ELL_PRIME + EPSILON);
         if self.z1 < -ell_bound.clone() || self.z1 > ell_bound {
             warn!("self.z1 > ell_bound check failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
         if self.z2 < -ell_prime_bound.clone() || self.z2 > ell_prime_bound {
             warn!("self.z2 > ell_prime_bound check failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         Ok(())
@@ -331,23 +355,23 @@ mod tests {
         x: &BigNumber,
         y: &BigNumber,
     ) -> Result<(PiAffgProof, PiAffgInput, Transcript)> {
-        let (decryption_key_0, _, _) = DecryptionKey::new(rng)?;
+        let (decryption_key_0, _, _) = DecryptionKey::new(rng).unwrap();
         let pk0 = decryption_key_0.encryption_key();
 
-        let (decryption_key_1, _, _) = DecryptionKey::new(rng)?;
+        let (decryption_key_1, _, _) = DecryptionKey::new(rng).unwrap();
         let pk1 = decryption_key_1.encryption_key();
 
         let g = k256::ProjectivePoint::GENERATOR;
 
         let X = CurvePoint(g * utils::bn_to_scalar(x)?);
-        let (Y, rho_y) = pk1.encrypt(rng, y)?;
+        let (Y, rho_y) = pk1.encrypt(rng, y).unwrap();
 
         let C = pk0.random_ciphertext(rng);
 
         // Compute D = C^x * (1 + N0)^y rho^N0 (mod N0^2)
         let (D, rho) = {
-            let (D_intermediate, rho) = pk0.encrypt(rng, y)?;
-            let D = pk0.multiply_and_add(x, &C, &D_intermediate)?;
+            let (D_intermediate, rho) = pk0.encrypt(rng, y).unwrap();
+            let D = pk0.multiply_and_add(x, &C, &D_intermediate).unwrap();
             (D, rho)
         };
 

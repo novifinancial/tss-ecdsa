@@ -13,6 +13,7 @@ use crate::{
     ParticipantIdentifier,
 };
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BroadcastData {
@@ -27,7 +28,11 @@ impl BroadcastData {
         if message.message_type() != MessageType::Broadcast(BroadcastMessageType::Disperse)
             && message.message_type() != MessageType::Broadcast(BroadcastMessageType::Redisperse)
         {
-            return Err(InternalError::MisroutedMessage);
+            error!(
+                "Incorrect MessageType given to Broadcast Handler. Got: {:?}",
+                message.message_type()
+            );
+            return Err(InternalError::InternalInvariantFailed);
         }
         let broadcast_data: BroadcastData = deserialize!(&message.unverified_bytes)?;
         Ok(broadcast_data)

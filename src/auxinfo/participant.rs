@@ -13,7 +13,7 @@ use crate::{
         proof::AuxInfoProof,
     },
     broadcast::participant::{BroadcastOutput, BroadcastParticipant, BroadcastTag},
-    errors::{InternalError, Result},
+    errors::{CallerError, InternalError, Result},
     local_storage::LocalStorage,
     messages::{AuxinfoMessageType, Message, MessageType},
     paillier::DecryptionKey,
@@ -23,7 +23,7 @@ use crate::{
     run_only_once,
 };
 use rand::{CryptoRng, RngCore};
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 // Local storage data types.
 mod storage {
@@ -148,7 +148,7 @@ impl ProtocolParticipant for AuxInfoParticipant {
         info!("Processing auxinfo message.");
 
         if *self.status() == Status::TerminatedSuccessfully {
-            return Err(InternalError::ProtocolAlreadyTerminated);
+            Err(CallerError::ProtocolAlreadyTerminated)?;
         }
 
         match message.message_type() {
@@ -165,8 +165,13 @@ impl ProtocolParticipant for AuxInfoParticipant {
             MessageType::Auxinfo(AuxinfoMessageType::R3Proof) => {
                 self.handle_round_three_msg(rng, message, input)
             }
-            MessageType::Auxinfo(_) => Err(InternalError::MessageMustBeBroadcasted),
-            _ => Err(InternalError::MisroutedMessage),
+            message_type => {
+                error!(
+                    "Incorrect MessageType given to AuxInfoParticipant. Got: {:?}",
+                    message_type
+                );
+                Err(InternalError::InternalInvariantFailed)
+            }
         }
     }
 
@@ -264,7 +269,12 @@ impl AuxInfoParticipant {
         info!("Handling round one auxinfo message.");
 
         if broadcast_message.tag != BroadcastTag::AuxinfoR1CommitHash {
-            return Err(InternalError::IncorrectBroadcastMessageTag);
+            error!(
+                "Incorrect Broadcast Tag on received message. Expected {:?}, got {:?}",
+                BroadcastTag::AuxinfoR1CommitHash,
+                broadcast_message.tag
+            );
+            return Err(InternalError::ProtocolError);
         }
         let message = &broadcast_message.msg;
         self.local_storage
@@ -521,7 +531,10 @@ impl AuxInfoParticipant {
     ) -> Result<(AuxInfoPrivate, AuxInfoPublic, AuxInfoWitnesses)> {
         debug!("Creating new auxinfo.");
 
-        let (decryption_key, p, q) = DecryptionKey::new(rng)?;
+        let (decryption_key, p, q) = DecryptionKey::new(rng).map_err(|_| {
+            error!("Failed to create DecryptionKey");
+            InternalError::InternalInvariantFailed
+        })?;
         let params = VerifiedRingPedersen::extract(&decryption_key, &self.retrieve_context(), rng)?;
         let encryption_key = decryption_key.encryption_key();
 

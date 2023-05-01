@@ -220,7 +220,10 @@ impl Proof for PiLogProof {
             input.ring_pedersen.commit(&secret.plaintext, ELL, rng);
         // Encrypt the random plaintext using Paillier (producing variables `A` and `r`
         // in the paper).
-        let (mask_ciphertext, mask_nonce) = input.prover_encryption_key.encrypt(rng, &mask)?;
+        let (mask_ciphertext, mask_nonce) = input
+            .prover_encryption_key
+            .encrypt(rng, &mask)
+            .map_err(|_| InternalError::InternalInvariantFailed)?;
         // Commit to the random plaintext using discrete log (`Y` in the paper).
         let mask_dlog_commit = input.generator.multiply_by_scalar(&mask)?;
         // Commit to the random plaintext using ring-Pedersen (producing variables `D`
@@ -283,24 +286,24 @@ impl Proof for PiLogProof {
         // ... and check that it's the correct challenge.
         if challenge != self.challenge {
             warn!("Fiat-Shamir consistency check failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         // Check that the Paillier encryption of the secret plaintext is valid.
         let paillier_encryption_is_valid = {
             let lhs = input
                 .prover_encryption_key
-                .encrypt_with_nonce(&self.plaintext_response, &self.nonce_response)?;
-            let rhs = input.prover_encryption_key.multiply_and_add(
-                &self.challenge,
-                &input.ciphertext,
-                &self.mask_ciphertext,
-            )?;
+                .encrypt_with_nonce(&self.plaintext_response, &self.nonce_response)
+                .map_err(|_| InternalError::ProtocolError)?;
+            let rhs = input
+                .prover_encryption_key
+                .multiply_and_add(&self.challenge, &input.ciphertext, &self.mask_ciphertext)
+                .map_err(|_| InternalError::ProtocolError)?;
             lhs == rhs
         };
         if !paillier_encryption_is_valid {
             warn!("paillier encryption check (first equality check) failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
         // Check that the group exponentiation of the secret plaintext is valid.
         let group_exponentiation_is_valid = {
@@ -313,7 +316,7 @@ impl Proof for PiLogProof {
         };
         if !group_exponentiation_is_valid {
             warn!("group exponentiation check (second equality check) failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         // Check that the ring-Pedersen commitment of the secret plaintext is valid.
@@ -330,14 +333,14 @@ impl Proof for PiLogProof {
         };
         if !ring_pedersen_commitment_is_valid {
             warn!("ring Pedersen commitment check (third equality check) failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         // Do a range check on the plaintext response, which validates that the
         // plaintext falls within the same range.
         if !within_bound_by_size(&self.plaintext_response, ELL + EPSILON) {
             warn!("plaintext range check failed");
-            return Err(InternalError::FailedToVerifyProof);
+            return Err(InternalError::ProtocolError);
         }
 
         Ok(())
@@ -358,13 +361,13 @@ mod tests {
         rng: &mut R,
         x: &BigNumber,
     ) -> Result<(PiLogProof, CommonInput, Transcript)> {
-        let (decryption_key, _, _) = DecryptionKey::new(rng)?;
+        let (decryption_key, _, _) = DecryptionKey::new(rng).unwrap();
         let pk = decryption_key.encryption_key();
 
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
         let X = CurvePoint(g.0 * utils::bn_to_scalar(x)?);
-        let (C, rho) = pk.encrypt(rng, x)?;
+        let (C, rho) = pk.encrypt(rng, x).unwrap();
 
         let setup_params = VerifiedRingPedersen::gen(rng, &())?;
 

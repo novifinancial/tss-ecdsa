@@ -8,7 +8,7 @@
 
 use crate::{
     broadcast::data::BroadcastData,
-    errors::{InternalError, Result},
+    errors::{CallerError, InternalError, Result},
     local_storage::LocalStorage,
     messages::{BroadcastMessageType, Message, MessageType},
     participant::{InnerProtocolParticipant, ProcessOutcome, ProtocolParticipant},
@@ -132,7 +132,7 @@ impl ProtocolParticipant for BroadcastParticipant {
             // have completed a broadcast equals the total number of other
             // participants.
             if participants.len() == self.other_participant_ids.len() {
-                return Err(InternalError::ProtocolAlreadyTerminated);
+                Err(CallerError::ProtocolAlreadyTerminated)?;
             }
         }
 
@@ -143,7 +143,13 @@ impl ProtocolParticipant for BroadcastParticipant {
             MessageType::Broadcast(BroadcastMessageType::Redisperse) => {
                 self.handle_round_two_msg(rng, message)
             }
-            _ => Err(InternalError::MisroutedMessage),
+            message_type => {
+                error!(
+                    "Incorrect MessageType given to Broadcast handler. Got: {:?}",
+                    message_type
+                );
+                Err(InternalError::InternalInvariantFailed)
+            }
         }
     }
 

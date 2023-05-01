@@ -263,7 +263,12 @@ impl SignatureShare {
             }
             (Some(prev_r), Some(new_r)) => {
                 if prev_r != new_r {
-                    return Err(InternalError::SignatureInstantiationError);
+                    error!(
+                        "Failed to chain signature shares together because 
+                        r-values were different. Got {:?}, expected {:?}.",
+                        &prev_r, new_r
+                    );
+                    return Err(InternalError::InternalInvariantFailed);
                 }
                 Ok(prev_r)
             }
@@ -285,10 +290,15 @@ impl SignatureShare {
         if bool::from(s.is_high()) {
             s = s.negate();
         }
-        let r = self.r.ok_or(InternalError::NoChainedShares)?;
+        let r = self.r.ok_or_else(|| {
+            error!("Tried to produce a signature without including shares");
+            InternalError::InternalInvariantFailed
+        })?;
 
-        k256::ecdsa::Signature::from_scalars(r, s)
-            .map_err(|_| InternalError::SignatureInstantiationError)
+        k256::ecdsa::Signature::from_scalars(r, s).map_err(|_| {
+            error!("Unable to create ECDSA signature from provided r and s");
+            InternalError::InternalInvariantFailed
+        })
     }
 }
 
