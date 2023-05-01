@@ -726,7 +726,7 @@ mod tests {
         assert!(outputs.len() == QUORUM_SIZE);
 
         let participant_ids = quorum[0].all_participants();
-        let context = SharedContext::fill_context(participant_ids);
+        let context = SharedContext::fill_context(participant_ids, sid);
         // Check returned outputs
         //
         // Every participant should have a public output from every other participant
