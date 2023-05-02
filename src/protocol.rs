@@ -303,7 +303,6 @@ pub struct ParticipantConfig {
     pub other_ids: Vec<ParticipantIdentifier>,
 }
 
-#[cfg(test)]
 impl ParticipantConfig {
     /// Get a list of `size` consistent [`ParticipantConfig`]s.
     ///
@@ -311,9 +310,11 @@ impl ParticipantConfig {
     /// [`ParticipantIdentifier`]s.
     ///
     /// This method implies the existence of a trusted third party that
-    /// generates the IDs; that's why it's only available for testing right
-    /// now.
-    fn random_quorum<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> Vec<ParticipantConfig> {
+    /// generates the IDs and gives them to participants.
+    pub fn random_quorum<R: RngCore + CryptoRng>(
+        size: usize,
+        rng: &mut R,
+    ) -> Vec<ParticipantConfig> {
         let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size)
             .collect::<Vec<_>>();
@@ -327,6 +328,7 @@ impl ParticipantConfig {
             .collect()
     }
 
+    #[cfg(test)]
     fn random<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> ParticipantConfig {
         assert!(size > 1);
         let other_ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))

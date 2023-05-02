@@ -9,7 +9,7 @@
 //! Runs the presignature generation protocol, producing a
 //! [record::PresignRecord]
 
-pub(crate) mod participant;
+pub mod participant;
 pub(crate) mod record;
 pub(crate) mod round_one;
 pub(crate) mod round_three;

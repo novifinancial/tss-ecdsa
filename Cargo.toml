@@ -37,7 +37,7 @@ zeroize = "1.5"
 
 [dev-dependencies]
 anyhow = "1"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4.2", features = ["derive"] }
 criterion = "0.3"
 dialoguer = "0.10"
 env_logger = "0.10.0"
@@ -48,7 +48,6 @@ reqwest = { version = "0.11", features = ["json"] }
 rocket = { version = "0.5.0-rc", default-features = false, features = ["json"] }
 rug = { version = "1.16", default-features = false, features = ["integer", "rand"] }
 tracing = {version = "0.1", default-features = false}
-#tracing-subscriber = {version = "0.3", default-features = false, features = ["env-filter", "fmt"]}
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tokio = { version = "1", features = ["full"] }
 
@@ -59,3 +58,7 @@ harness = false
 [[bench]]
 name = "bignumber_benchmark"
 harness = false
+
+[[example]]
+name = "threaded_example"
+path = "examples/threaded_example/main.rs"

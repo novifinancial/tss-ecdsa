@@ -1,3 +1,4 @@
+//! Types and functions related to key generation sub-protocol.
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
 //
@@ -8,4 +9,4 @@
 
 pub(crate) mod keygen_commit;
 pub(crate) mod keyshare;
-pub(crate) mod participant;
+pub mod participant;

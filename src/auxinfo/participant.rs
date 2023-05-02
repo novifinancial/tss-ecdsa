@@ -1,3 +1,6 @@
+//! Types and functions related to generate auxiliary information sub-protocol
+//! Participant.
+
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
 //
@@ -63,7 +66,9 @@ mod storage {
 /// Protocol status for [`AuxInfoParticipant`].
 #[derive(Debug, PartialEq)]
 pub enum Status {
+    /// Participant has been initialized.
     Initialized,
+    /// Participant has finished sub-protocol
     TerminatedSuccessfully,
 }
 
