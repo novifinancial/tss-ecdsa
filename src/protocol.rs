@@ -370,6 +370,7 @@ impl ParticipantIdentifier {
 /// The SharedContext contains fixed known parameters accross the entire
 /// protocol. It does not however contain the entire protocol context.
 pub struct SharedContext {
+    sid: Identifier,
     participants: Vec<ParticipantIdentifier>,
     generator: CurvePoint,
     order: BigNumber,
@@ -377,6 +378,7 @@ pub struct SharedContext {
 impl ProofContext for SharedContext {
     fn as_bytes(&self) -> Result<Vec<u8>> {
         Ok([
+            self.sid.0.to_be_bytes().into_iter().collect(),
             self.participants
                 .iter()
                 .flat_map(|pid| pid.0.to_le_bytes())
@@ -396,15 +398,17 @@ impl SharedContext {
         let generator = CurvePoint::GENERATOR;
         let order = k256_order();
         SharedContext {
+            sid: p.sid(),
             participants,
             generator,
             order,
         }
     }
     #[cfg(test)]
-    pub fn fill_context(mut participants: Vec<ParticipantIdentifier>) -> Self {
+    pub fn fill_context(mut participants: Vec<ParticipantIdentifier>, sid: Identifier) -> Self {
         participants.sort();
         SharedContext {
+            sid,
             participants,
             generator: CurvePoint::GENERATOR,
             order: k256_order(),
