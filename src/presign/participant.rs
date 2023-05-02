@@ -85,6 +85,37 @@ pub enum Status {
     TerminatedSuccessfully,
 }
 
+/// PresignContext includes shared parameters in
+/// `SharedContext` and public parameters as
+/// defined in [`AuxInfoPublic`].
+#[derive(Debug)]
+pub struct PresignContext {
+    shared_context: SharedContext,
+    auxinfo_public: Vec<AuxInfoPublic>,
+}
+
+impl ProofContext for PresignContext {
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        Ok([
+            self.shared_context.as_bytes()?,
+            bincode::serialize(&self.auxinfo_public)
+                .map_err(|_| InternalError::InternalInvariantFailed)?,
+        ]
+        .concat())
+    }
+}
+
+impl PresignContext {
+    pub(crate) fn collect(p: &PresignParticipant) -> Self {
+        let mut auxinfo_public = p.input().all_auxinfo_public();
+        auxinfo_public.sort_by(|a, b| a.participant().cmp(b.participant()));
+        Self {
+            shared_context: SharedContext::collect(p),
+            auxinfo_public,
+        }
+    }
+}
+
 /// A [`ProtocolParticipant`] that runs the presign protocol[^cite].
 ///
 /// # Protocol input
@@ -198,6 +229,11 @@ impl Input {
             .filter(|item| *item.participant() != pid)
             .collect()
     }
+    /// Returns a copy of the [`AuxInfoPublic`]s associated with all the
+    /// participants.
+    fn all_auxinfo_public(&self) -> Vec<AuxInfoPublic> {
+        self.all_auxinfo_public.clone()
+    }
 }
 
 impl ProtocolParticipant for PresignParticipant {
@@ -299,10 +335,10 @@ impl ProtocolParticipant for PresignParticipant {
 }
 
 impl InnerProtocolParticipant for PresignParticipant {
-    type Context = SharedContext;
+    type Context = PresignContext;
 
     fn retrieve_context(&self) -> <Self as InnerProtocolParticipant>::Context {
-        SharedContext::collect(self)
+        PresignContext::collect(self)
     }
 
     fn local_storage(&self) -> &LocalStorage {

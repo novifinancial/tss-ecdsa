@@ -18,7 +18,6 @@ use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::{error, instrument};
-
 /// The private key corresponding to a given Participant's [`AuxInfoPublic`].
 ///
 /// # 🔒 Storage requirements
