@@ -68,14 +68,13 @@ impl Public {
 
         // Verify the psi proof
         let psi_input = PiAffgInput::new(
-            receiver_auxinfo_public.params(),
-            &g,
-            receiver_auxinfo_public.pk(),
-            sender_auxinfo_public.pk(),
-            &receiver_r1_private.K,
-            &self.D,
-            &self.F,
-            &self.Gamma,
+            receiver_auxinfo_public.params().clone(),
+            receiver_auxinfo_public.pk().clone(),
+            sender_auxinfo_public.pk().clone(),
+            receiver_r1_private.K.clone(),
+            self.D.clone(),
+            self.F.clone(),
+            self.Gamma,
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
 
@@ -83,14 +82,13 @@ impl Public {
 
         // Verify the psi_hat proof
         let psi_hat_input = PiAffgInput::new(
-            receiver_auxinfo_public.params(),
-            &g,
-            receiver_auxinfo_public.pk(),
-            sender_auxinfo_public.pk(),
-            &receiver_r1_private.K,
-            &self.D_hat,
-            &self.F_hat,
-            &sender_keyshare_public.X,
+            receiver_auxinfo_public.params().clone(),
+            receiver_auxinfo_public.pk().clone(),
+            sender_auxinfo_public.pk().clone(),
+            receiver_r1_private.K.clone(),
+            self.D_hat.clone(),
+            self.F_hat.clone(),
+            sender_keyshare_public.X,
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
         self.psi_hat
