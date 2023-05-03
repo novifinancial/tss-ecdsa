@@ -369,8 +369,9 @@ impl ParticipantIdentifier {
     }
 }
 
-/// The SharedContext contains fixed known parameters accross the entire
+/// The `SharedContext` contains fixed known parameters accross the entire
 /// protocol. It does not however contain the entire protocol context.
+#[derive(Debug)]
 pub struct SharedContext {
     sid: Identifier,
     participants: Vec<ParticipantIdentifier>,
