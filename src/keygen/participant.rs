@@ -138,15 +138,20 @@ impl ProtocolParticipant for KeygenParticipant {
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
         input: Self::Input,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             sid,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, input),
+            broadcast_participant: BroadcastParticipant::new(
+                sid,
+                id,
+                other_participant_ids,
+                input,
+            )?,
             status: Status::Initialized,
-        }
+        })
     }
 
     fn ready_type() -> MessageType {
@@ -622,12 +627,13 @@ fn new_keyshare<R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(KeySharePrivate, KeySharePublic)> {
     let order = k256_order();
-    let private_share = BigNumber::from_rng(&order, rng);
-    let g = CurvePoint::GENERATOR;
-    let public_share = g.multiply_by_scalar(&private_share)?;
+    let private_share = KeySharePrivate {
+        x: BigNumber::from_rng(&order, rng),
+    };
+    let public_share = private_share.public_share()?;
 
     Ok((
-        KeySharePrivate { x: private_share },
+        private_share,
         KeySharePublic::new(participant, public_share),
     ))
 }
@@ -642,7 +648,7 @@ fn schnorr_proof_transcript(global_rid: [u8; 32]) -> Result<Transcript> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::testing::init_testing, Identifier};
+    use crate::{utils::testing::init_testing, Identifier, ParticipantConfig};
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::HashMap;
     use tracing::debug;
@@ -653,24 +659,10 @@ mod tests {
             quorum_size: usize,
             rng: &mut R,
         ) -> Result<Vec<Self>> {
-            let mut participant_ids = vec![];
-            for _ in 0..quorum_size {
-                participant_ids.push(ParticipantIdentifier::random(rng));
-            }
-            let participants = participant_ids
-                .iter()
-                .map(|&participant_id| -> KeygenParticipant {
-                    // Filter out current participant id from list of other ids
-                    let mut other_ids = vec![];
-                    for &id in participant_ids.iter() {
-                        if id != participant_id {
-                            other_ids.push(id);
-                        }
-                    }
-                    Self::new(sid, participant_id, other_ids, ())
-                })
-                .collect::<Vec<KeygenParticipant>>();
-            Ok(participants)
+            ParticipantConfig::random_quorum(quorum_size, rng)?
+                .into_iter()
+                .map(|config| Self::new(sid, config.id, config.other_ids, ()))
+                .collect::<Result<Vec<_>>>()
         }
         pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Message {
             Message::new(

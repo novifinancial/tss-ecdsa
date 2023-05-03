@@ -111,14 +111,14 @@ impl ProtocolParticipant for BroadcastParticipant {
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
         _input: Self::Input,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             sid,
             id,
             other_participant_ids,
             local_storage: Default::default(),
             status: Status::Initialized,
-        }
+        })
     }
 
     fn id(&self) -> ParticipantIdentifier {

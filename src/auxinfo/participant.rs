@@ -150,16 +150,21 @@ impl ProtocolParticipant for AuxInfoParticipant {
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
         input: Self::Input,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             sid,
             input,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, input),
+            broadcast_participant: BroadcastParticipant::new(
+                sid,
+                id,
+                other_participant_ids,
+                input,
+            )?,
             status: Status::Initialized,
-        }
+        })
     }
 
     fn ready_type() -> MessageType {
@@ -642,7 +647,7 @@ impl AuxInfoParticipant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{utils::testing::init_testing, Identifier};
+    use crate::{utils::testing::init_testing, Identifier, ParticipantConfig};
     use rand::{CryptoRng, Rng, RngCore};
     use std::collections::HashMap;
 
@@ -653,24 +658,10 @@ mod tests {
             quorum_size: usize,
             rng: &mut R,
         ) -> Result<Vec<Self>> {
-            let mut participant_ids = vec![];
-            for _ in 0..quorum_size {
-                participant_ids.push(ParticipantIdentifier::random(rng));
-            }
-            let participants = participant_ids
-                .iter()
-                .map(|&participant_id| -> AuxInfoParticipant {
-                    // Filter out current participant id from list of other ids
-                    let mut other_ids = vec![];
-                    for &id in participant_ids.iter() {
-                        if id != participant_id {
-                            other_ids.push(id);
-                        }
-                    }
-                    Self::new(sid, participant_id, other_ids, input)
-                })
-                .collect::<Vec<AuxInfoParticipant>>();
-            Ok(participants)
+            ParticipantConfig::random_quorum(quorum_size, rng)?
+                .into_iter()
+                .map(|config| Self::new(sid, config.id, config.other_ids, input))
+                .collect::<Result<Vec<_>>>()
         }
 
         pub fn initialize_auxinfo_message(&self, auxinfo_identifier: Identifier) -> Message {
@@ -813,7 +804,7 @@ mod tests {
             for (publics, _) in &outputs {
                 let public_key = publics
                     .iter()
-                    .find(|public_key| *public_key.participant() == pid);
+                    .find(|public_key| public_key.participant() == pid);
                 assert!(public_key.is_some());
                 // Check that it's valid while we're here.
                 assert!(public_key.unwrap().verify(&context).is_ok());
@@ -838,7 +829,7 @@ mod tests {
         for ((publics, private), pid) in outputs.iter().zip(quorum.iter().map(|p| p.id())) {
             let public_key = publics
                 .iter()
-                .find(|public_key| *public_key.participant() == pid);
+                .find(|public_key| public_key.participant() == pid);
             assert!(public_key.is_some());
             assert_eq!(*public_key.unwrap().pk(), private.encryption_key());
         }

@@ -184,12 +184,23 @@ pub trait ProtocolParticipant {
     fn protocol_type() -> ProtocolType;
 
     /// Create a new [`ProtocolParticipant`] from the given ids.
+    ///
+    /// **Assumption**: This method _does not_ validate the
+    /// [`ParticipantIdentifier`]s. It assumes that they comprise a unique
+    /// set and that there are a valid number of participants for a session.
+    ///
+    /// This method _does_ validate the input, checking any appropriate
+    /// constraints on its type and its relationship to the participant set
+    /// (for example, it may check that the input contains one field for
+    /// each participant).
     fn new(
         sid: Identifier,
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
         input: Self::Input,
-    ) -> Self;
+    ) -> Result<Self>
+    where
+        Self: Sized;
 
     /// Return the participant id
     fn id(&self) -> ParticipantIdentifier;

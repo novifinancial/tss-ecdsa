@@ -29,7 +29,6 @@ pub struct AuxInfoPrivate {
 }
 
 impl AuxInfoPrivate {
-    #[cfg(test)]
     pub(crate) fn encryption_key(&self) -> EncryptionKey {
         self.decryption_key.encryption_key()
     }
@@ -88,8 +87,8 @@ impl AuxInfoPublic {
         &self.params
     }
 
-    pub(crate) fn participant(&self) -> &ParticipantIdentifier {
-        &self.participant
+    pub(crate) fn participant(&self) -> ParticipantIdentifier {
+        self.participant
     }
 
     /// Verifies that the public key's modulus matches the ZKSetupParameters

@@ -124,7 +124,7 @@ impl<P: ProtocolParticipant> Participant<P> {
 
         Ok(Participant {
             id: config.id,
-            participant: P::new(sid, config.id, config.other_ids.clone(), input),
+            participant: P::new(sid, config.id, config.other_ids.clone(), input)?,
         })
     }
 
@@ -327,7 +327,7 @@ impl ParticipantConfig {
 
     ///Create a random [`ParticipantConfig`].
     #[cfg(test)]
-    fn random<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> ParticipantConfig {
+    pub(crate) fn random<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> ParticipantConfig {
         assert!(size > 1);
         let other_ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
             .take(size - 1)

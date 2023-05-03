@@ -52,6 +52,8 @@ pub enum CallerError {
     RetryFailed,
     #[error("Received a message with too few parties (Participant Config should have at least 2 parties)")]
     ParticipantConfigError,
+    #[error("The provided input did not satisfy the requirements on the input type. See logs for details.")]
+    BadInput,
 }
 
 macro_rules! serialize {

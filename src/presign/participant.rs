@@ -40,7 +40,7 @@ use crate::{
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{error, info, instrument};
 
 // Local storage data types.
@@ -114,7 +114,7 @@ impl PresignContext {
     /// Build a [`PresignContext`] from a [`PresignParticipant`].
     pub(crate) fn collect(p: &PresignParticipant) -> Self {
         let mut auxinfo_public = p.input().all_auxinfo_public();
-        auxinfo_public.sort_by(|a, b| a.participant().cmp(b.participant()));
+        auxinfo_public.sort_by_key(AuxInfoPublic::participant);
         Self {
             shared_context: SharedContext::collect(p),
             auxinfo_public,
@@ -211,20 +211,20 @@ impl PresignContext {
 /// 2021](https://eprint.iacr.org/2021/060.pdf). Figure 7.
 #[derive(Debug)]
 pub struct PresignParticipant {
-    /// The current session identifier
+    /// The current session identifier.
     sid: Identifier,
-    /// The current protocol input
+    /// The current protocol input.
     input: Input,
-    /// A unique identifier for this participant
+    /// A unique identifier for this participant.
     id: ParticipantIdentifier,
     /// A list of all other participant identifiers participating in the
-    /// protocol
+    /// protocol.
     other_participant_ids: Vec<ParticipantIdentifier>,
-    /// Local storage for this participant to store secrets
+    /// Local storage for this participant to store secrets.
     local_storage: LocalStorage,
-    /// Broadcast subprotocol handler
+    /// Broadcast subprotocol handler.
     broadcast_participant: BroadcastParticipant,
-    /// Status of the protocol execution
+    /// Status of the protocol execution.
     status: Status,
 }
 
@@ -258,15 +258,64 @@ impl Input {
                 all_auxinfo_public.len(),
                 all_keyshare_public.len()
             );
-            Err(InternalError::InternalInvariantFailed)
-        } else {
-            Ok(Self {
-                all_auxinfo_public,
-                auxinfo_private,
-                all_keyshare_public,
-                keyshare_private,
-            })
+            Err(CallerError::BadInput)?
         }
+
+        // The same set of participants must have produced the key shares and aux infos.
+        let aux_sids = all_auxinfo_public
+            .iter()
+            .map(|auxinfo| auxinfo.participant())
+            .collect::<HashSet<_>>();
+        let key_sids = all_keyshare_public
+            .iter()
+            .map(|keyshare| keyshare.participant())
+            .collect::<HashSet<_>>();
+        if aux_sids != key_sids {
+            error!("Public auxinfo and keyshare inputs to presign weren't from the same set of parties.");
+            Err(CallerError::BadInput)?
+        }
+
+        // There shouldn't be duplicates. Since we checked equality of the sets and the
+        // lengths already, this also applies to auxinfo.
+        if key_sids.len() != all_keyshare_public.len() {
+            error!("Duplicate participant IDs appeared in AuxInfo and KeyShare public input.");
+            Err(CallerError::BadInput)?
+        }
+
+        // The private values should map to one of the public values.
+        let expected_public_share = keyshare_private.public_share()?;
+        if !all_keyshare_public
+            .iter()
+            .any(|public_share| expected_public_share == public_share.X)
+        {
+            error!("Keygen private share did not correspond to any of the provided keygen public shares.");
+            Err(CallerError::BadInput)?
+        }
+        if !all_auxinfo_public
+            .iter()
+            .any(|auxinfo| &auxinfo_private.encryption_key() == auxinfo.pk())
+        {
+            error!("Auxinfo private key did not match any of the provided auxinfo public keys.");
+            Err(CallerError::BadInput)?
+        }
+
+        Ok(Self {
+            all_auxinfo_public,
+            auxinfo_private,
+            all_keyshare_public,
+            keyshare_private,
+        })
+    }
+
+    /// Get the set of participants that contributed to the input.
+    ///
+    /// By construction, this must be the same for the auxinfo and key share
+    /// lists.
+    fn participants(&self) -> Vec<ParticipantIdentifier> {
+        self.all_keyshare_public
+            .iter()
+            .map(KeySharePublic::participant)
+            .collect()
     }
 
     /// Returns the [`AuxInfoPublic`] associated with the given
@@ -274,8 +323,11 @@ impl Input {
     fn find_auxinfo_public(&self, pid: ParticipantIdentifier) -> Result<&AuxInfoPublic> {
         self.all_auxinfo_public
             .iter()
-            .find(|item| *item.participant() == pid)
-            .ok_or(InternalError::StorageItemNotFound)
+            .find(|item| item.participant() == pid)
+            .ok_or_else(|| {
+                error!("Presign input doesn't contain a public auxinfo for {}, even though we checked for it at construction.", pid);
+                InternalError::InternalInvariantFailed
+            })
     }
 
     /// Returns the [`KeySharePublic`] associated with the given
@@ -284,7 +336,10 @@ impl Input {
         self.all_keyshare_public
             .iter()
             .find(|item| item.participant() == pid)
-            .ok_or(InternalError::StorageItemNotFound)
+            .ok_or_else(|| {
+                error!("Presign input doesn't contain a public keyshare for {}, even though we checked for it at construction.", pid);
+                InternalError::InternalInvariantFailed
+            })
     }
 
     /// Returns the [`AuxInfoPublic`]s associated with all the participants
@@ -292,7 +347,7 @@ impl Input {
     fn all_but_one_auxinfo_public(&self, pid: ParticipantIdentifier) -> Vec<&AuxInfoPublic> {
         self.all_auxinfo_public
             .iter()
-            .filter(|item| *item.participant() != pid)
+            .filter(|item| item.participant() != pid)
             .collect()
     }
     /// Returns a copy of the [`AuxInfoPublic`]s associated with all the
@@ -312,16 +367,40 @@ impl ProtocolParticipant for PresignParticipant {
         id: ParticipantIdentifier,
         other_participant_ids: Vec<ParticipantIdentifier>,
         input: Self::Input,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let input_participants = input.participants();
+
+        // Check that we have the expected number of inputs
+        if input_participants.len() != other_participant_ids.len() + 1 {
+            error!(
+                "Size of the input ({}) doesn't match size of the participant set ({})",
+                input_participants.len(),
+                other_participant_ids.len() + 1
+            );
+            Err(CallerError::BadInput)?;
+        }
+
+        // Make sure the inputs belong to the specified participant set: first define
+        // the two sets...
+        let input_set = HashSet::<&ParticipantIdentifier>::from_iter(input_participants.iter());
+        let mut participants = HashSet::from_iter(other_participant_ids.iter());
+        let _inserted = participants.insert(&id);
+
+        // ...then make sure they match.
+        if participants != input_set {
+            error!("The provided inputs are not from the specified set of participants");
+            Err(CallerError::BadInput)?;
+        }
+
+        Ok(Self {
             sid,
             input,
             id,
             other_participant_ids: other_participant_ids.clone(),
             local_storage: Default::default(),
-            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, ()),
+            broadcast_participant: BroadcastParticipant::new(sid, id, other_participant_ids, ())?,
             status: Status::Initialized,
-        }
+        })
     }
 
     fn ready_type() -> MessageType {
@@ -1000,7 +1079,7 @@ impl PresignKeyShareAndInfo {
                 rng,
             )?;
             let r1_public = RoundOnePublic { proof };
-            let _ = r1_publics.insert(*aux_info_public.participant(), r1_public);
+            let _ = r1_publics.insert(aux_info_public.participant(), r1_public);
         }
 
         let r1_public_broadcast = RoundOnePublicBroadcast {
@@ -1251,5 +1330,255 @@ impl PresignKeyShareAndInfo {
         };
 
         Ok((private, ret_publics))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Input;
+    use crate::{
+        errors::{CallerError, InternalError, Result},
+        paillier::DecryptionKey,
+        ring_pedersen::VerifiedRingPedersen,
+        utils::{k256_order, testing::init_testing},
+        AuxInfoPrivate, AuxInfoPublic, Identifier, KeySharePrivate, KeySharePublic,
+        ParticipantConfig, ParticipantIdentifier, PresignParticipant, ProtocolParticipant,
+    };
+    use libpaillier::unknown_order::BigNumber;
+    use rand::rngs::StdRng;
+
+    // Simulate the output of a keygen run with the given participants.
+    fn simulate_keygen_output(
+        pids: &[ParticipantIdentifier],
+        rng: &mut StdRng,
+    ) -> (KeySharePrivate, Vec<KeySharePublic>) {
+        let (mut keygen_private_outputs, keygen_public_outputs): (Vec<_>, Vec<_>) = pids
+            .iter()
+            .map(|&pid| {
+                // TODO #340: Replace with KeyShare methods once they exist.
+                let secret = KeySharePrivate {
+                    x: BigNumber::from_rng(&k256_order(), rng),
+                };
+                let public = secret.public_share().unwrap();
+                (secret, KeySharePublic::new(pid, public))
+            })
+            .unzip();
+
+        (keygen_private_outputs.pop().unwrap(), keygen_public_outputs)
+    }
+
+    // Simulate the output of an auxinfo run with the given participants.
+    fn simulate_auxinfo_output(
+        pids: &[ParticipantIdentifier],
+        rng: &mut StdRng,
+    ) -> (AuxInfoPrivate, Vec<AuxInfoPublic>) {
+        let (mut auxinfo_private_outputs, auxinfo_public_outputs): (Vec<_>, Vec<_>) = pids
+            .iter()
+            .map(|&pid| {
+                let (key, _, _) = DecryptionKey::new(rng).unwrap();
+                (
+                    AuxInfoPrivate::from(key.clone()),
+                    AuxInfoPublic::new(
+                        &(),
+                        pid,
+                        key.encryption_key(),
+                        VerifiedRingPedersen::extract(&key, &(), rng).unwrap(),
+                    )
+                    .unwrap(),
+                )
+            })
+            .unzip();
+
+        (
+            auxinfo_private_outputs.pop().unwrap(),
+            auxinfo_public_outputs,
+        )
+    }
+
+    #[test]
+    fn inputs_must_be_same_length() {
+        let rng = &mut init_testing();
+
+        let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(5)
+            .collect::<Vec<_>>();
+        let (keygen_private, keygen_public) = simulate_keygen_output(&pids, rng);
+        let (auxinfo_private, auxinfo_public) = simulate_auxinfo_output(&pids, rng);
+
+        // Same length works
+        let result = Input::new(
+            auxinfo_public.clone(),
+            auxinfo_private.clone(),
+            keygen_public.clone(),
+            keygen_private.clone(),
+        );
+        assert!(result.is_ok());
+
+        // If keygen is too short, it fails.
+        let mut short_keygen = keygen_public.clone();
+        let _dropped = short_keygen.pop();
+        let result = Input::new(
+            auxinfo_public.clone(),
+            auxinfo_private.clone(),
+            short_keygen,
+            keygen_private.clone(),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
+        // If auxinfo is too short, it fails.
+        let mut short_auxinfo = auxinfo_public;
+        let _dropped = short_auxinfo.pop();
+        let result = Input::new(
+            short_auxinfo,
+            auxinfo_private,
+            keygen_public,
+            keygen_private,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+    }
+
+    #[test]
+    fn inputs_must_not_have_duplicates() {
+        let rng = &mut init_testing();
+
+        let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(5)
+            .collect::<Vec<_>>();
+        let (keygen_private, mut keygen_public) = simulate_keygen_output(&pids, rng);
+        let (auxinfo_private, mut auxinfo_public) = simulate_auxinfo_output(&pids, rng);
+
+        // This test doesn't bother adding a duplicate in only one of the inputs because
+        // that would fail the length checks tested in `inputs_must_be_same_length`
+        let keygen_dup = keygen_public.pop().unwrap();
+        keygen_public.push(keygen_dup.clone());
+        keygen_public.push(keygen_dup);
+
+        let auxinfo_dup = auxinfo_public.pop().unwrap();
+        auxinfo_public.push(auxinfo_dup.clone());
+        auxinfo_public.push(auxinfo_dup);
+
+        let result = Input::new(
+            auxinfo_public,
+            auxinfo_private,
+            keygen_public,
+            keygen_private,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+    }
+
+    #[test]
+    fn inputs_must_have_same_participant_sets() {
+        let rng = &mut init_testing();
+
+        let auxinfo_pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(5)
+            .collect::<Vec<_>>();
+        let (auxinfo_private, auxinfo_public) = simulate_auxinfo_output(&auxinfo_pids, rng);
+
+        let keygen_pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(5)
+            .collect::<Vec<_>>();
+        let (keygen_private, keygen_public) = simulate_keygen_output(&keygen_pids, rng);
+
+        let result = Input::new(
+            auxinfo_public,
+            auxinfo_private,
+            keygen_public,
+            keygen_private,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+    }
+
+    #[test]
+    fn inputs_must_have_a_public_private_pair() {
+        let rng = &mut init_testing();
+
+        let pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(5)
+            .collect::<Vec<_>>();
+
+        let (keygen_private, keygen_public) = simulate_keygen_output(&pids, rng);
+        let (auxinfo_private, auxinfo_public) = simulate_auxinfo_output(&pids, rng);
+
+        // Make private components with no relation to the public inputs.
+        let fake_auxinfo_private = AuxInfoPrivate::from(DecryptionKey::new(rng).unwrap().0);
+        let fake_keygen_private = KeySharePrivate {
+            x: BigNumber::from_rng(&k256_order(), rng),
+        };
+
+        // Auxinfo private key must correspond to one of the public inputs.
+        let result = Input::new(
+            auxinfo_public.clone(),
+            fake_auxinfo_private,
+            keygen_public.clone(),
+            keygen_private,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
+        // Keygen private share must correspond to one of the public shares.
+        let result = Input::new(
+            auxinfo_public,
+            auxinfo_private,
+            keygen_public,
+            fake_keygen_private,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+    }
+
+    #[test]
+    fn protocol_participants_must_match_input_participants() -> Result<()> {
+        let rng = &mut init_testing();
+        let SIZE = 5;
+
+        // Create valid input set with random PIDs
+        let input_pids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+            .take(SIZE)
+            .collect::<Vec<_>>();
+        let (keygen_private, keygen_public) = simulate_keygen_output(&input_pids, rng);
+        let (auxinfo_private, auxinfo_public) = simulate_auxinfo_output(&input_pids, rng);
+
+        let input = Input::new(
+            auxinfo_public,
+            auxinfo_private,
+            keygen_public,
+            keygen_private,
+        )?;
+
+        // Create valid config with PIDs independent of those used to make the input set
+        let config = ParticipantConfig::random(SIZE, rng);
+
+        let result =
+            PresignParticipant::new(Identifier::random(rng), config.id, config.other_ids, input);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            InternalError::CallingApplicationMistake(CallerError::BadInput)
+        );
+
+        Ok(())
     }
 }

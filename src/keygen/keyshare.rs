@@ -6,7 +6,7 @@
 // License, Version 2.0 found in the LICENSE-APACHE file in the root directory
 // of this source tree.
 
-use crate::{utils::CurvePoint, ParticipantIdentifier};
+use crate::{errors::Result, utils::CurvePoint, ParticipantIdentifier};
 use libpaillier::unknown_order::BigNumber;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -25,6 +25,13 @@ pub struct KeySharePrivate {
 impl Debug for KeySharePrivate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("KeySharePrivate([redacted])")
+    }
+}
+
+impl KeySharePrivate {
+    // Computes the "raw" curve point corresponding to this private key.
+    pub(crate) fn public_share(&self) -> Result<CurvePoint> {
+        CurvePoint::GENERATOR.multiply_by_scalar(&self.x)
     }
 }
 
