@@ -19,7 +19,7 @@ jobs:
         with:
           profile: minimal
           # Set Rust version here!
-          toolchain: 1.67.0
+          toolchain: 1.69.0
           override: true
 
       # Caching for Rust files. Must be called after installing Rust toolchain.
