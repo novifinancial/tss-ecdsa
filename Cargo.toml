@@ -8,7 +8,6 @@ edition = "2021"
 keywords = ["cryptography", "crypto", "signatures", "threshold", "ECDSA"]
 categories = ["cryptography"]
 readme = "README.md"
-autoexamples = false
 
 [features]
 default = []
@@ -58,7 +57,3 @@ harness = false
 [[bench]]
 name = "bignumber_benchmark"
 harness = false
-
-[[example]]
-name = "threaded_example"
-path = "examples/threaded_example/main.rs"
