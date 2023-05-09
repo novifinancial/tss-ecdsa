@@ -25,13 +25,25 @@ use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+/// Proofs used to validate correctness of the RSA modulus `N`.
+///
+/// This type includes proofs for `𝚷[fac]` and `𝚷[mod]`.
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct AuxInfoProof {
-    pub pimod: PiModProof,
-    pub pifac: PiFacProof,
+    pimod: PiModProof,
+    pifac: PiFacProof,
 }
 
 impl AuxInfoProof {
+    /// Generate a fresh transcript to be used in [`AuxInfoProof`].
+    fn new_transcript() -> Transcript {
+        Transcript::new(b"AuxInfoProof")
+    }
+
+    /// Convert a [`Message`] into an [`AuxInfoProof`].
+    ///
+    /// Note: This conversion **does not validate** the produced
+    /// [`AuxInfoProof`]!
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
         if message.message_type() != MessageType::Auxinfo(AuxinfoMessageType::R3Proof) {
             error!(
@@ -44,64 +56,99 @@ impl AuxInfoProof {
         let auxinfo_proof: AuxInfoProof = deserialize!(&message.unverified_bytes)?;
         Ok(auxinfo_proof)
     }
+
+    /// Construct a proof that the modulus `N` is a valid product of two large
+    /// primes `p` and `q` (`𝚷[mod]`) and that neither `p` nor `q` are small
+    /// (`𝚷[fac]`).
+    ///
+    /// Note: The [`VerifiedRingPedersen`] argument **must be** provided by the
+    /// verifier!
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn prove<R: RngCore + CryptoRng>(
         rng: &mut R,
         context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
         sid: Identifier,
         rho: [u8; 32],
-        setup_params: &VerifiedRingPedersen,
+        verifier_params: &VerifiedRingPedersen,
         N: &BigNumber,
         p: &BigNumber,
         q: &BigNumber,
     ) -> Result<Self> {
-        let mut pimod_transcript = Transcript::new(b"PaillierBlumModulusProof");
-        pimod_transcript.append_message(b"PiMod ProofContext", &context.as_bytes()?);
-        pimod_transcript.append_message(b"Session Id", &serialize!(&sid)?);
-        pimod_transcript.append_message(b"rho", &rho);
+        let mut transcript = Self::new_transcript();
+        Self::append_pimod_transcript(&mut transcript, context, sid, rho)?;
         let pimod = PiModProof::prove(
             &PiModInput::new(N),
             &PiModSecret::new(p, q),
             context,
-            &mut pimod_transcript,
+            &mut transcript,
             rng,
         )?;
-        let mut pifac_transcript = Transcript::new(b"PiFacProof");
-        pifac_transcript.append_message(b"PiFac ProofContext", &context.as_bytes()?);
-        pifac_transcript.append_message(b"Session Id", &serialize!(&sid)?);
-        pifac_transcript.append_message(b"rho", &rho);
+        Self::append_pifac_transcript(&mut transcript, context, sid, rho)?;
         let pifac = PiFacProof::prove(
-            &PiFacInput::new(setup_params, N),
+            &PiFacInput::new(verifier_params, N),
             &PiFacSecret::new(p, q),
             context,
-            &mut pifac_transcript,
+            &mut transcript,
             rng,
         )?;
 
         Ok(Self { pimod, pifac })
     }
 
-    ///`sid` corresponds to a unique session identifier.
+    /// Verify a proof that the modulus `N` is a valid product of two large
+    /// primes `p` and `q` (`𝚷[mod]`) and that neither `p` nor `q` are small
+    /// (`𝚷[fac]`).
+    ///
+    /// Note: The [`VerifiedRingPedersen`] argument **must be** provided by the
+    /// verifier!
     pub(crate) fn verify(
         &self,
         context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
         sid: Identifier,
         rho: [u8; 32],
-        params: &VerifiedRingPedersen,
+        verifier_params: &VerifiedRingPedersen,
         N: &BigNumber,
     ) -> Result<()> {
-        let mut pimod_transcript = Transcript::new(b"PaillierBlumModulusProof");
-        pimod_transcript.append_message(b"PiMod ProofContext", &context.as_bytes()?);
-        pimod_transcript.append_message(b"Session Id", &serialize!(&sid)?);
-        pimod_transcript.append_message(b"rho", &rho);
+        let mut transcript = Self::new_transcript();
+        Self::append_pimod_transcript(&mut transcript, context, sid, rho)?;
         self.pimod
-            .verify(&PiModInput::new(N), context, &mut pimod_transcript)?;
-        let mut pifac_transcript = Transcript::new(b"PiFacProof");
-        pifac_transcript.append_message(b"PiFac ProofContext", &context.as_bytes()?);
-        pifac_transcript.append_message(b"Session Id", &serialize!(&sid)?);
-        pifac_transcript.append_message(b"rho", &rho);
-        self.pifac
-            .verify(&PiFacInput::new(params, N), context, &mut pifac_transcript)?;
+            .verify(&PiModInput::new(N), context, &mut transcript)?;
+        Self::append_pifac_transcript(&mut transcript, context, sid, rho)?;
+        self.pifac.verify(
+            &PiFacInput::new(verifier_params, N),
+            context,
+            &mut transcript,
+        )?;
+        Ok(())
+    }
+
+    /// Append info relevant to the `𝚷[mod]` proof to the provided
+    /// [`Transcript`].
+    fn append_pimod_transcript(
+        transcript: &mut Transcript,
+        context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
+        sid: Identifier,
+        rho: [u8; 32],
+    ) -> Result<()> {
+        transcript.append_message(b"PaillierBumModulusProof", b"");
+        transcript.append_message(b"PiMod ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"Session Id", &serialize!(&sid)?);
+        transcript.append_message(b"rho", &rho);
+        Ok(())
+    }
+
+    /// Append info relevant to the `𝚷[fac]` proof to the provided
+    /// [`Transcript`].
+    fn append_pifac_transcript(
+        transcript: &mut Transcript,
+        context: &<AuxInfoParticipant as InnerProtocolParticipant>::Context,
+        sid: Identifier,
+        rho: [u8; 32],
+    ) -> Result<()> {
+        transcript.append_message(b"PiFacProof", b"");
+        transcript.append_message(b"PiFac ProofContext", &context.as_bytes()?);
+        transcript.append_message(b"Session Id", &serialize!(&sid)?);
+        transcript.append_message(b"rho", &rho);
         Ok(())
     }
 }
