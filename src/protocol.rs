@@ -214,47 +214,33 @@ impl<P: ProtocolParticipant> Participant<P> {
     pub fn status(&self) -> &P::Status {
         self.participant.status()
     }
-
-    /// Generate a signature share on the given `digest` with the
-    /// [`PresignRecord`].
-    ///
-    /// TODO #251: Move this method to `PresignRecord` instead of having it
-    /// belong to a `Participant`.
-    #[instrument(skip_all, err(Debug))]
-    pub fn sign(record: PresignRecord, digest: sha2::Sha256) -> Result<SignatureShare> {
-        info!("Issuing signature with presign record.");
-
-        let (r, s) = record.sign(digest)?;
-        let ret = SignatureShare { r: Some(r), s };
-
-        Ok(ret)
-    }
 }
 
 /// Simple wrapper around the signature share output
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SignatureShare {
     /// The r-scalar associated with an ECDSA signature
-    pub r: Option<k256::Scalar>,
+    r: Option<k256::Scalar>,
     /// The s-scalar associated with an ECDSA signature
-    pub s: k256::Scalar,
+    s: k256::Scalar,
 }
 
 impl Default for SignatureShare {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SignatureShare {
-    fn new() -> Self {
         Self {
             r: None,
             s: k256::Scalar::zero(),
         }
     }
+}
 
-    /// Can be used to combine [SignatureShare]s
+impl SignatureShare {
+    /// Creates a new [`SignatureShare`].
+    pub(crate) fn new(r: Option<k256::Scalar>, s: k256::Scalar) -> Self {
+        SignatureShare { r, s }
+    }
+
+    /// Can be used to combine [`SignatureShare`]s.
     pub fn chain(&self, share: Self) -> Result<Self> {
         let r = match (self.r, share.r) {
             (_, None) => {
@@ -282,7 +268,7 @@ impl SignatureShare {
         })
     }
 
-    /// Converts the [SignatureShare] into a signature
+    /// Converts the [`SignatureShare`] into a signature.
     #[instrument(skip_all err(Debug))]
     pub fn finish(&self) -> Result<k256::ecdsa::Signature> {
         info!("Converting signature share into a signature.");
@@ -940,7 +926,7 @@ mod tests {
 
         let signature = presign_outputs
             .into_values()
-            .map(|record| Participant::<PresignParticipant>::sign(record, hasher.clone()).unwrap())
+            .map(|record| record.sign(hasher.clone()).unwrap())
             .fold(SignatureShare::default(), |aggregator, share| {
                 aggregator.chain(share).unwrap()
             })

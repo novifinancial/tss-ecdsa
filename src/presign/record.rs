@@ -12,6 +12,7 @@ use crate::{
         Result,
     },
     presign::round_three::{Private as RoundThreePrivate, Public as RoundThreePublic},
+    protocol::SignatureShare,
     utils::bn_to_scalar,
     CurvePoint,
 };
@@ -22,7 +23,7 @@ use k256::{
 use libpaillier::unknown_order::BigNumber;
 use sha2::Digest;
 use std::fmt::Debug;
-use tracing::error;
+use tracing::{error, info, instrument};
 use zeroize::ZeroizeOnDrop;
 
 pub(crate) struct RecordPair {
@@ -96,7 +97,11 @@ impl PresignRecord {
         })
     }
 
-    pub(crate) fn sign(&self, d: sha2::Sha256) -> Result<(k256::Scalar, k256::Scalar)> {
+    /// Generate a signature share on the given `digest` with
+    /// the [`PresignRecord`].
+    #[instrument(skip_all, err(Debug))]
+    pub fn sign(self, d: sha2::Sha256) -> Result<SignatureShare> {
+        info!("Issuing signature with presign record.");
         let r = Self::x_from_point(&self.R)?;
         let m = Option::<Scalar>::from(k256::Scalar::from_repr(d.finalize())).ok_or_else(|| {
             error!("Unable to create Scalar from bytes representation");
@@ -104,6 +109,8 @@ impl PresignRecord {
         })?;
         let s = bn_to_scalar(&self.k)? * m + r * self.chi;
 
-        Ok((r, s))
+        let ret = SignatureShare::new(Some(r), s);
+
+        Ok(ret)
     }
 }
