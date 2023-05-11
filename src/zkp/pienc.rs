@@ -25,13 +25,12 @@
 //! [^cite]: Ran Canetti, Rosario Gennaro, Steven Goldfeder, Nikolaos Makriyannis, and Udi Peled.
 //! UC Non-Interactive, Proactive, Threshold ECDSA with Identifiable Aborts.
 //! [EPrint archive, 2021](https://eprint.iacr.org/2021/060.pdf).
-
 use crate::{
     errors::*,
     paillier::{Ciphertext, EncryptionKey, MaskedNonce, Nonce},
     parameters::{ELL, EPSILON},
     ring_pedersen::{Commitment, MaskedRandomness, VerifiedRingPedersen},
-    utils::{k256_order, plusminus_bn_random_from_transcript, random_plusminus_by_size},
+    utils::{plusminus_challenge_from_transcript, random_plusminus_by_size},
     zkp::{Proof, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
@@ -163,7 +162,7 @@ impl Proof for PiEncProof {
         )?;
 
         // ...and generate a challenge from it (aka `e`)
-        let challenge = plusminus_bn_random_from_transcript(transcript, &k256_order());
+        let challenge = plusminus_challenge_from_transcript(transcript)?;
 
         // Form proof responses. Each combines one secret value with its mask and the
         // challenge (aka `z1`, `z2`, `z3` respectively)
@@ -205,7 +204,7 @@ impl Proof for PiEncProof {
         )?;
 
         // ...generate a challenge, and make sure it matches the one the prover sent.
-        let e = plusminus_bn_random_from_transcript(transcript, &k256_order());
+        let e = plusminus_challenge_from_transcript(transcript)?;
         if e != self.challenge {
             warn!("Fiat-Shamir didn't verify");
             return Err(InternalError::ProtocolError);
@@ -292,8 +291,8 @@ mod tests {
     use crate::{
         paillier::DecryptionKey,
         utils::{
-            random_plusminus, random_plusminus_by_size_with_minimum, random_positive_bn,
-            testing::init_testing,
+            k256_order, random_plusminus, random_plusminus_by_size_with_minimum,
+            random_positive_bn, testing::init_testing,
         },
         zkp::BadContext,
     };
