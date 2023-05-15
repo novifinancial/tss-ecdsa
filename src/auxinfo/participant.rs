@@ -326,22 +326,15 @@ impl AuxInfoParticipant {
     fn handle_round_one_msg<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
-        broadcast_message: &BroadcastOutput,
+        broadcast_message: BroadcastOutput,
         _input: &(),
     ) -> Result<ProcessOutcome<<Self as ProtocolParticipant>::Output>> {
         info!("Handling round one auxinfo message.");
 
-        if broadcast_message.tag != BroadcastTag::AuxinfoR1CommitHash {
-            error!(
-                "Incorrect Broadcast Tag on received message. Expected {:?}, got {:?}",
-                BroadcastTag::AuxinfoR1CommitHash,
-                broadcast_message.tag
-            );
-            return Err(InternalError::ProtocolError);
-        }
-        let message = &broadcast_message.msg;
+        let message = broadcast_message.into_message(BroadcastTag::AuxinfoR1CommitHash)?;
+
         self.local_storage
-            .store::<storage::Commit>(message.from(), Commitment::from_message(message)?);
+            .store::<storage::Commit>(message.from(), Commitment::from_message(&message)?);
 
         // Check if we've received all the commitments.
         //

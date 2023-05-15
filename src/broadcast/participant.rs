@@ -83,8 +83,22 @@ pub(crate) struct BroadcastIndex {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BroadcastOutput {
-    pub(crate) tag: BroadcastTag,
-    pub(crate) msg: Message,
+    tag: BroadcastTag,
+    msg: Message,
+}
+
+impl BroadcastOutput {
+    pub(crate) fn into_message(self, expected_tag: BroadcastTag) -> Result<Message> {
+        if self.tag != expected_tag {
+            error!(
+                "Incorrect Broadcast Tag on received message. Expected {:?}, got {:?}",
+                expected_tag, self.tag
+            );
+            return Err(InternalError::ProtocolError);
+        }
+        let message = self.msg;
+        Ok(message)
+    }
 }
 
 impl ProtocolParticipant for BroadcastParticipant {
