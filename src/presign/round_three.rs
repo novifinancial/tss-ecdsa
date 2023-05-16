@@ -8,7 +8,7 @@
 
 use crate::{
     auxinfo::info::AuxInfoPublic,
-    errors::Result,
+    errors::{InternalError, Result},
     messages::{Message, MessageType, PresignMessageType},
     presign::{
         round_one::PublicBroadcast as RoundOnePublicBroadcast,
@@ -53,6 +53,12 @@ impl Debug for Private {
     }
 }
 
+/// Public information produced in round three of the presign protocol.
+///
+/// This type implements [`TryFrom`] on [`Message`], which validates that
+/// [`Message`] is a valid serialization of `Public`, but _not_ that `Public` is
+/// necessarily valid (i.e., that all the components are valid with respect to
+/// each other); use [`Public::verify`] to check this latter condition.
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Public {
     pub delta: Scalar,
@@ -63,19 +69,22 @@ pub(crate) struct Public {
 }
 
 impl Public {
+    /// Verify the validity of [`Public`] against the prover's [`AuxInfoPublic`]
+    /// and [`PublicBroadcast`](crate::presign::round_one::PublicBroadcast)
+    /// values.
     pub(crate) fn verify(
         &self,
         context: &impl ProofContext,
-        receiver_keygen_public: &AuxInfoPublic,
-        sender_keygen_public: &AuxInfoPublic,
-        sender_r1_public_broadcast: &RoundOnePublicBroadcast,
+        verifier_auxinfo_public: &AuxInfoPublic,
+        prover_auxinfo_public: &AuxInfoPublic,
+        prover_r1_public_broadcast: &RoundOnePublicBroadcast,
     ) -> Result<()> {
         let mut transcript = Transcript::new(b"PiLogProof");
         let psi_double_prime_input = CommonInput::new(
-            sender_r1_public_broadcast.K.clone(),
+            prover_r1_public_broadcast.K.clone(),
             self.Delta,
-            receiver_keygen_public.params().scheme().clone(),
-            sender_keygen_public.pk().clone(),
+            verifier_auxinfo_public.params().scheme().clone(),
+            prover_auxinfo_public.pk().clone(),
             self.Gamma,
         );
         self.psi_double_prime
@@ -83,24 +92,20 @@ impl Public {
 
         Ok(())
     }
+}
 
-    pub(crate) fn from_message(
-        message: &Message,
-        context: &impl ProofContext,
-        receiver_auxinfo_public: &AuxInfoPublic,
-        sender_auxinfo_public: &AuxInfoPublic,
-        sender_r1_public_broadcast: &RoundOnePublicBroadcast,
-    ) -> Result<Self> {
+impl TryFrom<&Message> for Public {
+    type Error = InternalError;
+
+    fn try_from(message: &Message) -> std::result::Result<Self, Self::Error> {
         message.check_type(MessageType::Presign(PresignMessageType::RoundThree))?;
-        let round_three_public: Self = deserialize!(&message.unverified_bytes)?;
-
-        round_three_public.verify(
-            context,
-            receiver_auxinfo_public,
-            sender_auxinfo_public,
-            sender_r1_public_broadcast,
-        )?;
-        Ok(round_three_public)
+        let public: Self = deserialize!(&message.unverified_bytes)?;
+        // TODO #369: This should check the validity of `delta` (namely that it
+        // is less than `k256_order()`). However, we are currently using an
+        // older version of the `k256` library that doesn't support comparisons,
+        // making doing this check difficult. Add this check once the `k256`
+        // library has been updated.
+        Ok(public)
     }
 }
 
