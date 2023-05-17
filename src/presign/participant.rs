@@ -415,7 +415,7 @@ impl ProtocolParticipant for PresignParticipant {
         self.id
     }
 
-    fn other_ids(&self) -> &Vec<ParticipantIdentifier> {
+    fn other_ids(&self) -> &[ParticipantIdentifier] {
         &self.other_participant_ids
     }
 
