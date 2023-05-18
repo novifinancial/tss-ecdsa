@@ -286,7 +286,7 @@ impl Input {
         let expected_public_share = keyshare_private.public_share()?;
         if !all_keyshare_public
             .iter()
-            .any(|public_share| expected_public_share == public_share.X)
+            .any(|public_share| expected_public_share == *public_share.as_ref())
         {
             error!("Keygen private share did not correspond to any of the provided keygen public shares.");
             Err(CallerError::BadInput)?
@@ -1144,7 +1144,7 @@ impl PresignKeyShareAndInfo {
         let D_hat = receiver_aux_info
             .pk()
             .multiply_and_add(
-                &self.keyshare_private.x,
+                self.keyshare_private.as_ref(),
                 &receiver_r1_pub_broadcast.K,
                 &beta_hat_ciphertext,
             )
@@ -1183,7 +1183,7 @@ impl PresignKeyShareAndInfo {
         )?;
         let mut transcript = Transcript::new(b"PiAffgProof");
         let secret = PiAffgSecret::new(
-            self.keyshare_private.x.clone(),
+            self.keyshare_private.as_ref().clone(),
             beta_hat.clone(),
             s_hat,
             r_hat,
@@ -1196,7 +1196,7 @@ impl PresignKeyShareAndInfo {
                 receiver_r1_pub_broadcast.K.clone(),
                 D_hat.clone(),
                 F_hat.clone(),
-                self.keyshare_public.X,
+                *self.keyshare_public.as_ref(),
             ),
             &secret,
             context,
@@ -1250,7 +1250,10 @@ impl PresignKeyShareAndInfo {
         let g = CurvePoint::GENERATOR;
 
         let mut delta: BigNumber = sender_r1_priv.gamma.modmul(&sender_r1_priv.k, &order);
-        let mut chi: BigNumber = self.keyshare_private.x.modmul(&sender_r1_priv.k, &order);
+        let mut chi: BigNumber = self
+            .keyshare_private
+            .as_ref()
+            .modmul(&sender_r1_priv.k, &order);
         let mut Gamma = g.multiply_by_scalar(&sender_r1_priv.gamma)?;
 
         for round_three_input in other_participant_inputs.values() {
@@ -1340,11 +1343,10 @@ mod test {
         errors::{CallerError, InternalError, Result},
         paillier::DecryptionKey,
         ring_pedersen::VerifiedRingPedersen,
-        utils::{k256_order, testing::init_testing},
+        utils::testing::init_testing,
         AuxInfoPrivate, AuxInfoPublic, Identifier, KeySharePrivate, KeySharePublic,
         ParticipantConfig, ParticipantIdentifier, PresignParticipant, ProtocolParticipant,
     };
-    use libpaillier::unknown_order::BigNumber;
     use rand::rngs::StdRng;
 
     // Simulate the output of a keygen run with the given participants.
@@ -1356,9 +1358,7 @@ mod test {
             .iter()
             .map(|&pid| {
                 // TODO #340: Replace with KeyShare methods once they exist.
-                let secret = KeySharePrivate {
-                    x: BigNumber::from_rng(&k256_order(), rng),
-                };
+                let secret = KeySharePrivate::random(rng);
                 let public = secret.public_share().unwrap();
                 (secret, KeySharePublic::new(pid, public))
             })
@@ -1518,10 +1518,7 @@ mod test {
 
         // Make private components with no relation to the public inputs.
         let fake_auxinfo_private = AuxInfoPrivate::from(DecryptionKey::new(rng).unwrap().0);
-        let fake_keygen_private = KeySharePrivate {
-            x: BigNumber::from_rng(&k256_order(), rng),
-        };
-
+        let fake_keygen_private = KeySharePrivate::random(rng);
         // Auxinfo private key must correspond to one of the public inputs.
         let result = Input::new(
             auxinfo_public.clone(),
