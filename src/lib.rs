@@ -193,10 +193,7 @@ pub use auxinfo::{
     info::{AuxInfoPrivate, AuxInfoPublic},
     participant::AuxInfoParticipant,
 };
-pub use keygen::{
-    keyshare::{KeySharePrivate, KeySharePublic},
-    participant::KeygenParticipant,
-};
+pub use keygen::KeygenParticipant;
 pub use messages::Message;
 pub use participant::ProtocolParticipant;
 pub use presign::{
@@ -204,10 +201,8 @@ pub use presign::{
     record::PresignRecord,
 };
 pub use protocol::{
-    Identifier, Output, Participant, ParticipantConfig, ParticipantIdentifier, SharedContext,
-    SignatureShare,
+    Identifier, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
 };
-pub use utils::CurvePoint;
 
 use crate::presign::*;
 

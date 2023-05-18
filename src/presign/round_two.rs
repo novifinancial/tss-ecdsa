@@ -9,16 +9,16 @@
 use crate::{
     auxinfo::info::AuxInfoPublic,
     errors::{InternalError, Result},
-    keygen::keyshare::KeySharePublic,
+    keygen::KeySharePublic,
     messages::{Message, MessageType, PresignMessageType},
     paillier::Ciphertext,
     presign::round_one::{Private as RoundOnePrivate, PublicBroadcast as RoundOnePublicBroadcast},
+    utils::CurvePoint,
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof},
         pilog::{CommonInput, PiLogProof},
         Proof, ProofContext,
     },
-    CurvePoint,
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
