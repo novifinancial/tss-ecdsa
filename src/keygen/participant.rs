@@ -468,21 +468,11 @@ impl KeygenParticipant {
         }
 
         let decom = self.local_storage.retrieve::<storage::Decommit>(self.id)?;
-        let decom_bytes = serialize!(&decom)?;
-
-        let more_messages: Vec<Message> = self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                Message::new(
-                    MessageType::Keygen(KeygenMessageType::R2Decommit),
-                    sid,
-                    self.id,
-                    other_participant_id,
-                    &decom_bytes,
-                )
-            })
-            .collect();
+        let more_messages = self.message_for_other_participants(
+            MessageType::Keygen(KeygenMessageType::R2Decommit),
+            sid,
+            decom,
+        )?;
         messages.extend_from_slice(&more_messages);
         Ok(messages)
     }
@@ -595,21 +585,11 @@ impl KeygenParticipant {
             &PiSchSecret::new(my_sk.as_ref()),
             &transcript,
         )?;
-        let proof_bytes = serialize!(&proof)?;
-
-        let messages: Vec<Message> = self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                Message::new(
-                    MessageType::Keygen(KeygenMessageType::R3Proof),
-                    sid,
-                    self.id,
-                    other_participant_id,
-                    &proof_bytes,
-                )
-            })
-            .collect();
+        let messages = self.message_for_other_participants(
+            MessageType::Keygen(KeygenMessageType::R3Proof),
+            sid,
+            proof,
+        )?;
         Ok(messages)
     }
 

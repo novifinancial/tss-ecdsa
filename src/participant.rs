@@ -18,6 +18,7 @@ use crate::{
     Identifier,
 };
 use rand::{CryptoRng, RngCore};
+use serde::Serialize;
 use std::fmt::Debug;
 use tracing::error;
 
@@ -267,6 +268,28 @@ pub(crate) trait InnerProtocolParticipant: ProtocolParticipant {
     /// Returns a mutable reference to the [`LocalStorage`] associated with this
     /// protocol.
     fn local_storage_mut(&mut self) -> &mut LocalStorage;
+
+    /// Returns a Result[`Vec<Message>`] which are intended for the other
+    /// participants.
+    fn message_for_other_participants<T: Serialize>(
+        &self,
+        message_type: MessageType,
+        id: Identifier,
+        data: T,
+    ) -> Result<Vec<Message>> {
+        self.other_ids()
+            .iter()
+            .map(|&other_participant_id| {
+                Ok(Message::new(
+                    message_type,
+                    id,
+                    self.id(),
+                    other_participant_id,
+                    &serialize!(&data)?,
+                ))
+            })
+            .collect()
+    }
 
     /// Process a `ready` message: tell other participants that we're ready and
     /// see if all others have also reported that they are ready.

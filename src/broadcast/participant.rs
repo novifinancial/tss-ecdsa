@@ -225,20 +225,11 @@ impl BroadcastParticipant {
             message_type,
             data,
         };
-        let b_data_bytes = serialize!(&b_data)?;
-        let messages: Vec<Message> = self
-            .other_participant_ids
-            .iter()
-            .map(|&other_participant_id| {
-                Message::new(
-                    MessageType::Broadcast(BroadcastMessageType::Disperse),
-                    sid,
-                    self.id,
-                    other_participant_id,
-                    &b_data_bytes,
-                )
-            })
-            .collect();
+        let messages = self.message_for_other_participants(
+            MessageType::Broadcast(BroadcastMessageType::Disperse),
+            sid,
+            b_data,
+        )?;
         Ok(messages)
     }
 
