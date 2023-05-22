@@ -49,6 +49,8 @@ rug = { version = "1.16", default-features = false, features = ["integer", "rand
 tracing = {version = "0.1", default-features = false}
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tokio = { version = "1", features = ["full"] }
+# Generate UUID for threaded example.
+uuid = { version = "1.3.3", features =  ["v4", "fast-rng" ]}
 
 [[bench]]
 name = "e2e_benchmark"
@@ -57,3 +59,8 @@ harness = false
 [[bench]]
 name = "bignumber_benchmark"
 harness = false
+
+# This isn't strictly necessary but helps certain IDEs (Clion) find the code.
+[[example]]
+name = "threaded_example"
+path = "examples/threaded_example/threaded.rs"
