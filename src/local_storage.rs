@@ -62,8 +62,11 @@ impl LocalStorage {
             .insert((participant_id, TypeId::of::<T>()), Box::new(value));
     }
 
-    /// Retrieves a reference to a value via its [`TypeTag`]
-    /// and [`ParticipantIdentifier`].
+    /// Retrieves a reference to a value via its [`TypeTag`] and
+    /// [`ParticipantIdentifier`]. This will return an error if the item is
+    /// not in storage and should only be called after first checking with
+    /// [`contains()`](LocalStorage::contains())
+    /// or [`contains_for_all_ids()`](LocalStorage::contains_for_all_ids())
     pub(crate) fn retrieve<T: TypeTag>(
         &self,
         participant_id: ParticipantIdentifier,
@@ -73,14 +76,21 @@ impl LocalStorage {
             .map(|any| {
                 any.downcast_ref::<T::Value>().ok_or_else(|| {
                     error!(
-                        "Could not downcast storage entry. T: {:?}, participant_id: {}",
-                        TypeId::of::<T>(),
+                        "Could not downcast storage entry. Type: {:?}, participant_id: {}",
+                        std::any::type_name::<T::Value>(),
                         participant_id
                     );
                     InternalError::InternalInvariantFailed
                 })
             })
-            .unwrap_or(Err(InternalError::StorageItemNotFound))
+            .unwrap_or_else(|| {
+                error!(
+                    "Could not retrieve storage entry. Type: {:?}, participant_id: {}",
+                    std::any::type_name::<T::Value>(),
+                    participant_id
+                );
+                Err(InternalError::InternalInvariantFailed)
+            })
     }
 
     /// Retrieves a mutable reference to a value via its [`TypeTag`]
@@ -88,20 +98,11 @@ impl LocalStorage {
     pub(crate) fn retrieve_mut<T: TypeTag>(
         &mut self,
         participant_id: ParticipantIdentifier,
-    ) -> Result<&mut T::Value> {
-        self.storage
-            .get_mut(&(participant_id, TypeId::of::<T>()))
-            .map(|any| {
-                any.downcast_mut::<T::Value>().ok_or_else(|| {
-                    error!(
-                        "Could not downcast storage entry. T: {:?}, participant_id: {}",
-                        TypeId::of::<T>(),
-                        participant_id
-                    );
-                    InternalError::InternalInvariantFailed
-                })
-            })
-            .unwrap_or(Err(InternalError::StorageItemNotFound))
+    ) -> Option<&mut T::Value> {
+        match self.storage.get_mut(&(participant_id, TypeId::of::<T>())) {
+            Some(any) => any.downcast_mut::<T::Value>(),
+            None => None,
+        }
     }
 
     /// Checks whether values exist for the given [`TypeTag`]
