@@ -1,3 +1,5 @@
+//! Types and methods for our `Message` type and friends.
+
 // Copyright (c) Facebook, Inc. and its affiliates.
 // Modifications Copyright (c) 2022-2023 Bolt Labs Holdings, Inc
 //
@@ -77,6 +79,7 @@ pub enum PresignMessageType {
     RoundThree,
 }
 
+/// The type of broadcast message this is.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BroadcastMessageType {
     /// First round: sender sends their message to everyone
@@ -118,7 +121,7 @@ impl Debug for Message {
 impl Message {
     /// Creates a new instance of [`Message`].
     #[instrument(skip_all)]
-    pub fn new(
+    pub(crate) fn new(
         message_type: MessageType,
         identifier: Identifier,
         from: ParticipantIdentifier,

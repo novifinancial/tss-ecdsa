@@ -178,7 +178,7 @@ pub mod broadcast;
 pub mod keygen;
 mod local_storage;
 mod message_queue;
-mod messages;
+pub mod messages;
 mod paillier;
 mod parameters;
 mod participant;
