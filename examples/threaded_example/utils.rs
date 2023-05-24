@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tss_ecdsa::Message;
 
-/// Messages from main thread to Participant worker threads.
+/// Sub-protocol of tss-ecdsa.
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
 pub enum SubProtocol {
     KeyGeneration,
