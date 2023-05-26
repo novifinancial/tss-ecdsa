@@ -33,7 +33,7 @@ use crate::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
         pienc::{PiEncInput, PiEncProof, PiEncSecret},
         pilog::{CommonInput, PiLogProof, ProverSecret},
-        Proof, ProofContext,
+        Proof, Proof2, ProofContext,
     },
     Identifier,
 };
@@ -966,7 +966,7 @@ impl PresignParticipant {
             .retrieve::<storage::RoundOnePublicBroadcast>(message.from())?;
 
         let round_two_public = RoundTwoPublic::try_from(message)?;
-        round_two_public.verify(
+        round_two_public.clone().verify(
             &self.retrieve_context(),
             receiver_auxinfo_public,
             receiver_r1_private,
@@ -1062,18 +1062,14 @@ impl PresignKeyShareAndInfo {
             .encrypt(rng, &gamma)
             .map_err(|_| InternalError::InternalInvariantFailed)?;
         let mut r1_publics = HashMap::new();
-        let secret = PiEncSecret::new(k.clone(), rho.clone());
+        let secret = PiEncSecret::new(&k, &rho);
         for aux_info_public in other_auxinfos {
             // Construct a proof that `K` is the ciphertext of `k` using
             // parameters from the other participant.
             let mut transcript = Transcript::new(b"PiEncProof");
             let proof = PiEncProof::prove(
-                &PiEncInput::new(
-                    aux_info_public.params().clone(),
-                    self.aux_info_public.pk().clone(),
-                    K.clone(),
-                ),
-                &secret,
+                PiEncInput::new(aux_info_public.params(), self.aux_info_public.pk(), &K),
+                secret,
                 context,
                 &mut transcript,
                 rng,
@@ -1165,40 +1161,35 @@ impl PresignKeyShareAndInfo {
 
         // Generate the proofs.
         let mut transcript = Transcript::new(b"PiAffgProof");
-        let secret = PiAffgSecret::new(sender_r1_priv.gamma.clone(), beta.clone(), s, r);
+        let secret = PiAffgSecret::new(&sender_r1_priv.gamma, &beta, &s, &r);
         let psi = PiAffgProof::prove(
-            &PiAffgInput::new(
-                receiver_aux_info.params().clone(),
-                receiver_aux_info.pk().clone(),
-                self.aux_info_public.pk().clone(),
-                receiver_r1_pub_broadcast.K.clone(),
-                D.clone(),
-                F.clone(),
-                Gamma,
+            PiAffgInput::new(
+                receiver_aux_info.params(),
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
+                &receiver_r1_pub_broadcast.K,
+                &D,
+                &F,
+                &Gamma,
             ),
-            &secret,
+            secret,
             context,
             &mut transcript,
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiAffgProof");
-        let secret = PiAffgSecret::new(
-            self.keyshare_private.as_ref().clone(),
-            beta_hat.clone(),
-            s_hat,
-            r_hat,
-        );
+        let secret = PiAffgSecret::new(self.keyshare_private.as_ref(), &beta_hat, &s_hat, &r_hat);
         let psi_hat = PiAffgProof::prove(
-            &PiAffgInput::new(
-                receiver_aux_info.params().clone(),
-                receiver_aux_info.pk().clone(),
-                self.aux_info_public.pk().clone(),
-                receiver_r1_pub_broadcast.K.clone(),
-                D_hat.clone(),
-                F_hat.clone(),
-                *self.keyshare_public.as_ref(),
+            PiAffgInput::new(
+                receiver_aux_info.params(),
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
+                &receiver_r1_pub_broadcast.K,
+                &D_hat,
+                &F_hat,
+                self.keyshare_public.as_ref(),
             ),
-            &secret,
+            secret,
             context,
             &mut transcript,
             rng,

@@ -46,7 +46,7 @@ use crate::{
     utils::{
         self, plusminus_challenge_from_transcript, random_plusminus_by_size, within_bound_by_size,
     },
-    zkp::{Proof, ProofContext},
+    zkp::{Proof2, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -55,7 +55,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::error;
 use utils::CurvePoint;
-use zeroize::ZeroizeOnDrop;
 
 /// Zero-knowledge proof of knowledge of a Paillier affine operation with a
 /// group commitment where the encrypted and committed values are in a given
@@ -108,39 +107,42 @@ pub(crate) struct PiAffgProof {
 
 /// Common input and setup parameters for [`PiAffgProof`] known to both the
 /// prover and verifier.
-#[derive(Serialize)]
-pub(crate) struct PiAffgInput {
+///
+/// Copying/Cloning references is harmless and sometimes necessary. So we
+/// implement Clone and Copy for this type.
+#[derive(Serialize, Clone, Copy)]
+pub(crate) struct PiAffgInput<'a> {
     /// The verifier's commitment parameters (`(Nhat, s, t)` in the paper).
-    verifier_setup_params: VerifiedRingPedersen,
+    verifier_setup_params: &'a VerifiedRingPedersen,
     /// The verifier's Paillier encryption key (`N_0` in the paper).
-    verifier_encryption_key: EncryptionKey,
+    verifier_encryption_key: &'a EncryptionKey,
     /// The prover's Paillier encryption key (`N_1` in the paper).
-    prover_encryption_key: EncryptionKey,
+    prover_encryption_key: &'a EncryptionKey,
     /// The original Paillier ciphertext encrypted under the verifier's
     /// encryption key (`C` in the paper).
-    original_ciphertext_verifier: Ciphertext,
+    original_ciphertext_verifier: &'a Ciphertext,
     /// The transformed Paillier ciphertext encrypted under the verifier's
     /// encryption key (`D` in the paper).
-    transformed_ciphertext_verifier: Ciphertext,
+    transformed_ciphertext_verifier: &'a Ciphertext,
     /// Paillier ciphertext of the prover's additive coefficient under the
     /// prover's encryption key (`Y` in the paper).
-    add_coeff_ciphertext_prover: Ciphertext,
+    add_coeff_ciphertext_prover: &'a Ciphertext,
     /// Exponentiation of the prover's multiplicative coefficient (`X` in the
     /// paper).
-    mult_coeff_exp: CurvePoint,
+    mult_coeff_exp: &'a CurvePoint,
 }
 
-impl PiAffgInput {
+impl<'a> PiAffgInput<'a> {
     /// Construct a new [`PiAffgInput`] type.
     pub(crate) fn new(
-        verifier_setup_params: VerifiedRingPedersen,
-        verifier_encryption_key: EncryptionKey,
-        prover_encryption_key: EncryptionKey,
-        original_ciphertext_verifier: Ciphertext,
-        transformed_ciphertext_verifier: Ciphertext,
-        add_coeff_ciphertext_prover: Ciphertext,
-        mult_coeff_exp: CurvePoint,
-    ) -> Self {
+        verifier_setup_params: &'a VerifiedRingPedersen,
+        verifier_encryption_key: &'a EncryptionKey,
+        prover_encryption_key: &'a EncryptionKey,
+        original_ciphertext_verifier: &'a Ciphertext,
+        transformed_ciphertext_verifier: &'a Ciphertext,
+        add_coeff_ciphertext_prover: &'a Ciphertext,
+        mult_coeff_exp: &'a CurvePoint,
+    ) -> PiAffgInput<'a> {
         Self {
             verifier_setup_params,
             verifier_encryption_key,
@@ -154,21 +156,20 @@ impl PiAffgInput {
 }
 
 /// The prover's secret knowledge.
-#[derive(ZeroizeOnDrop)]
-pub(crate) struct PiAffgSecret {
+pub(crate) struct PiAffgSecret<'a> {
     /// The multiplicative coefficient (`x` in the paper).
-    mult_coeff: BigNumber,
+    mult_coeff: &'a BigNumber,
     /// The additive coefficient (`y` in the paper).
-    add_coeff: BigNumber,
+    add_coeff: &'a BigNumber,
     /// The additive coefficient's nonce produced when encrypted using the
     /// verifier's encryption key (`ρ` in the paper).
-    add_coeff_nonce_verifier_key: Nonce,
+    add_coeff_nonce_verifier_key: &'a Nonce,
     /// The additive coefficient's nonce produced when encrypted using the
     /// prover's encryption key (`ρ_y` in the paper).
-    add_coeff_nonce_prover_key: Nonce,
+    add_coeff_nonce_prover_key: &'a Nonce,
 }
 
-impl Debug for PiAffgSecret {
+impl Debug for PiAffgSecret<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Paillier Affine Operation Proof Secret")
             .field("mult_coeff", &"[redacted]")
@@ -179,14 +180,14 @@ impl Debug for PiAffgSecret {
     }
 }
 
-impl PiAffgSecret {
+impl<'a> PiAffgSecret<'a> {
     /// Construct a new [`PiAffgSecret`] type.
     pub(crate) fn new(
-        mult_coeff: BigNumber,
-        add_coeff: BigNumber,
-        add_coeff_nonce_verifier_key: Nonce,
-        add_coeff_nonce_prover_key: Nonce,
-    ) -> Self {
+        mult_coeff: &'a BigNumber,
+        add_coeff: &'a BigNumber,
+        add_coeff_nonce_verifier_key: &'a Nonce,
+        add_coeff_nonce_prover_key: &'a Nonce,
+    ) -> PiAffgSecret<'a> {
         Self {
             mult_coeff,
             add_coeff,
@@ -196,14 +197,14 @@ impl PiAffgSecret {
     }
 }
 
-impl Proof for PiAffgProof {
-    type CommonInput = PiAffgInput;
-    type ProverSecret = PiAffgSecret;
+impl Proof2 for PiAffgProof {
+    type CommonInput<'a> = PiAffgInput<'a>;
+    type ProverSecret<'b> = PiAffgSecret<'b>;
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
     fn prove<R: RngCore + CryptoRng>(
-        input: &Self::CommonInput,
-        secret: &Self::ProverSecret,
+        input: Self::CommonInput<'_>,
+        secret: Self::ProverSecret<'_>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
@@ -278,7 +279,7 @@ impl Proof for PiAffgProof {
             .verifier_encryption_key
             .multiply_and_add(
                 &random_mult_coeff,
-                &input.original_ciphertext_verifier,
+                input.original_ciphertext_verifier,
                 &random_additive_coeff_ciphertext_verifier,
             )
             .map_err(|_| InternalError::InternalInvariantFailed)?;
@@ -302,7 +303,7 @@ impl Proof for PiAffgProof {
         let (mult_coeff_commit, mult_coeff_commit_randomness) = input
             .verifier_setup_params
             .scheme()
-            .commit(&secret.mult_coeff, ELL, rng);
+            .commit(secret.mult_coeff, ELL, rng);
         // Compute a ring-Pedersen commitment of the random additive coefficient
         // (producing `F` and `δ` in the paper).
         let (random_add_coeff_commit, random_add_coeff_commit_randomness) = input
@@ -314,12 +315,12 @@ impl Proof for PiAffgProof {
         let (add_coeff_commit, add_coeff_commit_randomness) = input
             .verifier_setup_params
             .scheme()
-            .commit(&secret.add_coeff, ELL, rng);
+            .commit(secret.add_coeff, ELL, rng);
         // Generate verifier's challenge via Fiat-Shamir (`e` in the paper).
         let challenge = Self::generate_challenge(
             transcript,
             context,
-            input,
+            &input,
             &mult_coeff_commit,
             &add_coeff_commit,
             &random_affine_ciphertext_verifier,
@@ -329,9 +330,9 @@ impl Proof for PiAffgProof {
             &random_add_coeff_commit,
         )?;
         // Mask the (secret) multiplicative coefficient (`z_1` in the paper).
-        let masked_mult_coeff = &random_mult_coeff + &challenge * &secret.mult_coeff;
+        let masked_mult_coeff = &random_mult_coeff + &challenge * secret.mult_coeff;
         // Mask the (secret) additive coefficient (`z_2` in the paper).
-        let masked_add_coeff = &random_add_coeff + &challenge * &secret.add_coeff;
+        let masked_add_coeff = &random_add_coeff + &challenge * secret.add_coeff;
         // Mask the multiplicative coefficient's commitment randomness (`z_3` in the
         // paper).
         let masked_mult_coeff_commit_randomness =
@@ -343,7 +344,7 @@ impl Proof for PiAffgProof {
         // additive coefficient's nonce produced using the verifier's encryption
         // key (`w` in the paper).
         let masked_add_coeff_nonce_verifier = input.verifier_encryption_key.mask(
-            &secret.add_coeff_nonce_verifier_key,
+            secret.add_coeff_nonce_verifier_key,
             &random_add_coeff_nonce_verifier,
             &challenge,
         );
@@ -351,7 +352,7 @@ impl Proof for PiAffgProof {
         // additive coefficient's nonce produced using the prover's encryption
         // key (`w_y` in the paper).
         let masked_add_coeff_nonce_prover = input.prover_encryption_key.mask(
-            &secret.add_coeff_nonce_prover_key,
+            secret.add_coeff_nonce_prover_key,
             &random_add_coeff_nonce_prover,
             &challenge,
         );
@@ -375,8 +376,8 @@ impl Proof for PiAffgProof {
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
     fn verify(
-        &self,
-        input: &Self::CommonInput,
+        self,
+        input: Self::CommonInput<'_>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()> {
@@ -384,7 +385,7 @@ impl Proof for PiAffgProof {
         let challenge = Self::generate_challenge(
             transcript,
             context,
-            input,
+            &input,
             &self.mult_coeff_commit,
             &self.add_coeff_commit,
             &self.random_affine_ciphertext_verifier,
@@ -407,12 +408,12 @@ impl Proof for PiAffgProof {
             )?;
             let lhs = input.verifier_encryption_key.multiply_and_add(
                 &self.masked_mult_coeff,
-                &input.original_ciphertext_verifier,
+                input.original_ciphertext_verifier,
                 &tmp,
             )?;
             let rhs = input.verifier_encryption_key.multiply_and_add(
                 &self.challenge,
-                &input.transformed_ciphertext_verifier,
+                input.transformed_ciphertext_verifier,
                 &self.random_affine_ciphertext_verifier,
             )?;
             Ok(lhs == rhs)
@@ -444,7 +445,7 @@ impl Proof for PiAffgProof {
                 .prover_encryption_key
                 .multiply_and_add(
                     &self.challenge,
-                    &input.add_coeff_ciphertext_prover,
+                    input.add_coeff_ciphertext_prover,
                     &self.random_add_coeff_ciphertext_prover,
                 )
                 .map_err(|_| InternalError::ProtocolError)?;
@@ -553,11 +554,19 @@ mod tests {
         zkp::BadContext,
     };
 
-    fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
+    // Type of expected function for our code testing.
+    type TestFn = fn(PiAffgProof, PiAffgInput) -> Result<()>;
+
+    fn transcript() -> Transcript {
+        Transcript::new(b"random_paillier_affg_proof")
+    }
+
+    fn with_random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         x: &BigNumber,
         y: &BigNumber,
-    ) -> Result<(PiAffgProof, PiAffgInput, Transcript)> {
+        test_code: TestFn,
+    ) -> Result<()> {
         let (decryption_key_0, _, _) = DecryptionKey::new(rng).unwrap();
         let pk0 = decryption_key_0.encryption_key();
 
@@ -578,13 +587,12 @@ mod tests {
         };
 
         let setup_params = VerifiedRingPedersen::gen(rng, &())?;
-        let mut transcript = Transcript::new(b"random_paillier_affg_proof");
-        let input = PiAffgInput::new(setup_params, pk0, pk1, C, D, Y, X);
-        let secret = PiAffgSecret::new(x.clone(), y.clone(), rho, rho_y);
+        let input = PiAffgInput::new(&setup_params, &pk0, &pk1, &C, &D, &Y, &X);
+        let secret = PiAffgSecret::new(x, y, &rho, &rho_y);
 
-        let proof = PiAffgProof::prove(&input, &secret, &(), &mut transcript, rng)?;
-        let transcript = Transcript::new(b"random_paillier_affg_proof");
-        Ok((proof, input, transcript))
+        let proof = PiAffgProof::prove(input, secret, &(), &mut transcript(), rng)?;
+        test_code(proof, input)?;
+        Ok(())
     }
 
     fn random_paillier_affg_verified_proof<R: RngCore + CryptoRng>(
@@ -592,8 +600,8 @@ mod tests {
         x: &BigNumber,
         y: &BigNumber,
     ) -> Result<()> {
-        let (proof, input, mut transcript) = random_paillier_affg_proof(rng, x, y)?;
-        proof.verify(&input, &(), &mut transcript)
+        let f: TestFn = |proof, input| proof.verify(input, &(), &mut transcript());
+        with_random_paillier_affg_proof(rng, x, y, f)
     }
 
     #[test]
@@ -628,11 +636,12 @@ mod tests {
         let x_small = random_plusminus_by_size(&mut rng, ELL);
         let y_small = random_plusminus_by_size(&mut rng, ELL_PRIME);
 
-        let context = BadContext {};
-        let (proof, input, mut transcript) =
-            random_paillier_affg_proof(&mut rng, &x_small, &y_small).unwrap();
-        let result = proof.verify(&input, &context, &mut transcript);
-        assert!(result.is_err());
+        let test_code: TestFn = |proof, input| {
+            let result = proof.verify(input, &BadContext {}, &mut transcript());
+            assert!(result.is_err());
+            Ok(())
+        };
+        with_random_paillier_affg_proof(&mut rng, &x_small, &y_small, test_code)?;
         Ok(())
     }
 }

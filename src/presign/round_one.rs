@@ -13,7 +13,7 @@ use crate::{
     ring_pedersen::VerifiedRingPedersen,
     zkp::{
         pienc::{PiEncInput, PiEncProof},
-        Proof, ProofContext,
+        Proof2, ProofContext,
     },
 };
 use libpaillier::unknown_order::BigNumber;
@@ -79,19 +79,15 @@ impl Public {
     /// Note: The [`VerifiedRingPedersen`] value must be that of the _caller_
     /// (i.e., the verifier).
     pub(crate) fn verify(
-        &self,
+        self,
         context: &impl ProofContext,
         verifier_setup_params: &VerifiedRingPedersen,
         prover_pk: &EncryptionKey,
         prover_public_broadcast: &PublicBroadcast,
     ) -> Result<()> {
         let mut transcript = Transcript::new(b"PiEncProof");
-        let input = PiEncInput::new(
-            verifier_setup_params.clone(),
-            prover_pk.clone(),
-            prover_public_broadcast.K.clone(),
-        );
-        self.proof.verify(&input, context, &mut transcript)
+        let input = PiEncInput::new(verifier_setup_params, prover_pk, &prover_public_broadcast.K);
+        self.proof.verify(input, context, &mut transcript)
     }
 }
 
