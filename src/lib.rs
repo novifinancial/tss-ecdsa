@@ -201,7 +201,8 @@ pub use presign::{
     record::PresignRecord,
 };
 pub use protocol::{
-    Identifier, Participant, ParticipantConfig, ParticipantIdentifier, SignatureShare,
+    participant_config::ParticipantConfig, Identifier, Participant, ParticipantIdentifier,
+    SignatureShare,
 };
 
 use crate::presign::*;

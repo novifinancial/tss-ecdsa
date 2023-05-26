@@ -82,21 +82,11 @@ fn init_new_player_set<P: ProtocolParticipant>(
     let num_players = inputs.len();
 
     // Get the sets of mine/other ids for each party
-    let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(&mut rng))
-        .take(num_players)
-        .collect::<Vec<_>>();
-
-    let configs = (0..num_players)
-        .map(|i| {
-            let mut other_ids = ids.clone();
-            let id = other_ids.remove(i);
-            ParticipantConfig { id, other_ids }
-        })
-        .collect::<Vec<_>>();
+    let configs = ParticipantConfig::random_quorum(num_players, &mut rng).unwrap();
 
     // Instantiate participants
     let quorum: Vec<Participant<P>> = configs
-        .iter()
+        .into_iter()
         .zip(inputs)
         .map(|(config, input)| Participant::from_config(config, sid, input).unwrap())
         .collect();

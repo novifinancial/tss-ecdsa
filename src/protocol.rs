@@ -14,6 +14,7 @@ use crate::{
     errors::{CallerError, InternalError, Result},
     messages::MessageType,
     participant::{InnerProtocolParticipant, ProtocolParticipant},
+    protocol::participant_config::ParticipantConfig,
     utils::{k256_order, CurvePoint},
     zkp::ProofContext,
     Message,
@@ -24,6 +25,7 @@ use rand::{CryptoRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{Ord, PartialOrd},
+    collections::HashSet,
     fmt::{Debug, Formatter},
 };
 use tracing::{error, info, instrument, trace};
@@ -108,19 +110,17 @@ where
 impl<P: ProtocolParticipant> Participant<P> {
     /// Initialize the participant from a [`ParticipantConfig`].
     pub fn from_config(
-        config: &ParticipantConfig,
+        config: ParticipantConfig,
         sid: Identifier,
         input: P::Input,
     ) -> Result<Self> {
         info!("Initializing participant from config.");
 
-        if config.other_ids.is_empty() {
-            Err(CallerError::ParticipantConfigError)?
-        }
+        let (id, other_ids) = config.into_parts();
 
         Ok(Participant {
-            id: config.id,
-            participant: P::new(sid, config.id, config.other_ids.clone(), input)?,
+            id,
+            participant: P::new(sid, id, other_ids, input)?,
         })
     }
 
@@ -292,52 +292,162 @@ impl SignatureShare {
     }
 }
 
-/// The configuration for the participant.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParticipantConfig {
-    /// The identifier for this participant.
-    pub id: ParticipantIdentifier,
-    /// The identifier for the other participants executing the protocol.
-    pub other_ids: Vec<ParticipantIdentifier>,
-}
+pub(crate) mod participant_config {
+    use super::*;
 
-impl ParticipantConfig {
-    /// Get a list of `size` consistent [`ParticipantConfig`]s.
+    /// The configuration for the participant.
     ///
-    /// Each config contains a different permutation of a single overall set of
-    /// [`ParticipantIdentifier`]s.
-    ///
-    /// This method implies the existence of a trusted third party that
-    /// generates the IDs.
-    pub fn random_quorum<R: RngCore + CryptoRng>(
-        size: usize,
-        rng: &mut R,
-    ) -> Result<Vec<ParticipantConfig>> {
-        if size < 2 {
-            Err(CallerError::ParticipantConfigError)?
-        }
-        let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
-            .take(size)
-            .collect::<Vec<_>>();
-
-        Ok((0..size)
-            .map(|i| {
-                let mut other_ids = ids.clone();
-                let id = other_ids.swap_remove(i);
-                Self { id, other_ids }
-            })
-            .collect())
+    /// Contains a set of at least two unique participant identifiers.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ParticipantConfig {
+        /// The identifier for this participant.
+        id: ParticipantIdentifier,
+        /// The identifier for the other participants executing the protocol.
+        other_ids: Vec<ParticipantIdentifier>,
     }
 
-    ///Create a random [`ParticipantConfig`].
+    impl ParticipantConfig {
+        /// Get the [`ParticipantIdentifier`] for the owner of this config.
+        pub fn id(&self) -> ParticipantIdentifier {
+            self.id
+        }
+
+        /// Get the [`ParticipantIdentifier`] for all other participants.
+        pub fn other_ids(&self) -> &[ParticipantIdentifier] {
+            self.other_ids.as_slice()
+        }
+
+        /// Returns a list of all participant IDs, including `self`'s.
+        pub fn all_participants(&self) -> Vec<ParticipantIdentifier> {
+            let mut participant = self.other_ids().to_owned();
+            participant.push(self.id());
+            participant
+        }
+
+        pub(crate) fn into_parts(self) -> (ParticipantIdentifier, Vec<ParticipantIdentifier>) {
+            (self.id, self.other_ids)
+        }
+
+        /// Create a new [`ParticipantConfig`].
+        ///
+        /// The protocol requires at least two participants; `other_ids` cannot
+        /// be empty. All participant identifiers must be unique.
+        pub fn new(id: ParticipantIdentifier, other_ids: &[ParticipantIdentifier]) -> Result<Self> {
+            if other_ids.is_empty() {
+                error!(
+                    "Tried to create a participant config with too few participants. There must be at least one `other_id`.",
+                );
+                Err(CallerError::ParticipantConfigError)?
+            }
+
+            // Test for uniqueness
+            let unique_set =
+                HashSet::<&ParticipantIdentifier>::from_iter(std::iter::once(&id).chain(other_ids));
+            if unique_set.len() != other_ids.len() + 1 {
+                error!(
+                    "Tried to create a participant config with a non-unique set of participants"
+                );
+                Err(CallerError::ParticipantConfigError)?
+            }
+
+            Ok(Self {
+                id,
+                other_ids: other_ids.to_vec(),
+            })
+        }
+
+        /// Get a list of `size` consistent [`ParticipantConfig`]s.
+        ///
+        /// Each config contains a different permutation of a single overall set
+        /// of [`ParticipantIdentifier`]s.
+        ///
+        /// **⚠️ Security warning:** This method implies the existence of a
+        /// trusted third party that generates the participant IDs. This
+        /// method must not be used if your deployment does not have a
+        /// trusted party.
+        pub fn random_quorum<R: RngCore + CryptoRng>(
+            size: usize,
+            rng: &mut R,
+        ) -> Result<Vec<ParticipantConfig>> {
+            if size < 2 {
+                Err(CallerError::ParticipantConfigError)?
+            }
+            let ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+                .take(size)
+                .collect::<Vec<_>>();
+
+            (0..size)
+                .map(|i| {
+                    let mut other_ids = ids.clone();
+                    let id = other_ids.swap_remove(i);
+                    Self::new(id, other_ids.as_slice())
+                })
+                .collect::<Result<_>>()
+        }
+
+        ///Create a random [`ParticipantConfig`].
+        #[cfg(test)]
+        pub(crate) fn random<R: RngCore + CryptoRng>(
+            size: usize,
+            rng: &mut R,
+        ) -> ParticipantConfig {
+            assert!(size > 1);
+            let other_ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
+                .take(size - 1)
+                .collect::<Vec<_>>();
+            let id = ParticipantIdentifier::random(rng);
+            Self { id, other_ids }
+        }
+    }
+
     #[cfg(test)]
-    pub(crate) fn random<R: RngCore + CryptoRng>(size: usize, rng: &mut R) -> ParticipantConfig {
-        assert!(size > 1);
-        let other_ids = std::iter::repeat_with(|| ParticipantIdentifier::random(rng))
-            .take(size - 1)
-            .collect::<Vec<_>>();
-        let id = ParticipantIdentifier::random(rng);
-        Self { id, other_ids }
+    mod tests {
+        use super::*;
+        use crate::utils::testing::init_testing;
+
+        #[test]
+        fn participant_config_must_have_at_least_two_participants() {
+            let mut rng = init_testing();
+            let result = ParticipantConfig::new(ParticipantIdentifier::random(&mut rng), &[]);
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
+            );
+        }
+
+        #[test]
+        fn participant_config_must_have_unique_participants() {
+            let mut rng = init_testing();
+            let id = ParticipantIdentifier::random(&mut rng);
+            let result = ParticipantConfig::new(id, &[id]);
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
+            );
+
+            let result = ParticipantConfig::new(ParticipantIdentifier::random(&mut rng), &[id, id]);
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
+            );
+        }
+
+        // Testing whether Participant Config has at least 2 participants
+        #[test]
+        fn random_quorum_must_have_at_least_two_participants() {
+            let mut rng = init_testing();
+            for i in 0..2 {
+                let result = ParticipantConfig::random_quorum(i, &mut rng);
+                assert!(result.is_err());
+                assert_eq!(
+                    result.unwrap_err(),
+                    InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
+                );
+            }
+        }
     }
 }
 
@@ -505,13 +615,24 @@ impl Debug for Identifier {
 }
 
 impl Identifier {
-    /// Produces a random [Identifier]
+    /// Produces an [`Identifier`] chosen uniformly at random.
+    ///
+    /// **⚠️ Security warning:** This method implies the existence of a trusted
+    /// third party that generates session IDs and correctly distributes
+    /// them to all participants. This method must not be used if your
+    /// deployment does not have a trusted party.
     #[instrument(skip_all)]
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         // Sample random 32 bytes and convert to hex
         let random_bytes = rng.gen::<u128>();
         trace!("Created new Session Identifier({random_bytes})");
         Self(random_bytes)
+    }
+}
+
+impl From<u128> for Identifier {
+    fn from(value: u128) -> Self {
+        Self(value)
     }
 }
 
@@ -545,7 +666,7 @@ mod tests {
         let config = ParticipantConfig::random(QUORUM_SIZE, &mut rng);
         let auxinfo_sid = Identifier::random(&mut rng);
         let mut participant =
-            Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ()).unwrap();
+            Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong session ID
         let message = participant.initialize_message();
@@ -579,7 +700,7 @@ mod tests {
         let config = ParticipantConfig::random(QUORUM_SIZE, &mut rng);
         let auxinfo_sid = Identifier::random(&mut rng);
         let mut participant =
-            Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ()).unwrap();
+            Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong participant to field
         let message = participant.initialize_message();
@@ -612,7 +733,7 @@ mod tests {
         let config = ParticipantConfig::random(QUORUM_SIZE, &mut rng);
         let auxinfo_sid = Identifier::random(&mut rng);
         let mut participant =
-            Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ()).unwrap();
+            Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong protocol type
         let message = participant.initialize_message();
@@ -646,7 +767,7 @@ mod tests {
         let config = ParticipantConfig::random(QUORUM_SIZE, &mut rng);
         let auxinfo_sid = Identifier::random(&mut rng);
         let mut participant =
-            Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ()).unwrap();
+            Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         //message with the wrong sender participant
         let message = participant.initialize_message();
@@ -665,37 +786,6 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::InvalidMessageSender)
-        );
-    }
-
-    // Testing whether Participant Config has at least 2 participants
-    #[test]
-    fn random_quorum_must_have_at_least_two_participants() {
-        let mut rng = init_testing();
-        for i in 0..2 {
-            let result = ParticipantConfig::random_quorum(i, &mut rng);
-            assert!(result.is_err());
-            assert_eq!(
-                result.unwrap_err(),
-                InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
-            );
-        }
-    }
-
-    // Testing whether set of other participants is not empty
-    #[test]
-    fn participant_does_not_have_empty_set_of_other_participants() {
-        let mut rng = init_testing();
-        let config = ParticipantConfig {
-            id: ParticipantIdentifier::random(&mut rng),
-            other_ids: vec![],
-        };
-        let auxinfo_sid = Identifier::random(&mut rng);
-        let p = Participant::<AuxInfoParticipant>::from_config(&config, auxinfo_sid, ());
-        assert!(p.is_err());
-        assert_eq!(
-            p.unwrap_err(),
-            InternalError::CallingApplicationMistake(CallerError::ParticipantConfigError)
         );
     }
 
@@ -762,7 +852,8 @@ mod tests {
         // Set up auxinfo participants
         let auxinfo_sid = Identifier::random(&mut rng);
         let mut auxinfo_quorum = configs
-            .iter()
+            .clone()
+            .into_iter()
             .map(|config| {
                 Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap()
             })
@@ -807,7 +898,8 @@ mod tests {
         // Set up keygen participants
         let keygen_sid = Identifier::random(&mut rng);
         let mut keygen_quorum = configs
-            .iter()
+            .clone()
+            .into_iter()
             .map(|config| {
                 Participant::<KeygenParticipant>::from_config(config, keygen_sid, ()).unwrap()
             })
@@ -843,7 +935,7 @@ mod tests {
 
         // Save the public key for later
         let saved_public_key = keygen_outputs
-            .get(&configs.get(0).unwrap().id)
+            .get(&configs.get(0).unwrap().id())
             .unwrap()
             .public_key()?;
 
@@ -855,8 +947,8 @@ mod tests {
             .iter()
             .map(|config| {
                 (
-                    auxinfo_outputs.get(&config.id).unwrap(),
-                    keygen_outputs.get(&config.id).unwrap(),
+                    auxinfo_outputs.get(&config.id()).unwrap(),
+                    keygen_outputs.get(&config.id()).unwrap(),
                 )
             })
             .map(|((aux_pub, aux_priv), keygen_output)| {
@@ -865,7 +957,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut presign_quorum = configs
-            .iter()
+            .into_iter()
             .zip(presign_inputs)
             .map(|(config, input)| {
                 Participant::<PresignParticipant>::from_config(config, presign_sid, input).unwrap()

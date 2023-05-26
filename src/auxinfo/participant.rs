@@ -648,7 +648,7 @@ mod tests {
         ) -> Result<Vec<Self>> {
             ParticipantConfig::random_quorum(quorum_size, rng)?
                 .into_iter()
-                .map(|config| Self::new(sid, config.id, config.other_ids, input))
+                .map(|config| Self::new(sid, config.id(), config.other_ids().to_vec(), input))
                 .collect::<Result<Vec<_>>>()
         }
 

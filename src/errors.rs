@@ -48,7 +48,7 @@ pub enum CallerError {
     ProtocolAlreadyTerminated,
     #[error("The provided RNG failed to produce suitable values after a maximum number of attempts. Please check the RNG.")]
     RetryFailed,
-    #[error("Received a message with too few parties (Participant Config should have at least 2 parties)")]
+    #[error("Tried to create an invalid `ParticipantConfig` (the protocol requires at least 2 uniquely identified parties)")]
     ParticipantConfigError,
     #[error("The provided input did not satisfy the requirements on the input type. See logs for details.")]
     BadInput,

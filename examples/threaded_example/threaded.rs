@@ -175,7 +175,7 @@ fn main() -> anyhow::Result<()> {
     // Spawn worker threads. Link worker to main thread with channels.
     for config in participants {
         let (from_coordinator_tx, from_coordinator_rx) = channel::<MessageFromCoordinator>();
-        worker_messages.insert(config.id, from_coordinator_tx);
+        worker_messages.insert(config.id(), from_coordinator_tx);
 
         let outgoing = outgoing_tx.clone();
         thread::spawn(|| participant_worker(config, from_coordinator_rx, outgoing));
@@ -352,7 +352,7 @@ impl Worker {
         let rng = &mut thread_rng();
 
         let mut participant: Participant<P> =
-            Participant::from_config(&self.config, sid.0, inputs)?;
+            Participant::from_config(self.config.clone(), sid.0, inputs)?;
         let init_message = participant.initialize_message();
 
         // Output will be None.

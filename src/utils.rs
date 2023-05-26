@@ -306,9 +306,9 @@ pub(crate) mod testing {
         let mut seeder = OsRng;
         let seed = seeder.gen();
         eprintln!(
-            "Test Failed. To recreate the randomness used, use init_testing_with_seed() with the following seed:"
+            "To re-run test with the same randomness, use init_testing_with_seed() with the following seed:"
         );
-        eprintln!("seed: {seed:?}");
+        eprintln!("\t{seed:?}");
         StdRng::from_seed(seed)
     }
 

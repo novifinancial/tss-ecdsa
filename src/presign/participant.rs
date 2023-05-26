@@ -1517,8 +1517,12 @@ mod test {
         // Create valid config with PIDs independent of those used to make the input set
         let config = ParticipantConfig::random(SIZE, rng);
 
-        let result =
-            PresignParticipant::new(Identifier::random(rng), config.id, config.other_ids, input);
+        let result = PresignParticipant::new(
+            Identifier::random(rng),
+            config.id(),
+            config.other_ids().to_vec(),
+            input,
+        );
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
