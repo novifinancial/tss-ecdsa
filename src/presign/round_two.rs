@@ -15,9 +15,9 @@ use crate::{
     presign::round_one::{Private as RoundOnePrivate, PublicBroadcast as RoundOnePublicBroadcast},
     utils::CurvePoint,
     zkp::{
-        piaffg::{PiAffgInput, PiAffgProof},
+        piaffg::{PiAffgInput2ElectricBoogaloo, PiAffgProof},
         pilog::{CommonInput, PiLogProof},
-        Proof, ProofContext,
+        Proof, Proof2ElectricBoogaloo, ProofContext,
     },
 };
 use libpaillier::unknown_order::BigNumber;
@@ -75,28 +75,28 @@ impl Public {
         let g = CurvePoint::GENERATOR;
 
         // Verify the psi proof
-        let psi_input = PiAffgInput::new(
-            verifier_auxinfo_public.params().clone(),
-            verifier_auxinfo_public.pk().clone(),
-            prover_auxinfo_public.pk().clone(),
-            verifier_r1_private.K.clone(),
-            self.D.clone(),
-            self.F.clone(),
-            self.Gamma,
+        let psi_input = PiAffgInput2ElectricBoogaloo::new(
+            verifier_auxinfo_public.params(),
+            verifier_auxinfo_public.pk(),
+            prover_auxinfo_public.pk(),
+            &verifier_r1_private.K,
+            &self.D,
+            &self.F,
+            &self.Gamma,
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
 
         self.psi.verify(&psi_input, context, &mut transcript)?;
 
         // Verify the psi_hat proof
-        let psi_hat_input = PiAffgInput::new(
-            verifier_auxinfo_public.params().clone(),
-            verifier_auxinfo_public.pk().clone(),
-            prover_auxinfo_public.pk().clone(),
-            verifier_r1_private.K.clone(),
-            self.D_hat.clone(),
-            self.F_hat.clone(),
-            *prover_keyshare_public.as_ref(),
+        let psi_hat_input = PiAffgInput2ElectricBoogaloo::new(
+            verifier_auxinfo_public.params(),
+            verifier_auxinfo_public.pk(),
+            prover_auxinfo_public.pk(),
+            &verifier_r1_private.K,
+            &self.D_hat,
+            &self.F_hat,
+            prover_keyshare_public.as_ref(),
         );
         let mut transcript = Transcript::new(b"PiAffgProof");
         self.psi_hat

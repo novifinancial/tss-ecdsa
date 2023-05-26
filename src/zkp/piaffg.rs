@@ -46,7 +46,7 @@ use crate::{
     utils::{
         self, plusminus_challenge_from_transcript, random_plusminus_by_size, within_bound_by_size,
     },
-    zkp::{Proof, ProofContext},
+    zkp::{Proof2ElectricBoogaloo, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -130,17 +130,39 @@ pub(crate) struct PiAffgInput {
     mult_coeff_exp: CurvePoint,
 }
 
-impl PiAffgInput {
+#[derive(Serialize)]
+pub(crate) struct PiAffgInput2ElectricBoogaloo<'a> {
+    /// The verifier's commitment parameters (`(Nhat, s, t)` in the paper).
+    verifier_setup_params: &'a VerifiedRingPedersen,
+    /// The verifier's Paillier encryption key (`N_0` in the paper).
+    verifier_encryption_key: &'a EncryptionKey,
+    /// The prover's Paillier encryption key (`N_1` in the paper).
+    prover_encryption_key: &'a EncryptionKey,
+    /// The original Paillier ciphertext encrypted under the verifier's
+    /// encryption key (`C` in the paper).
+    original_ciphertext_verifier: &'a Ciphertext,
+    /// The transformed Paillier ciphertext encrypted under the verifier's
+    /// encryption key (`D` in the paper).
+    transformed_ciphertext_verifier: &'a Ciphertext,
+    /// Paillier ciphertext of the prover's additive coefficient under the
+    /// prover's encryption key (`Y` in the paper).
+    add_coeff_ciphertext_prover: &'a Ciphertext,
+    /// Exponentiation of the prover's multiplicative coefficient (`X` in the
+    /// paper).
+    mult_coeff_exp: &'a CurvePoint,
+}
+
+impl<'a> PiAffgInput2ElectricBoogaloo<'a> {
     /// Construct a new [`PiAffgInput`] type.
     pub(crate) fn new(
-        verifier_setup_params: VerifiedRingPedersen,
-        verifier_encryption_key: EncryptionKey,
-        prover_encryption_key: EncryptionKey,
-        original_ciphertext_verifier: Ciphertext,
-        transformed_ciphertext_verifier: Ciphertext,
-        add_coeff_ciphertext_prover: Ciphertext,
-        mult_coeff_exp: CurvePoint,
-    ) -> Self {
+        verifier_setup_params: &'a VerifiedRingPedersen,
+        verifier_encryption_key: &'a EncryptionKey,
+        prover_encryption_key: &'a EncryptionKey,
+        original_ciphertext_verifier: &'a Ciphertext,
+        transformed_ciphertext_verifier: &'a Ciphertext,
+        add_coeff_ciphertext_prover: &'a Ciphertext,
+        mult_coeff_exp: &'a CurvePoint,
+    ) -> PiAffgInput2ElectricBoogaloo<'a> {
         Self {
             verifier_setup_params,
             verifier_encryption_key,
@@ -196,13 +218,13 @@ impl PiAffgSecret {
     }
 }
 
-impl Proof for PiAffgProof {
-    type CommonInput = PiAffgInput;
+impl Proof2ElectricBoogaloo for PiAffgProof {
+    type CommonInput<'a> = PiAffgInput2ElectricBoogaloo<'a>;
     type ProverSecret = PiAffgSecret;
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
-    fn prove<R: RngCore + CryptoRng>(
-        input: &Self::CommonInput,
+    fn prove<'a, R: RngCore + CryptoRng>(
+        input: &Self::CommonInput<'a>,
         secret: &Self::ProverSecret,
         context: &impl ProofContext,
         transcript: &mut Transcript,
@@ -374,9 +396,9 @@ impl Proof for PiAffgProof {
     }
 
     #[cfg_attr(feature = "flame_it", flame("PiAffgProof"))]
-    fn verify(
+    fn verify<'a>(
         &self,
-        input: &Self::CommonInput,
+        input: &Self::CommonInput<'a>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()> {
@@ -509,7 +531,7 @@ impl PiAffgProof {
     fn generate_challenge(
         transcript: &mut Transcript,
         context: &impl ProofContext,
-        input: &PiAffgInput,
+        input: &PiAffgInput2ElectricBoogaloo,
         mult_coeff_commit: &Commitment,
         add_coeff_commit: &Commitment,
         random_affine_ciphertext: &Ciphertext,
@@ -553,11 +575,19 @@ mod tests {
         zkp::BadContext,
     };
 
-    fn random_paillier_affg_proof<R: RngCore + CryptoRng>(
+    // Type of expected function for our code testing.
+    type TestFn = fn(PiAffgProof, PiAffgInput2ElectricBoogaloo) -> Result<()>;
+
+    fn transcript() -> Transcript {
+        Transcript::new(b"random_paillier_affg_proof")
+    }
+
+    fn with_random_paillier_affg_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         x: &BigNumber,
         y: &BigNumber,
-    ) -> Result<(PiAffgProof, PiAffgInput, Transcript)> {
+        test_code: TestFn,
+    ) -> Result<()> {
         let (decryption_key_0, _, _) = DecryptionKey::new(rng).unwrap();
         let pk0 = decryption_key_0.encryption_key();
 
@@ -578,13 +608,12 @@ mod tests {
         };
 
         let setup_params = VerifiedRingPedersen::gen(rng, &())?;
-        let mut transcript = Transcript::new(b"random_paillier_affg_proof");
-        let input = PiAffgInput::new(setup_params, pk0, pk1, C, D, Y, X);
+        let input = PiAffgInput2ElectricBoogaloo::new(&setup_params, &pk0, &pk1, &C, &D, &Y, &X);
         let secret = PiAffgSecret::new(x.clone(), y.clone(), rho, rho_y);
 
-        let proof = PiAffgProof::prove(&input, &secret, &(), &mut transcript, rng)?;
-        let transcript = Transcript::new(b"random_paillier_affg_proof");
-        Ok((proof, input, transcript))
+        let proof = PiAffgProof::prove(&input, &secret, &(), &mut transcript(), rng)?;
+        test_code(proof, input)?;
+        Ok(())
     }
 
     fn random_paillier_affg_verified_proof<R: RngCore + CryptoRng>(
@@ -592,8 +621,8 @@ mod tests {
         x: &BigNumber,
         y: &BigNumber,
     ) -> Result<()> {
-        let (proof, input, mut transcript) = random_paillier_affg_proof(rng, x, y)?;
-        proof.verify(&input, &(), &mut transcript)
+        let f: TestFn = |proof, input| proof.verify(&input, &(), &mut transcript());
+        with_random_paillier_affg_proof(rng, x, y, f)
     }
 
     #[test]
@@ -628,11 +657,12 @@ mod tests {
         let x_small = random_plusminus_by_size(&mut rng, ELL);
         let y_small = random_plusminus_by_size(&mut rng, ELL_PRIME);
 
-        let context = BadContext {};
-        let (proof, input, mut transcript) =
-            random_paillier_affg_proof(&mut rng, &x_small, &y_small).unwrap();
-        let result = proof.verify(&input, &context, &mut transcript);
-        assert!(result.is_err());
+        let test_code: TestFn = |proof, input| {
+            let result = proof.verify(&input, &BadContext {}, &mut transcript());
+            assert!(result.is_err());
+            Ok(())
+        };
+        with_random_paillier_affg_proof(&mut rng, &x_small, &y_small, test_code)?;
         Ok(())
     }
 }

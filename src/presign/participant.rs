@@ -30,10 +30,10 @@ use crate::{
     run_only_once,
     utils::{bn_to_scalar, k256_order, random_plusminus_by_size, random_positive_bn, CurvePoint},
     zkp::{
-        piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
+        piaffg::{PiAffgInput2ElectricBoogaloo, PiAffgProof, PiAffgSecret},
         pienc::{PiEncInput, PiEncProof, PiEncSecret},
         pilog::{CommonInput, PiLogProof, ProverSecret},
-        Proof, ProofContext,
+        Proof, Proof2ElectricBoogaloo, ProofContext,
     },
     Identifier,
 };
@@ -1068,11 +1068,7 @@ impl PresignKeyShareAndInfo {
             // parameters from the other participant.
             let mut transcript = Transcript::new(b"PiEncProof");
             let proof = PiEncProof::prove(
-                &PiEncInput::new(
-                    aux_info_public.params().clone(),
-                    self.aux_info_public.pk().clone(),
-                    K.clone(),
-                ),
+                &PiEncInput::new(aux_info_public.params(), self.aux_info_public.pk(), &K),
                 &secret,
                 context,
                 &mut transcript,
@@ -1167,14 +1163,14 @@ impl PresignKeyShareAndInfo {
         let mut transcript = Transcript::new(b"PiAffgProof");
         let secret = PiAffgSecret::new(sender_r1_priv.gamma.clone(), beta.clone(), s, r);
         let psi = PiAffgProof::prove(
-            &PiAffgInput::new(
-                receiver_aux_info.params().clone(),
-                receiver_aux_info.pk().clone(),
-                self.aux_info_public.pk().clone(),
-                receiver_r1_pub_broadcast.K.clone(),
-                D.clone(),
-                F.clone(),
-                Gamma,
+            &PiAffgInput2ElectricBoogaloo::new(
+                receiver_aux_info.params(),
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
+                &receiver_r1_pub_broadcast.K,
+                &D,
+                &F,
+                &Gamma,
             ),
             &secret,
             context,
@@ -1189,14 +1185,14 @@ impl PresignKeyShareAndInfo {
             r_hat,
         );
         let psi_hat = PiAffgProof::prove(
-            &PiAffgInput::new(
-                receiver_aux_info.params().clone(),
-                receiver_aux_info.pk().clone(),
-                self.aux_info_public.pk().clone(),
-                receiver_r1_pub_broadcast.K.clone(),
-                D_hat.clone(),
-                F_hat.clone(),
-                *self.keyshare_public.as_ref(),
+            &PiAffgInput2ElectricBoogaloo::new(
+                receiver_aux_info.params(),
+                receiver_aux_info.pk(),
+                self.aux_info_public.pk(),
+                &receiver_r1_pub_broadcast.K,
+                &D_hat,
+                &F_hat,
+                self.keyshare_public.as_ref(),
             ),
             &secret,
             context,

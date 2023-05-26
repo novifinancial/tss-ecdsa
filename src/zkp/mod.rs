@@ -51,12 +51,13 @@ impl ProofContext for BadContext {
 
 /// A trait for constructing zero knowledge proofs.
 ///
-/// The associated type [`Proof::CommonInput`] denotes the data known the both
+/// The associated type [`Proof::CommonInput`] denotes the data known to both
 /// the prover and verifier, and the associated type [`Proof::ProverSecret`]
 /// denotes the data known only to the prover.
 pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
     type CommonInput;
     type ProverSecret;
+
     /// Constructs a zero knowledge proof over [`Proof::ProverSecret`] and
     /// [`Proof::CommonInput`] using the provided [`Transcript`].
     fn prove<R: RngCore + CryptoRng>(
@@ -66,11 +67,36 @@ pub(crate) trait Proof: Sized + Serialize + DeserializeOwned {
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self>;
+
     /// Verifies a zero knowledge proof using the provided
     /// [`Proof::CommonInput`] and [`Transcript`].
     fn verify(
         &self,
         input: &Self::CommonInput,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+    ) -> Result<()>;
+}
+
+pub(crate) trait Proof2ElectricBoogaloo: Sized + Serialize + DeserializeOwned {
+    type CommonInput<'a>;
+    type ProverSecret;
+
+    /// Constructs a zero knowledge proof over [`Proof::ProverSecret`] and
+    /// [`Proof::CommonInput`] using the provided [`Transcript`].
+    fn prove<'a, R: RngCore + CryptoRng>(
+        input: &Self::CommonInput<'a>,
+        secret: &Self::ProverSecret,
+        context: &impl ProofContext,
+        transcript: &mut Transcript,
+        rng: &mut R,
+    ) -> Result<Self>;
+
+    /// Verifies a zero knowledge proof using the provided
+    /// [`Proof::CommonInput`] and [`Transcript`].
+    fn verify<'a>(
+        &self,
+        input: &Self::CommonInput<'a>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()>;
