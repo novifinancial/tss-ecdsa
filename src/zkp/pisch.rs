@@ -12,7 +12,7 @@ use crate::{
     errors::*,
     messages::{KeygenMessageType, Message, MessageType},
     utils::{self, positive_challenge_from_transcript},
-    zkp::{Proof, ProofContext},
+    zkp::{Proof2, ProofContext},
 };
 use libpaillier::unknown_order::BigNumber;
 use merlin::Transcript;
@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::error;
 use utils::CurvePoint;
-use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchProof {
@@ -35,11 +34,15 @@ pub(crate) struct PiSchPrecommit {
     alpha: BigNumber,
 }
 
-#[derive(Serialize)]
-pub(crate) struct PiSchInput {
-    g: CurvePoint,
-    q: BigNumber,
-    X: CurvePoint,
+/// Common input and setup parameters known to both the prover and verifier.
+///
+/// Copying/Cloning references is harmless and sometimes necessary. So we
+/// implement Clone and Copy for this type.
+#[derive(Serialize, Copy, Clone)]
+pub(crate) struct PiSchInput<'a> {
+    g: &'a CurvePoint,
+    q: &'a BigNumber,
+    X: &'a CurvePoint,
 }
 
 #[derive(Serialize)]
@@ -48,22 +51,17 @@ pub(crate) struct PiSchPublicParams {
     q: BigNumber,
 }
 
-impl PiSchInput {
-    pub(crate) fn new(g: &CurvePoint, q: &BigNumber, X: &CurvePoint) -> Self {
-        Self {
-            g: *g,
-            q: q.clone(),
-            X: *X,
-        }
+impl<'a> PiSchInput<'a> {
+    pub(crate) fn new(g: &'a CurvePoint, q: &'a BigNumber, X: &'a CurvePoint) -> PiSchInput<'a> {
+        Self { g, q, X }
     }
 }
 
-#[derive(ZeroizeOnDrop)]
-pub(crate) struct PiSchSecret {
-    x: BigNumber,
+pub(crate) struct PiSchSecret<'a> {
+    x: &'a BigNumber,
 }
 
-impl Debug for PiSchSecret {
+impl<'a> Debug for PiSchSecret<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("pisch::PiSchSecret")
             .field("x", &"[redacted]")
@@ -71,33 +69,33 @@ impl Debug for PiSchSecret {
     }
 }
 
-impl PiSchSecret {
-    pub(crate) fn new(x: &BigNumber) -> Self {
-        Self { x: x.clone() }
+impl<'a> PiSchSecret<'a> {
+    pub(crate) fn new(x: &'a BigNumber) -> PiSchSecret<'a> {
+        Self { x }
     }
 }
 
-impl Proof for PiSchProof {
-    type CommonInput = PiSchInput;
-    type ProverSecret = PiSchSecret;
+impl Proof2 for PiSchProof {
+    type CommonInput<'a> = PiSchInput<'a>;
+    type ProverSecret<'a> = PiSchSecret<'a>;
     #[cfg_attr(feature = "flame_it", flame("PiSchProof"))]
     fn prove<R: RngCore + CryptoRng>(
-        input: &Self::CommonInput,
-        secret: &Self::ProverSecret,
+        input: Self::CommonInput<'_>,
+        secret: Self::ProverSecret<'_>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
         rng: &mut R,
     ) -> Result<Self> {
         // Sample alpha from F_q
-        let alpha = crate::utils::random_positive_bn(rng, &input.q);
+        let alpha = crate::utils::random_positive_bn(rng, input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
 
-        Self::fill_transcript(transcript, context, input, &A)?;
+        Self::fill_transcript(transcript, context, &input, &A)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(transcript, &input.q)?;
+        let e = positive_challenge_from_transcript(transcript, input.q)?;
 
-        let z = &alpha + &e * &secret.x;
+        let z = &alpha + &e * secret.x;
 
         let proof = Self { A, e, z };
         Ok(proof)
@@ -105,16 +103,16 @@ impl Proof for PiSchProof {
 
     #[cfg_attr(feature = "flame_it", flame("PiSchProof"))]
     fn verify(
-        &self,
-        input: &Self::CommonInput,
+        self,
+        input: Self::CommonInput<'_>,
         context: &impl ProofContext,
         transcript: &mut Transcript,
     ) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
-        Self::fill_transcript(transcript, context, input, &self.A)?;
+        Self::fill_transcript(transcript, context, &input, &self.A)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(transcript, &input.q)?;
+        let e = positive_challenge_from_transcript(transcript, input.q)?;
         if e != self.e {
             error!("Fiat-Shamir consistency check failed");
             return Err(InternalError::ProtocolError);
@@ -142,7 +140,7 @@ impl PiSchProof {
         input: &PiSchInput,
     ) -> Result<PiSchPrecommit> {
         // Sample alpha from F_q
-        let alpha = crate::utils::random_positive_bn(rng, &input.q);
+        let alpha = crate::utils::random_positive_bn(rng, input.q);
         let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
         Ok(PiSchPrecommit { A, alpha })
     }
@@ -160,9 +158,9 @@ impl PiSchProof {
         Self::fill_transcript(&mut local_transcript, context, input, &A)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(&mut local_transcript, &input.q)?;
+        let e = positive_challenge_from_transcript(&mut local_transcript, input.q)?;
 
-        let z = &com.alpha + &e * &secret.x;
+        let z = &com.alpha + &e * secret.x;
 
         let proof = Self { A, e, z };
         Ok(proof)
@@ -189,11 +187,17 @@ impl PiSchProof {
 mod tests {
     use super::*;
     use crate::{utils::testing::init_testing, zkp::BadContext};
+    fn transcript() -> Transcript {
+        Transcript::new(b"PiSchProof Test")
+    }
 
-    fn random_schnorr_proof<R: RngCore + CryptoRng>(
+    type TestFn = fn(PiSchProof, PiSchInput) -> Result<()>;
+
+    fn with_random_schnorr_proof<R: RngCore + CryptoRng>(
         rng: &mut R,
         additive: bool,
-    ) -> Result<(PiSchInput, PiSchProof)> {
+        test_code: impl Fn(PiSchProof, PiSchInput) -> Result<()>,
+    ) -> Result<()> {
         let q = crate::utils::k256_order();
         let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
 
@@ -204,38 +208,45 @@ mod tests {
         }
 
         let input = PiSchInput::new(&g, &q, &X);
-        let mut transcript = Transcript::new(b"PiSchProof Test");
+        let proof = PiSchProof::prove(input, PiSchSecret::new(&x), &(), &mut transcript(), rng)?;
 
-        let proof = PiSchProof::prove(&input, &PiSchSecret::new(&x), &(), &mut transcript, rng)?;
-
-        Ok((input, proof))
+        test_code(proof, input)?;
+        Ok(())
     }
 
     #[test]
     fn test_schnorr_proof() -> Result<()> {
         let mut rng = init_testing();
 
-        let (input, proof) = random_schnorr_proof(&mut rng, false)?;
-        let mut transcript = Transcript::new(b"PiSchProof Test");
-        proof.verify(&input, &(), &mut transcript)?;
+        let test_code: TestFn = |proof, input| {
+            proof.verify(input, &(), &mut transcript())?;
+            Ok(())
+        };
+        with_random_schnorr_proof(&mut rng, false, test_code)?;
 
-        let (input, proof) = random_schnorr_proof(&mut rng, true)?;
-        let mut transcript = Transcript::new(b"PiSchProof Test");
-        assert!(proof.verify(&input, &(), &mut transcript).is_err());
+        let test_code: TestFn = |proof, input| {
+            assert!(proof.verify(input, &(), &mut transcript()).is_err());
+            Ok(())
+        };
+        with_random_schnorr_proof(&mut rng, true, test_code)?;
 
         Ok(())
     }
+
     #[test]
     fn pisch_proof_context_must_be_correct() -> Result<()> {
-        let context = BadContext {};
         let mut rng = init_testing();
 
-        let (input, proof) = random_schnorr_proof(&mut rng, false)?;
-        let mut transcript = Transcript::new(b"PiSchProof Test");
-        let result = proof.verify(&input, &context, &mut transcript);
-        assert!(result.is_err());
+        let test_code: TestFn = |proof, input| {
+            let result = proof.verify(input, &BadContext {}, &mut transcript());
+            assert!(result.is_err());
+            Ok(())
+        };
+
+        with_random_schnorr_proof(&mut rng, false, test_code)?;
         Ok(())
     }
+
     #[test]
     fn test_precommit_proof() -> Result<()> {
         let mut rng = init_testing();
@@ -256,7 +267,7 @@ mod tests {
             &PiSchSecret::new(&x),
             &transcript,
         )?;
-        proof.verify(&input, &(), &mut transcript)?;
+        proof.verify(input, &(), &mut transcript)?;
 
         //test public param mismatch
         let lambda = crate::utils::random_positive_bn(&mut rng, &q);
@@ -269,7 +280,7 @@ mod tests {
             &PiSchSecret::new(&x),
             &transcript,
         )?;
-        assert!(proof2.verify(&input, &(), &mut transcript).is_err());
+        assert!(proof2.verify(input, &(), &mut transcript).is_err());
 
         //test transcript mismatch
         let transcript2 = Transcript::new(b"some other external proof stuff");
@@ -280,7 +291,7 @@ mod tests {
             &PiSchSecret::new(&x),
             &transcript2,
         )?;
-        assert!(proof3.verify(&input, &(), &mut transcript).is_err());
+        assert!(proof3.verify(input, &(), &mut transcript).is_err());
 
         Ok(())
     }
