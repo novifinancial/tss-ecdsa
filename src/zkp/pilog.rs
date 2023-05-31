@@ -351,7 +351,7 @@ impl Proof for PiLogProof {
 mod tests {
     use super::*;
     use crate::{
-        paillier::DecryptionKey,
+        paillier::{DecryptionKey, Nonce},
         ring_pedersen::VerifiedRingPedersen,
         utils::{random_plusminus_by_size_with_minimum, testing::init_testing},
         zkp::BadContext,
@@ -364,14 +364,14 @@ mod tests {
         let (decryption_key, _, _) = DecryptionKey::new(rng).unwrap();
         let pk = decryption_key.encryption_key();
 
-        let g = CurvePoint(k256::ProjectivePoint::GENERATOR);
+        let g = CurvePoint::GENERATOR;
 
         let X = CurvePoint(g.0 * utils::bn_to_scalar(x)?);
-        let (C, rho) = pk.encrypt(rng, x).unwrap();
+        let (ciphertext, rho) = pk.encrypt(rng, x).unwrap();
 
         let setup_params = VerifiedRingPedersen::gen(rng, &())?;
 
-        let input = CommonInput::new(C, X, setup_params.scheme().clone(), pk, g);
+        let input = CommonInput::new(ciphertext, X, setup_params.scheme().clone(), pk, g);
         let mut transcript = Transcript::new(b"PiLogProof Test");
 
         let proof = PiLogProof::prove(
@@ -393,8 +393,288 @@ mod tests {
         proof.verify(&input, &(), &mut transcript)
     }
 
+    fn transcript() -> Transcript {
+        Transcript::new(b"PiLogProof Test")
+    }
+
     #[test]
-    fn pifac_proof_context_must_be_correct() -> Result<()> {
+    fn pilog_proof_with_consistent_secret_inputs_out_of_range() -> Result<()> {
+        let mut rng = init_testing();
+        let upper_bound = BigNumber::one() << (ELL + EPSILON);
+        loop {
+            let too_large = random_plusminus_by_size_with_minimum(
+                &mut rng,
+                ELL + EPSILON + 2,
+                ELL + EPSILON + 1,
+            )?;
+
+            // If the input value is larger than the top of the range, the proof won't
+            // verify
+            if too_large > upper_bound {
+                let (bad_proof, input, mut transcript) =
+                    random_paillier_log_proof(&mut rng, &too_large).unwrap();
+                assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
+                // If the value is smaller than the bottom of the range, the proof won't verify
+                let too_small = -too_large;
+                let (bad_proof, input, mut transcript) =
+                    random_paillier_log_proof(&mut rng, &too_small).unwrap();
+                assert!(bad_proof.verify(&input, &(), &mut transcript).is_err());
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pilog_proof_with_different_setup_parameters() -> Result<()> {
+        let mut rng = init_testing();
+        let x = random_plusminus_by_size(&mut rng, ELL);
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
+        let pk = decryption_key.encryption_key();
+        let g = CurvePoint::GENERATOR;
+        let dlog_commit = g.multiply_by_scalar(&x)?;
+        let (ciphertext, rho) = pk.encrypt(&mut rng, &x).unwrap();
+        let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
+
+        let input = CommonInput::new(
+            ciphertext.clone(),
+            dlog_commit,
+            setup_params.scheme().clone(),
+            pk.clone(),
+            g,
+        );
+
+        // Generate a random encryption key
+        let (bad_decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
+        let bad_pk = bad_decryption_key.encryption_key();
+        let bad_input = CommonInput::new(
+            ciphertext.clone(),
+            dlog_commit,
+            setup_params.scheme().clone(),
+            bad_pk,
+            g,
+        );
+        let proof = PiLogProof::prove(
+            &bad_input,
+            &ProverSecret::new(x.clone(), rho.clone()),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+        assert!(proof.verify(&bad_input, &(), &mut transcript()).is_err());
+
+        // Generate a random generator
+        let random_mask = random_plusminus_by_size(&mut rng, ELL);
+        let bad_g = input.generator.multiply_by_scalar(&random_mask)?;
+        let bad_input = CommonInput::new(
+            ciphertext.clone(),
+            dlog_commit,
+            setup_params.scheme().clone(),
+            pk.clone(),
+            bad_g,
+        );
+        let proof = PiLogProof::prove(
+            &bad_input,
+            &ProverSecret::new(x.clone(), rho.clone()),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+        assert!(proof.verify(&bad_input, &(), &mut transcript()).is_err());
+
+        // Generate a random setup parameter
+        let bad_setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
+        let bad_input = CommonInput::new(
+            ciphertext.clone(),
+            dlog_commit,
+            bad_setup_params.scheme().clone(),
+            pk.clone(),
+            g,
+        );
+        let proof = PiLogProof::prove(
+            &bad_input,
+            &ProverSecret::new(x.clone(), rho.clone()),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+        assert!(proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap ciphertext with a random [`Ciphertext`]
+        let plaintext = random_plusminus_by_size(&mut rng, ELL);
+        let (bad_ciphertext, _nonce) = input
+            .prover_encryption_key
+            .encrypt(&mut rng, &plaintext)
+            .unwrap();
+        let bad_input = CommonInput::new(
+            bad_ciphertext,
+            dlog_commit,
+            setup_params.scheme().clone(),
+            pk.clone(),
+            g,
+        );
+        let proof = PiLogProof::prove(
+            &bad_input,
+            &ProverSecret::new(x.clone(), rho.clone()),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+        assert!(proof.verify(&bad_input, &(), &mut transcript()).is_err());
+
+        // Swap dlog_commit with a random [`CurvePoint`]
+        let mask = random_plusminus_by_size(&mut rng, ELL);
+        let bad_dlog_commit = input.generator.multiply_by_scalar(&mask)?;
+        assert_ne!(bad_dlog_commit, input.dlog_commit);
+        let bad_input = CommonInput::new(
+            ciphertext,
+            bad_dlog_commit,
+            setup_params.scheme().clone(),
+            pk.clone(),
+            g,
+        );
+        let bad_proof = PiLogProof::prove(
+            &bad_input,
+            &ProverSecret::new(x.clone(), rho),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+        assert!(bad_proof
+            .verify(&bad_input, &(), &mut transcript())
+            .is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn pilog_proof_with_inconsistent_secret_inputs() -> Result<()> {
+        let mut rng = init_testing();
+
+        // Make a valid secret
+        let x = random_plusminus_by_size(&mut rng, ELL);
+        let (decryption_key, _, _) = DecryptionKey::new(&mut rng).unwrap();
+        let pk = decryption_key.encryption_key();
+        let g = CurvePoint::GENERATOR;
+
+        // Make a valid common input
+        let dlog_commit = g.multiply_by_scalar(&x)?;
+        let (ciphertext, rho) = pk.encrypt(&mut rng, &x).unwrap();
+        let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
+        let input = CommonInput::new(
+            ciphertext,
+            dlog_commit,
+            setup_params.scheme().clone(),
+            pk,
+            g,
+        );
+
+        // Generate a random plaintext for the secret
+        let bad_x = random_plusminus_by_size(&mut rng, ELL);
+        let bad_proof_x = PiLogProof::prove(
+            &input,
+            &ProverSecret::new(bad_x, rho),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+
+        // The proof should fail to verify
+        assert!(bad_proof_x.verify(&input, &(), &mut transcript()).is_err());
+
+        // Generate a random rho for the secret
+        let bad_rho = Nonce::random(&mut rng, input.prover_encryption_key.modulus());
+        let bad_proof_rho = PiLogProof::prove(
+            &input,
+            &ProverSecret::new(x.clone(), bad_rho),
+            &(),
+            &mut transcript(),
+            &mut rng,
+        )?;
+
+        // The proof should fail to verify
+        assert!(bad_proof_rho
+            .verify(&input, &(), &mut transcript())
+            .is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn negative_test_swap_proof_elements() -> Result<()> {
+        let mut rng = init_testing();
+        let x = random_plusminus_by_size(&mut rng, ELL);
+
+        let (proof, input, _) = random_paillier_log_proof(&mut rng, &x).unwrap();
+        let setup_params = VerifiedRingPedersen::gen(&mut rng, &())?;
+
+        // Generate some random elements to use as replacements
+        let random_mask = random_plusminus_by_size(&mut rng, ELL + EPSILON);
+        let scheme = setup_params.scheme();
+        let (bad_plaintext_mask, bad_randomness) = scheme.commit(&random_mask, ELL, &mut rng);
+
+        // Swap mask_commit with a random [`Commitment`]
+        let mut bad_proof = proof.clone();
+        bad_proof.mask_commit = bad_plaintext_mask.clone();
+        assert_ne!(bad_proof.mask_commit, proof.mask_commit);
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap plaintext_commit with a random [`Commitment`]
+        let mut bad_proof = proof.clone();
+        bad_proof.plaintext_commit = bad_plaintext_mask;
+        assert_ne!(bad_proof.plaintext_commit, proof.plaintext_commit);
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap plaintext_response with a random [`Bignumber`]
+        let mut bad_proof = proof.clone();
+        assert_ne!(bad_proof.plaintext_response, random_mask);
+        bad_proof.plaintext_response = random_mask.clone();
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap challenge with a random [`Bignumber`]
+        let mut bad_proof = proof.clone();
+        assert_ne!(bad_proof.challenge, random_mask.clone());
+        bad_proof.challenge = random_mask;
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap mask_ciphertext with a random [`Ciphertext`]
+        let mut bad_proof = proof.clone();
+        let plaintext = random_plusminus_by_size(&mut rng, ELL);
+        let (ciphertext, _nonce) = input
+            .prover_encryption_key
+            .encrypt(&mut rng, &plaintext)
+            .unwrap();
+        bad_proof.mask_ciphertext = ciphertext;
+        assert_ne!(bad_proof.mask_ciphertext, proof.mask_ciphertext);
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap mask_dlog_commit with a random [`CurvePoint`]
+        let mut bad_proof = proof.clone();
+        let mask = random_plusminus_by_size(&mut rng, ELL);
+        bad_proof.mask_dlog_commit = input.generator.multiply_by_scalar(&mask)?;
+        assert_ne!(bad_proof.mask_dlog_commit, proof.mask_dlog_commit);
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap nonce_response with a random [`MaskedNonce`]
+        let mut bad_proof = proof.clone();
+        bad_proof.nonce_response =
+            MaskedNonce::random(&mut rng, input.prover_encryption_key.modulus());
+        assert_ne!(bad_proof.nonce_response, proof.nonce_response);
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        // Swap plaintext_commit_response with a random [`MaskedRandomness`]
+        let mut bad_proof = proof.clone();
+        bad_proof.plaintext_commit_response = bad_randomness.as_masked().to_owned();
+        assert_ne!(
+            bad_proof.plaintext_commit_response,
+            proof.plaintext_commit_response
+        );
+        assert!(bad_proof.verify(&input, &(), &mut transcript()).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn pilog_proof_context_must_be_correct() -> Result<()> {
         let mut rng = init_testing();
 
         let context = BadContext {};
