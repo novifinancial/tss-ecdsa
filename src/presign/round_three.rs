@@ -17,7 +17,7 @@ use crate::{
     utils::CurvePoint,
     zkp::{
         pilog::{CommonInput, PiLogProof},
-        Proof, ProofContext,
+        Proof2, ProofContext,
     },
 };
 use k256::Scalar;
@@ -73,7 +73,7 @@ impl Public {
     /// and [`PublicBroadcast`](crate::presign::round_one::PublicBroadcast)
     /// values.
     pub(crate) fn verify(
-        &self,
+        self,
         context: &impl ProofContext,
         verifier_auxinfo_public: &AuxInfoPublic,
         prover_auxinfo_public: &AuxInfoPublic,
@@ -81,14 +81,14 @@ impl Public {
     ) -> Result<()> {
         let mut transcript = Transcript::new(b"PiLogProof");
         let psi_double_prime_input = CommonInput::new(
-            prover_r1_public_broadcast.K.clone(),
-            self.Delta,
-            verifier_auxinfo_public.params().scheme().clone(),
-            prover_auxinfo_public.pk().clone(),
-            self.Gamma,
+            &prover_r1_public_broadcast.K,
+            &self.Delta,
+            verifier_auxinfo_public.params().scheme(),
+            prover_auxinfo_public.pk(),
+            &self.Gamma,
         );
         self.psi_double_prime
-            .verify(&psi_double_prime_input, context, &mut transcript)?;
+            .verify(psi_double_prime_input, context, &mut transcript)?;
 
         Ok(())
     }
