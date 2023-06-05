@@ -23,7 +23,7 @@ use crate::{
     utils::{k256_order, CurvePoint},
     zkp::{
         pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
-        Proof,
+        Proof2,
     },
     Identifier,
 };
@@ -622,7 +622,7 @@ impl KeygenParticipant {
         let input = PiSchInput::new(&g, &q, decom.pk.as_ref());
 
         let mut transcript = schnorr_proof_transcript(&global_rid)?;
-        proof.verify(&input, &self.retrieve_context(), &mut transcript)?;
+        proof.verify(input, &self.retrieve_context(), &mut transcript)?;
 
         // Only if the proof verifies do we store the participant's public key
         // share. This signals the end of the protocol for the participant.
