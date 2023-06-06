@@ -17,7 +17,7 @@ use crate::{
     zkp::{
         piaffg::{PiAffgInput, PiAffgProof},
         pilog::{CommonInput, PiLogProof},
-        Proof, Proof2, ProofContext,
+        Proof2, ProofContext,
     },
 };
 use libpaillier::unknown_order::BigNumber;
@@ -104,15 +104,15 @@ impl Public {
 
         // Verify the psi_prime proof
         let psi_prime_input = CommonInput::new(
-            prover_r1_public_broadcast.G.clone(),
-            self.Gamma,
-            verifier_auxinfo_public.params().scheme().clone(),
-            prover_auxinfo_public.pk().clone(),
-            g,
+            &prover_r1_public_broadcast.G,
+            &self.Gamma,
+            verifier_auxinfo_public.params().scheme(),
+            prover_auxinfo_public.pk(),
+            &g,
         );
         let mut transcript = Transcript::new(b"PiLogProof");
         self.psi_prime
-            .verify(&psi_prime_input, context, &mut transcript)?;
+            .verify(psi_prime_input, context, &mut transcript)?;
 
         Ok(())
     }

@@ -33,7 +33,7 @@ use crate::{
         piaffg::{PiAffgInput, PiAffgProof, PiAffgSecret},
         pienc::{PiEncInput, PiEncProof, PiEncSecret},
         pilog::{CommonInput, PiLogProof, ProverSecret},
-        Proof, Proof2, ProofContext,
+        Proof2, ProofContext,
     },
     Identifier,
 };
@@ -993,7 +993,7 @@ impl PresignParticipant {
             .local_storage
             .retrieve::<storage::RoundOnePublicBroadcast>(message.from())?;
         let public = RoundThreePublic::try_from(message)?;
-        public.verify(
+        public.clone().verify(
             &self.retrieve_context(),
             receiver_auxinfo_public,
             sender_auxinfo_public,
@@ -1195,16 +1195,16 @@ impl PresignKeyShareAndInfo {
             rng,
         )?;
         let mut transcript = Transcript::new(b"PiLogProof");
-        let secret = ProverSecret::new(sender_r1_priv.gamma.clone(), sender_r1_priv.nu.clone());
+        let secret = ProverSecret::new(&sender_r1_priv.gamma, &sender_r1_priv.nu);
         let psi_prime = PiLogProof::prove(
-            &CommonInput::new(
-                sender_r1_priv.G.clone(),
-                Gamma,
-                receiver_aux_info.params().scheme().clone(),
-                self.aux_info_public.pk().clone(),
-                g,
+            CommonInput::new(
+                &sender_r1_priv.G,
+                &Gamma,
+                receiver_aux_info.params().scheme(),
+                self.aux_info_public.pk(),
+                &g,
             ),
-            &secret,
+            secret,
             context,
             &mut transcript,
             rng,
@@ -1292,14 +1292,14 @@ impl PresignKeyShareAndInfo {
         for (other_id, round_three_input) in other_participant_inputs {
             let mut transcript = Transcript::new(b"PiLogProof");
             let psi_double_prime = PiLogProof::prove(
-                &CommonInput::new(
-                    sender_r1_priv.K.clone(),
-                    Delta,
-                    round_three_input.auxinfo_public.params().scheme().clone(),
-                    self.aux_info_public.pk().clone(),
-                    Gamma,
+                CommonInput::new(
+                    &sender_r1_priv.K,
+                    &Delta,
+                    round_three_input.auxinfo_public.params().scheme(),
+                    self.aux_info_public.pk(),
+                    &Gamma,
                 ),
-                &ProverSecret::new(sender_r1_priv.k.clone(), sender_r1_priv.rho.clone()),
+                ProverSecret::new(&sender_r1_priv.k, &sender_r1_priv.rho),
                 context,
                 &mut transcript,
                 rng,
