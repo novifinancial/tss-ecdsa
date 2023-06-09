@@ -24,14 +24,20 @@ use utils::CurvePoint;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchProof {
-    pub(crate) A: CurvePoint,
-    e: BigNumber,
-    z: BigNumber,
+    /// Commitment to the secret (`A` in the paper).
+    pub(crate) commitment: CurvePoint,
+    /// Fiat-Shamir challenge (`e` in the paper).
+    challenge: BigNumber,
+    /// Response binding the commitment randomness used in the commitment (`z`
+    /// in the paper).
+    response: BigNumber,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PiSchPrecommit {
-    pub(crate) A: CurvePoint,
-    alpha: BigNumber,
+    /// Precommitment value (`A` in the paper).
+    pub(crate) precommitment: CurvePoint,
+    /// Randomness mask for commitment (`alpha` in the paper).
+    randomness_for_commitment: BigNumber,
 }
 
 /// Common input and setup parameters known to both the prover and verifier.
@@ -88,16 +94,20 @@ impl Proof2 for PiSchProof {
     ) -> Result<Self> {
         // Sample alpha from F_q
         let alpha = crate::utils::random_positive_bn(rng, input.q);
-        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
+        let commitment = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
 
-        Self::fill_transcript(transcript, context, &input, &A)?;
+        Self::fill_transcript(transcript, context, &input, &commitment)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(transcript, input.q)?;
+        let challenge = positive_challenge_from_transcript(transcript, input.q)?;
 
-        let z = &alpha + &e * secret.x;
+        let response = &alpha + &challenge * secret.x;
 
-        let proof = Self { A, e, z };
+        let proof = Self {
+            commitment,
+            challenge,
+            response,
+        };
         Ok(proof)
     }
 
@@ -109,23 +119,24 @@ impl Proof2 for PiSchProof {
         transcript: &mut Transcript,
     ) -> Result<()> {
         // First check Fiat-Shamir challenge consistency
-        Self::fill_transcript(transcript, context, &input, &self.A)?;
+        Self::fill_transcript(transcript, context, &input, &self.commitment)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(transcript, input.q)?;
-        if e != self.e {
+        let challenge = positive_challenge_from_transcript(transcript, input.q)?;
+        if challenge != self.challenge {
             error!("Fiat-Shamir consistency check failed");
             return Err(InternalError::ProtocolError);
         }
 
         // Do equality checks
 
-        let eq_check_1 = {
-            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.z)?);
-            let rhs = CurvePoint(self.A.0 + input.X.0 * utils::bn_to_scalar(&self.e)?);
+        let response_matches_commitment = {
+            let lhs = CurvePoint(input.g.0 * utils::bn_to_scalar(&self.response)?);
+            let rhs =
+                CurvePoint(self.commitment.0 + input.X.0 * utils::bn_to_scalar(&self.challenge)?);
             lhs == rhs
         };
-        if !eq_check_1 {
+        if !response_matches_commitment {
             error!("eq_check_1 failed");
             return Err(InternalError::ProtocolError);
         }
@@ -140,9 +151,13 @@ impl PiSchProof {
         input: &PiSchInput,
     ) -> Result<PiSchPrecommit> {
         // Sample alpha from F_q
-        let alpha = crate::utils::random_positive_bn(rng, input.q);
-        let A = CurvePoint(input.g.0 * utils::bn_to_scalar(&alpha)?);
-        Ok(PiSchPrecommit { A, alpha })
+        let randomness_for_commitment = crate::utils::random_positive_bn(rng, input.q);
+        let precommitment =
+            CurvePoint(input.g.0 * utils::bn_to_scalar(&randomness_for_commitment)?);
+        Ok(PiSchPrecommit {
+            precommitment,
+            randomness_for_commitment,
+        })
     }
 
     pub fn prove_from_precommit(
@@ -152,17 +167,21 @@ impl PiSchProof {
         secret: &PiSchSecret,
         transcript: &Transcript,
     ) -> Result<Self> {
-        let A = com.A;
+        let commitment = com.precommitment;
         let mut local_transcript = transcript.clone();
 
-        Self::fill_transcript(&mut local_transcript, context, input, &A)?;
+        Self::fill_transcript(&mut local_transcript, context, input, &commitment)?;
 
         // Verifier samples e in F_q
-        let e = positive_challenge_from_transcript(&mut local_transcript, input.q)?;
+        let challenge = positive_challenge_from_transcript(&mut local_transcript, input.q)?;
 
-        let z = &com.alpha + &e * secret.x;
+        let response = &com.randomness_for_commitment + &challenge * secret.x;
 
-        let proof = Self { A, e, z };
+        let proof = Self {
+            commitment,
+            challenge,
+            response,
+        };
         Ok(proof)
     }
     pub(crate) fn from_message(message: &Message) -> Result<Self> {
