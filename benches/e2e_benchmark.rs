@@ -3,9 +3,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{prelude::IteratorRandom, rngs::OsRng, CryptoRng, Rng, RngCore};
 use std::collections::HashMap;
 use tss_ecdsa::{
-    errors::Result, AuxInfoParticipant, Identifier, KeygenParticipant, Message, Participant,
-    ParticipantConfig, ParticipantIdentifier, PresignInput, PresignParticipant,
-    ProtocolParticipant,
+    auxinfo::AuxInfoParticipant, errors::Result, keygen::KeygenParticipant, messages::Message,
+    Identifier, Participant, ParticipantConfig, ParticipantIdentifier, PresignInput,
+    PresignParticipant, ProtocolParticipant,
 };
 
 /// Delivers all messages into their respective participant's inboxes
@@ -133,8 +133,8 @@ fn run_benchmarks_for_given_size(c: &mut Criterion, num_players: usize) {
     let presign_inputs = auxinfo_outputs
         .into_iter()
         .zip(keygen_outputs)
-        .map(|((aux_pub, aux_priv), keygen_output)| {
-            PresignInput::new(aux_pub, aux_priv, keygen_output).unwrap()
+        .map(|(auxinfo_output, keygen_output)| {
+            PresignInput::new(auxinfo_output, keygen_output).unwrap()
         })
         .collect::<Vec<_>>();
 
