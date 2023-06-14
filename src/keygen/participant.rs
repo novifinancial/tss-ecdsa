@@ -22,7 +22,7 @@ use crate::{
     run_only_once,
     utils::{k256_order, CurvePoint},
     zkp::{
-        pisch::{PiSchInput, PiSchPrecommit, PiSchProof, PiSchSecret},
+        pisch::{CommonInput, PiSchPrecommit, PiSchProof, ProverSecret},
         Proof2,
     },
     Identifier,
@@ -350,7 +350,7 @@ impl KeygenParticipant {
         let g = CurvePoint::GENERATOR;
         let X = keyshare_public.as_ref();
 
-        let input = PiSchInput::new(&g, &q, X);
+        let input = CommonInput::new(&g, &q, X);
         // This corresponds to `A_i` in the paper.
         let sch_precom = PiSchProof::precommit(rng, &input)?;
         let decom = KeygenDecommit::new(rng, &sid, &self.id, &keyshare_public, &sch_precom);
@@ -573,7 +573,7 @@ impl KeygenParticipant {
         let my_pk = self
             .local_storage
             .retrieve::<storage::PublicKeyshare>(self.id)?;
-        let input = PiSchInput::new(&g, &q, my_pk.as_ref());
+        let input = CommonInput::new(&g, &q, my_pk.as_ref());
 
         let my_sk = self
             .local_storage
@@ -583,7 +583,7 @@ impl KeygenParticipant {
             &self.retrieve_context(),
             precom,
             &input,
-            &PiSchSecret::new(my_sk.as_ref()),
+            &ProverSecret::new(my_sk.as_ref()),
             &transcript,
         )?;
         let messages = self.message_for_other_participants(
@@ -620,7 +620,7 @@ impl KeygenParticipant {
 
         let q = k256_order();
         let g = CurvePoint::GENERATOR;
-        let input = PiSchInput::new(&g, &q, decom.pk.as_ref());
+        let input = CommonInput::new(&g, &q, decom.pk.as_ref());
 
         let mut transcript = schnorr_proof_transcript(&global_rid)?;
         proof.verify(input, &self.retrieve_context(), &mut transcript)?;
