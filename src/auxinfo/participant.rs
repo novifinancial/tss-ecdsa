@@ -527,13 +527,13 @@ impl AuxInfoParticipant {
                     &witness.p,
                     &witness.q,
                 )?;
-                Ok(Message::new(
+                Message::new(
                     MessageType::Auxinfo(AuxinfoMessageType::R3Proof),
                     sid,
                     self.id,
                     pid,
-                    &serialize!(&proof)?,
-                ))
+                    &proof,
+                )
             })
             .collect::<Result<Vec<_>>>()
     }
@@ -654,13 +654,17 @@ mod tests {
                 .collect::<Result<Vec<_>>>()
         }
 
-        pub fn initialize_auxinfo_message(&self, auxinfo_identifier: Identifier) -> Message {
+        pub fn initialize_auxinfo_message(
+            &self,
+            auxinfo_identifier: Identifier,
+        ) -> Result<Message> {
+            let empty: [u8; 0] = [];
             Message::new(
                 MessageType::Auxinfo(AuxinfoMessageType::Ready),
                 auxinfo_identifier,
                 self.id,
                 self.id,
-                &[],
+                &empty,
             )
         }
     }
@@ -735,6 +739,7 @@ mod tests {
         }
         Ok(())
     }
+
     #[test]
     fn test_run_auxinfo_protocol() -> Result<()> {
         let QUORUM_SIZE = 3;
@@ -753,7 +758,7 @@ mod tests {
 
         for participant in &quorum {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_auxinfo_message(keyshare_identifier));
+            inbox.push(participant.initialize_auxinfo_message(keyshare_identifier)?);
         }
 
         while !is_auxinfo_done(&quorum) {

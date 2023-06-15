@@ -16,7 +16,7 @@ use crate::{
     protocol::{Identifier, ParticipantIdentifier},
 };
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use tracing::{error, instrument, trace};
 
 /////////////////
@@ -89,7 +89,7 @@ pub enum BroadcastMessageType {
 }
 
 /// A message that can be posted to (and read from) the communication channel.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     /// The type of the message
     pub(crate) message_type: MessageType,
@@ -106,36 +106,48 @@ pub struct Message {
     pub(crate) unverified_bytes: Vec<u8>,
 }
 
-/// Manually implement Debug instance to avoid printing unverified bytes.
-impl Debug for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Message")
-            .field("message_type", &self.message_type)
-            .field("session identifier", &self.identifier)
-            .field("from", &self.from)
-            .field("to", &self.to)
-            .finish()
-    }
-}
-
 impl Message {
     /// Creates a new instance of [`Message`].
     #[instrument(skip_all)]
-    pub(crate) fn new(
+    pub(crate) fn new<T>(
         message_type: MessageType,
         identifier: Identifier,
         from: ParticipantIdentifier,
         to: ParticipantIdentifier,
-        unverified_bytes: &[u8],
-    ) -> Self {
+        unverified_bytes: &T,
+    ) -> Result<Self>
+    where
+        T: Serialize,
+    {
         trace!("New message created.");
-        Self {
+        Ok(Self {
             message_type,
             identifier,
             from,
             to,
-            unverified_bytes: unverified_bytes.to_vec(),
-        }
+            unverified_bytes: serialize!(unverified_bytes)?,
+        })
+    }
+
+    /// Creates a new instance of [`Message`] from serialized data.
+    /// This was created in order to quickly resolve the bug of extra 8 bytes
+    /// while serializing message in broadcast:participant file. It is
+    /// recommended to do away with this function in future.
+    pub(crate) fn new_from_serialized_data(
+        message_type: MessageType,
+        identifier: Identifier,
+        from: ParticipantIdentifier,
+        to: ParticipantIdentifier,
+        unverified_bytes: Vec<u8>,
+    ) -> Result<Self> {
+        trace!("New message created from constructor with serialized data.");
+        Ok(Self {
+            message_type,
+            identifier,
+            from,
+            to,
+            unverified_bytes,
+        })
     }
 
     /// The message type associated with the message.

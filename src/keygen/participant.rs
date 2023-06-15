@@ -27,10 +27,11 @@ use crate::{
     },
     Identifier,
 };
+
 use k256::ecdsa::VerifyingKey;
 use merlin::Transcript;
 use rand::{CryptoRng, RngCore};
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 mod storage {
     use super::*;
@@ -399,8 +400,9 @@ impl KeygenParticipant {
         // message _after_ round one is complete? Likewise for all other rounds.
 
         let message = broadcast_message.into_message(BroadcastTag::KeyGenR1CommitHash)?;
+        let keygen_commit = KeygenCommit::from_message(&message)?;
         self.local_storage
-            .store::<storage::Commit>(message.from(), KeygenCommit::from_message(&message)?);
+            .store::<storage::Commit>(message.from(), keygen_commit);
 
         // Check if we've received all the commits, which signals an end to
         // round one.
@@ -687,18 +689,19 @@ mod tests {
                 .map(|config| Self::new(sid, config.id(), config.other_ids().to_vec(), ()))
                 .collect::<Result<Vec<_>>>()
         }
-        pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Message {
+        pub fn initialize_keygen_message(&self, keygen_identifier: Identifier) -> Result<Message> {
+            let empty: [u8; 0] = [];
             Message::new(
                 MessageType::Keygen(KeygenMessageType::Ready),
                 keygen_identifier,
                 self.id,
                 self.id,
-                &[],
+                &empty,
             )
         }
     }
 
-    /// Delivers all messages into their respective participant's inboxes
+    /// Delivers all messages into their respective participant's inboxes.
     fn deliver_all(
         messages: &[Message],
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
@@ -782,7 +785,7 @@ mod tests {
 
         for participant in &quorum {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_keygen_message(keyshare_identifier));
+            inbox.push(participant.initialize_keygen_message(keyshare_identifier)?);
         }
 
         while !is_keygen_done(&quorum) {

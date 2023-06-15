@@ -200,9 +200,10 @@ impl<P: ProtocolParticipant> Participant<P> {
     /// Produce a message to signal to this participant that the protocol can
     /// begin.
     #[instrument(skip_all)]
-    pub fn initialize_message(&self) -> Message {
+    pub fn initialize_message(&self) -> Result<Message> {
         info!("Initializing subprotocol.");
-        Message::new(P::ready_type(), self.sid(), self.id, self.id, &[])
+        let empty: [u8; 0] = [];
+        Message::new(P::ready_type(), self.sid(), self.id, self.id, &empty)
     }
 
     /// Return the protocol status.
@@ -659,7 +660,7 @@ mod tests {
 
     // Negative test checking whether the message has the correct session id
     #[test]
-    fn participant_rejects_messages_with_wrong_session_id() {
+    fn participant_rejects_messages_with_wrong_session_id() -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
 
@@ -670,7 +671,7 @@ mod tests {
             Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong session ID
-        let message = participant.initialize_message();
+        let message = participant.initialize_message()?;
         let bad_sid = Identifier::random(&mut rng);
         assert_ne!(bad_sid, message.id());
         let bad_sid_message = Message::new(
@@ -679,7 +680,7 @@ mod tests {
             message.from(),
             message.to(),
             &message.unverified_bytes,
-        );
+        )?;
 
         // Make sure the participant rejects the message
         let result = participant.process_single_message(&bad_sid_message, &mut rng);
@@ -688,12 +689,13 @@ mod tests {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::WrongSessionId)
         );
+        Ok(())
     }
 
     // Negative test checking whether the message has the correct recipient
     // participant
     #[test]
-    fn participant_rejects_messages_with_wrong_participant_to_field() {
+    fn participant_rejects_messages_with_wrong_participant_to_field() -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
 
@@ -704,7 +706,7 @@ mod tests {
             Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong participant to field
-        let message = participant.initialize_message();
+        let message = participant.initialize_message()?;
         let bad_receiver_pid = ParticipantIdentifier::random(&mut rng);
         assert_ne!(participant.id(), bad_receiver_pid);
         let bad_receiver_pid_message = Message::new(
@@ -713,7 +715,7 @@ mod tests {
             message.from(),
             bad_receiver_pid,
             &message.unverified_bytes,
-        );
+        )?;
 
         // Make sure the participant rejects the message
         let result = participant.process_single_message(&bad_receiver_pid_message, &mut rng);
@@ -722,11 +724,12 @@ mod tests {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::WrongMessageRecipient)
         );
+        Ok(())
     }
 
     // Negative test checking whether the message has the correct protocol type
     #[test]
-    fn participant_rejects_messages_with_wrong_protocol_type() {
+    fn participant_rejects_messages_with_wrong_protocol_type() -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
 
@@ -737,7 +740,7 @@ mod tests {
             Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         // Make a message with the wrong protocol type
-        let message = participant.initialize_message();
+        let message = participant.initialize_message()?;
         let bad_message_type =
             MessageType::Keygen(crate::messages::KeygenMessageType::R1CommitHash);
         let bad_protocol_type_message = Message::new(
@@ -746,7 +749,7 @@ mod tests {
             message.from(),
             message.to(),
             &message.unverified_bytes,
-        );
+        )?;
 
         // Make sure the participant rejects the message
         let result = participant.process_single_message(&bad_protocol_type_message, &mut rng);
@@ -755,12 +758,13 @@ mod tests {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::WrongProtocol)
         );
+        Ok(())
     }
 
     // Negative test checking whether the message sender is included in the list of
     // all participants
     #[test]
-    fn participant_rejects_messages_with_wrong_sender_participant() {
+    fn participant_rejects_messages_with_wrong_sender_participant() -> Result<()> {
         let mut rng = init_testing();
         let QUORUM_SIZE = 3;
 
@@ -771,7 +775,7 @@ mod tests {
             Participant::<AuxInfoParticipant>::from_config(config, auxinfo_sid, ()).unwrap();
 
         //message with the wrong sender participant
-        let message = participant.initialize_message();
+        let message = participant.initialize_message()?;
         let bad_sender_pid = ParticipantIdentifier::random(&mut rng);
         let bad_sender_pid_message = Message::new(
             message.message_type(),
@@ -779,7 +783,7 @@ mod tests {
             bad_sender_pid,
             message.to(),
             &message.unverified_bytes,
-        );
+        )?;
 
         // Make sure the participant rejects the message
         let result = participant.process_single_message(&bad_sender_pid_message, &mut rng);
@@ -788,6 +792,7 @@ mod tests {
             result.unwrap_err(),
             InternalError::CallingApplicationMistake(CallerError::InvalidMessageSender)
         );
+        Ok(())
     }
 
     /// Delivers all messages into their respective participant's inboxes   
@@ -805,7 +810,6 @@ mod tests {
         }
         Ok(())
     }
-
     fn process_messages<R: RngCore + CryptoRng, P: ProtocolParticipant>(
         quorum: &mut [Participant<P>],
         inboxes: &mut HashMap<ParticipantIdentifier, Vec<Message>>,
@@ -860,7 +864,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut inboxes = HashMap::from_iter(
+        let mut inboxes: HashMap<ParticipantIdentifier, Vec<Message>> = HashMap::from_iter(
             auxinfo_quorum
                 .iter()
                 .map(|p| (p.id, vec![]))
@@ -875,7 +879,7 @@ mod tests {
         // Initialize auxinfo for all parties
         for participant in &auxinfo_quorum {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_message());
+            inbox.push(participant.initialize_message()?);
         }
 
         // Run auxinfo until all parties have outputs
@@ -913,7 +917,7 @@ mod tests {
         // Initialize keygen for all participants
         for participant in &keygen_quorum {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_message());
+            inbox.push(participant.initialize_message()?);
         }
 
         // Run keygen until all parties have outputs
@@ -971,7 +975,7 @@ mod tests {
 
         for participant in &mut presign_quorum {
             let inbox = inboxes.get_mut(&participant.id).unwrap();
-            inbox.push(participant.initialize_message());
+            inbox.push(participant.initialize_message()?);
         }
 
         while presign_outputs.len() < QUORUM_SIZE {

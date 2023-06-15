@@ -15,6 +15,7 @@ use crate::{
     protocol::{ParticipantIdentifier, ProtocolType, SharedContext},
     run_only_once_per_tag, Identifier,
 };
+
 use rand::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -302,7 +303,13 @@ impl BroadcastParticipant {
         // output if every node voted for the same message
         for (k, v) in tally.iter() {
             if *v == self.other_participant_ids.len() {
-                let msg = Message::new(data.message_type, sid, data.leader, self.id, k);
+                let msg = Message::new_from_serialized_data(
+                    data.message_type,
+                    sid,
+                    data.leader,
+                    self.id,
+                    k.clone(),
+                )?;
                 let out = BroadcastOutput { tag: data.tag, msg };
                 match &mut self.status {
                     Status::Initialized => {
@@ -330,7 +337,6 @@ impl BroadcastParticipant {
         info!("Generating round two broadcast messages.");
 
         let data = BroadcastData::from_message(message)?;
-        let data_bytes = serialize!(&data)?;
         // todo: handle this more memory-efficiently
         let mut others_minus_leader = self.other_participant_ids.clone();
         others_minus_leader.retain(|&id| id != leader);
@@ -342,10 +348,10 @@ impl BroadcastParticipant {
                     message.id(),
                     self.id,
                     other_participant_id,
-                    &data_bytes,
+                    &data,
                 )
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         Ok(messages)
     }
 
