@@ -155,7 +155,12 @@ impl ProtocolParticipant for BroadcastParticipant {
         message: &Message,
         _: &Self::Input,
     ) -> Result<ProcessOutcome<Self::Output>> {
-        info!("BROADCAST: Player {}: received {:?} from {}", self.id(), message.message_type(), message.from());
+        info!(
+            "BROADCAST: Player {}: received {:?} from {}",
+            self.id(),
+            message.message_type(),
+            message.from()
+        );
 
         if let Status::ParticipantCompletedBroadcast(participants) = self.status() {
             // The protocol has terminated if the number of participants who
@@ -187,8 +192,8 @@ impl ProtocolParticipant for BroadcastParticipant {
         &self.status
     }
 
-    // As a subprotocol, Broadcast doesn't need to be activated with a Ready message.
-    // However, it's part of the trait and needs to be implemented.
+    // As a subprotocol, Broadcast doesn't need to be activated with a Ready
+    // message. However, it's part of the trait and needs to be implemented.
     fn is_ready(&self) -> bool {
         true
     }
